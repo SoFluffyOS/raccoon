@@ -3,10 +3,11 @@ import 'dart:io';
 
 import 'package:raccoon/raccoon.dart';
 import 'package:raccoon_runtime/src/message_framing.dart';
+import 'package:raccoon_runtime/src/runner_connection.dart';
 import 'package:raccoon_runtime/src/runner_endpoint.dart';
 
 /// A connection to one runner: frames and logs in, resize and input out.
-final class RunnerClient {
+final class RunnerClient implements RunnerConnection {
   RunnerClient._(this._socket) {
     _subscription = _socket.listen(
       _onBytes,
@@ -53,7 +54,7 @@ final class RunnerClient {
   /// The runner's hello, with its protocol version.
   Future<RunnerHello> get hello => _hello.future;
 
-  /// The latest frame first, then every new one.
+  @override
   Stream<Frame> get frames async* {
     if (_latestFrame case final frame?) yield frame;
     yield* messages.where((m) => m.hasFrame()).map((m) => m.frame);
@@ -68,14 +69,17 @@ final class RunnerClient {
   /// Completes when the runner closed the connection.
   Future<void> get closed => _closed.future;
 
+  @override
   void resize(int width, int height, double pixelRatio) => send(
     ClientMessage(
       resize: Resize(width: width, height: height, pixelRatio: pixelRatio),
     ),
   );
 
+  @override
   void sendPointer(PointerEvent event) => send(ClientMessage(pointer: event));
 
+  @override
   void sendKey(KeyEvent event) => send(ClientMessage(key: event));
 
   /// Asks the runner to stop.
