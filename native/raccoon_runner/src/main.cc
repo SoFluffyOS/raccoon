@@ -5,6 +5,9 @@
 //   raccoon_runner --version
 
 #include <unistd.h>
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
 
 #include <csignal>
 #include <cstdio>
@@ -104,6 +107,31 @@ void OnSignal(int) {
 void PrintEngineLog(const std::string&, const std::string& message) {
   std::fprintf(stdout, "%s\n", message.c_str());
   std::fflush(stdout);
+}
+
+// Where the GPU buffers' descriptors are served: the runner's socket path
+// with .gpu in place of .sock, so discovery, which lists .sock files, does
+// not take it for a runner.
+std::string GpuSocketPath(const std::string& socket) {
+  const std::string suffix = ".sock";
+  if (socket.size() > suffix.size() &&
+      socket.compare(socket.size() - suffix.size(), suffix.size(), suffix) == 0) {
+    return socket.substr(0, socket.size() - suffix.size()) + ".gpu";
+  }
+  return socket + ".gpu";
+}
+
+void FillGpuBuffers(const raccoon::GpuBufferSet& set, const std::string& socket,
+                    raccoon::v1::GpuBuffers* out) {
+  out->set_generation(set.generation);
+  out->set_count(static_cast<uint32_t>(set.fds.size()));
+  out->set_width(static_cast<uint32_t>(set.width));
+  out->set_height(static_cast<uint32_t>(set.height));
+  out->set_fourcc(set.fourcc);
+  out->set_modifier(set.modifier);
+  for (const uint32_t stride : set.strides) out->add_strides(stride);
+  for (const uint32_t offset : set.offsets) out->add_offsets(offset);
+  out->set_socket(socket);
 }
 
 FlutterPointerPhase ToPhase(raccoon::v1::PointerPhase phase) {
@@ -232,6 +260,12 @@ int Serve(const Options& options) {
   bool vm_sent = false;
   bool client_shared = false;
   std::unique_ptr<raccoon::SharedBufferPool> pool;
+  // GPU buffers: the client asked for them in its hello, the set it was told
+  // about on this socket, and the set whose descriptors went out on the GPU
+  // socket.
+  bool client_gpu = false;
+  uint32_t gpu_told = 0;
+  uint32_t gpu_fds_sent = 0;
   raccoon::RunnerServer* server_ptr = nullptr;
   // The active text field, to the client; a client with an input method
   // mirrors it there.
@@ -309,6 +343,17 @@ int Serve(const Options& options) {
   const pid_t parent = getppid();
   handler.on_hello = [&](const raccoon::v1::ClientHello& hello) {
     client_shared = hello.shared_buffers();
+    client_gpu = false;
+    if (hello.gpu_buffers()) {
+      std::string gpu_error;
+      if (host.EnableGpuBuffers(3, &gpu_error)) {
+        client_gpu = true;
+      } else {
+        std::fprintf(stderr, "raccoon_runner: no GPU buffers: %s; frames by readback\n",
+                     gpu_error.c_str());
+      }
+    }
+    gpu_told = 0;
     host.text_input().SetComposer(hello.composes());
     // A client that arrives mid-run learns which field is active.
     SendTextField(host.text_input().state());
@@ -322,6 +367,10 @@ int Serve(const Options& options) {
   host.text_input().SetStateListener(
       [&](const raccoon::TextFieldState& state) { SendTextField(state); });
   handler.on_release_buffer = [&](const raccoon::v1::ReleaseBuffer& release) {
+    if (release.generation() != 0) {
+      host.ReleaseGpuBuffer(release.generation(), static_cast<int>(release.index()));
+      return;
+    }
     if (pool) pool->Release(static_cast<int>(release.index()));
   };
   handler.on_platform_response = [&](const raccoon::v1::PlatformResponse& response) {
@@ -354,12 +403,26 @@ int Serve(const Options& options) {
     host.frame().SetSharedPool(nullptr);
     pool.reset();
     client_shared = false;
+    host.DisableGpuBuffers();
+    client_gpu = false;
+    gpu_told = 0;
     std::fprintf(stderr, "raccoon_runner: client disconnected\n");
   };
 
   raccoon::RunnerServer server(loop, handler);
   server_ptr = &server;
   if (!server.Listen(options.socket, &error)) {
+    std::fprintf(stderr, "raccoon_runner: %s\n", error.c_str());
+    return 1;
+  }
+  // The GPU socket: a native client takes the buffers' descriptors here,
+  // which Dart cannot. Named without .sock, so discovery does not list it.
+  const std::string gpu_socket = GpuSocketPath(options.socket);
+  raccoon::RunnerServer::Handler gpu_handler;
+  gpu_handler.on_client_connected = [&] { gpu_fds_sent = 0; };
+  gpu_handler.on_client_disconnected = [&] { gpu_fds_sent = 0; };
+  raccoon::RunnerServer gpu_server(loop, gpu_handler);
+  if (!gpu_server.Listen(gpu_socket, &error)) {
     std::fprintf(stderr, "raccoon_runner: %s\n", error.c_str());
     return 1;
   }
@@ -377,6 +440,39 @@ int Serve(const Options& options) {
           message.mutable_vm_service()->set_uri(uri);
           server.Send(message);
           vm_sent = true;
+        }
+      }
+      if (client_gpu) {
+        raccoon::GpuBufferSet set;
+        if (host.GpuBufferSetNow(&set)) {
+          if (set.generation != gpu_told) {
+            raccoon::v1::RunnerMessage message;
+            FillGpuBuffers(set, gpu_socket, message.mutable_gpu_buffers());
+            if (server.Send(message)) gpu_told = set.generation;
+          }
+          if (gpu_server.has_client() && set.generation != gpu_fds_sent) {
+            raccoon::v1::RunnerMessage message;
+            FillGpuBuffers(set, gpu_socket, message.mutable_gpu_buffers());
+            if (gpu_server.SendWithFds(message, set.fds)) {
+              gpu_fds_sent = set.generation;
+            }
+          }
+        }
+        raccoon::SoftwareFrame::Gpu gpu;
+        if (host.frame().TakeGpu(&gpu)) {
+          raccoon::v1::RunnerMessage message;
+          auto* frame = message.mutable_frame();
+          frame->set_sequence(gpu.sequence);
+          frame->set_width(static_cast<uint32_t>(gpu.width));
+          frame->set_height(static_cast<uint32_t>(gpu.height));
+          frame->set_row_bytes(static_cast<uint32_t>(gpu.width * 4));
+          frame->set_format(raccoon::v1::PIXEL_FORMAT_UNSPECIFIED);
+          frame->set_in_gpu_buffer(true);
+          frame->set_buffer_index(static_cast<uint32_t>(gpu.index));
+          frame->set_gpu_generation(gpu.generation);
+          frame->set_timestamp_micros(host.NowMicros());
+          if (!server.Send(message)) host.ReleaseGpuBuffer(gpu.generation, gpu.index);
+          last_sent = gpu.sequence;
         }
       }
       raccoon::SoftwareFrame::Shared shared;
@@ -412,7 +508,8 @@ int Serve(const Options& options) {
       // replacing the pool releases it, and that frame would be lost.
       // Shared buffers, sized for the current frame; replaced on resize.
       const size_t need = host.frame().LatestSizeBytes();
-      if (client_shared && need > 0 && (!pool || pool->size() != need)) {
+      if (client_shared && !client_gpu && need > 0 &&
+          (!pool || pool->size() != need)) {
         host.frame().SetSharedPool(nullptr);
         auto fresh = std::make_unique<raccoon::SharedBufferPool>();
         std::string pool_error;
@@ -453,6 +550,13 @@ int Serve(const Options& options) {
 }  // namespace
 
 int main(int argc, char** argv) {
+#if defined(__linux__)
+  // RACCOON_PTRACE_ANY=1 lets any process of this user attach a debugger,
+  // for a backtrace of a runner that a test harness started.
+  if (std::getenv("RACCOON_PTRACE_ANY") != nullptr) {
+    prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0);
+  }
+#endif
   if (argc == 2 && std::strcmp(argv[1], "--version") == 0) {
     std::printf("%s\n", RACCOON_RUNNER_VERSION);
     return 0;
