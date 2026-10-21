@@ -35,22 +35,29 @@ void main() {
 
   test('watch reports runners as they appear and go', () async {
     final discovery = RunnerDiscovery(p.join(temp.path, 'raccoon'));
-    final updates = discovery.watch().map(
-      (e) => e.map(RunnerDiscovery.appNameOf).toList(),
-    );
     final seen = <List<String>>[];
-    final subscription = updates.listen(seen.add);
-    await Future<void>.delayed(const Duration(milliseconds: 100));
+    final subscription = discovery
+        .watch()
+        .map((e) => e.map(RunnerDiscovery.appNameOf).toList())
+        .listen(seen.add);
+    await _until(() => seen.isNotEmpty);
+    expect(seen.first, isEmpty);
 
     final server = await _bind(p.join(discovery.directory, 'app.sock'));
-    await Future<void>.delayed(const Duration(milliseconds: 300));
+    await _until(() => seen.any((names) => names.contains('app')));
+
     await server.close();
     File(p.join(discovery.directory, 'app.sock')).deleteSync();
-    await Future<void>.delayed(const Duration(milliseconds: 300));
+    await _until(() => seen.last.isEmpty);
     await subscription.cancel();
-
-    expect(seen.first, isEmpty);
-    expect(seen, contains(['app']));
-    expect(seen.last, isEmpty);
   });
+}
+
+/// Polls [condition] until it holds, failing after five seconds.
+Future<void> _until(bool Function() condition) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 5));
+  while (!condition()) {
+    if (DateTime.now().isAfter(deadline)) fail('condition not met in time');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
 }
