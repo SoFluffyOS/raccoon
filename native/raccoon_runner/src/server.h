@@ -20,6 +20,7 @@ class RunnerServer {
     std::function<void(const v1::Resize&)> on_resize;
     std::function<void(const v1::PointerEvent&)> on_pointer;
     std::function<void(const v1::KeyEvent&)> on_key;
+    std::function<void(const v1::TextEditing&)> on_text_editing;
     std::function<void()> on_shutdown;
     std::function<void(const v1::PlatformResponse&)> on_platform_response;
     std::function<void()> on_client_connected;

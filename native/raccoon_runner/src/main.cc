@@ -220,6 +220,23 @@ int Serve(const Options& options) {
   bool client_shared = false;
   std::unique_ptr<raccoon::SharedBufferPool> pool;
   raccoon::RunnerServer* server_ptr = nullptr;
+  // The active text field, to the client; a client with an input method
+  // mirrors it there.
+  auto SendTextField = [&server_ptr](const raccoon::TextFieldState& state) {
+    if (server_ptr == nullptr || !server_ptr->has_client()) return;
+    raccoon::v1::RunnerMessage message;
+    auto* field = message.mutable_text_field();
+    field->set_active(state.active);
+    field->set_text(state.text);
+    field->set_selection_base(state.selection_base);
+    field->set_selection_extent(state.selection_extent);
+    field->set_composing_base(state.composing_base);
+    field->set_composing_extent(state.composing_extent);
+    field->set_multiline(state.multiline);
+    field->set_input_action(state.input_action);
+    field->set_obscure(state.obscure);
+    server_ptr->Send(message);
+  };
   // Platform messages waiting for the client's answer, by response id.
   std::unordered_map<uint64_t, const FlutterPlatformMessageResponseHandle*> pending;
   uint64_t next_response_id = 1;
@@ -279,7 +296,18 @@ int Serve(const Options& options) {
   const pid_t parent = getppid();
   handler.on_hello = [&](const raccoon::v1::ClientHello& hello) {
     client_shared = hello.shared_buffers();
+    host.text_input().SetComposer(hello.composes());
+    // A client that arrives mid-run learns which field is active.
+    SendTextField(host.text_input().state());
   };
+  handler.on_text_editing = [&host](const raccoon::v1::TextEditing& editing) {
+    host.text_input().ApplyEditing(editing.text(), editing.selection_base(),
+                                   editing.selection_extent(),
+                                   editing.composing_base(),
+                                   editing.composing_extent());
+  };
+  host.text_input().SetStateListener(
+      [&](const raccoon::TextFieldState& state) { SendTextField(state); });
   handler.on_release_buffer = [&](const raccoon::v1::ReleaseBuffer& release) {
     if (pool) pool->Release(static_cast<int>(release.index()));
   };
@@ -306,6 +334,7 @@ int Serve(const Options& options) {
     std::fprintf(stderr, "raccoon_runner: client connected\n");
   };
   handler.on_client_disconnected = [&] {
+    host.text_input().SetComposer(false);
     // Nobody will answer these now; let the app see "no plugin".
     for (const auto& [id, handle] : pending) host.Respond(handle, nullptr, 0);
     pending.clear();

@@ -198,6 +198,11 @@ void RunnerServer::Dispatch(const v1::ClientMessage& message) {
     case v1::ClientMessage::kKey:
       if (handler_.on_key) handler_.on_key(message.key());
       break;
+    case v1::ClientMessage::kTextEditing:
+      if (handler_.on_text_editing) {
+        handler_.on_text_editing(message.text_editing());
+      }
+      break;
     case v1::ClientMessage::kShutdown:
       if (handler_.on_shutdown) handler_.on_shutdown();
       break;

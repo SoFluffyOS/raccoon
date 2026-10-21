@@ -77,6 +77,7 @@ class EngineHost {
   std::string vm_service_uri() const;
 
   SoftwareFrame& frame() { return frame_; }
+  TextInput& text_input() { return text_input_; }
   PlatformTaskRunner& platform() { return *platform_; }
   std::chrono::steady_clock::time_point started() const { return started_; }
 

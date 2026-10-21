@@ -20,6 +20,10 @@ message ClientHello {
   // The client can take frames from shared buffers whose file descriptors
   // ride along the SharedBuffers message (Unix sockets only).
   bool shared_buffers = 3;
+  // The client has an input method and sends TextEditing for the active
+  // field; the runner then leaves typing characters to it. Keys still reach
+  // the app.
+  bool composes = 5;
   uint32 pid = 4;  // the client process, named to a later client
 }
 
@@ -98,7 +102,19 @@ message ClientMessage {
     Shutdown shutdown = 5;
     PlatformResponse platform_response = 6;
     ReleaseBuffer release_buffer = 7;
+    TextEditing text_editing = 8;
   }
+}
+
+// The client's input method produced a value for the active text field:
+// the whole value, as Flutter's TextEditingValue, offsets in UTF-16 code
+// units; -1,-1 for no composing range.
+message TextEditing {
+  string text = 1;
+  int32 selection_base = 2;
+  int32 selection_extent = 3;
+  int32 composing_base = 4;
+  int32 composing_extent = 5;
 }
 
 // Runner to client.
@@ -159,6 +175,20 @@ message PlatformMessage {
   bytes data = 3;
 }
 
+// The app's active text field, whenever it changes; active=false once no
+// field has focus. A client with an input method mirrors it there.
+message TextField {
+  bool active = 1;
+  string text = 2;
+  int32 selection_base = 3;
+  int32 selection_extent = 4;
+  int32 composing_base = 5;
+  int32 composing_extent = 6;
+  bool multiline = 7;
+  string input_action = 8;
+  bool obscure = 9;
+}
+
 // The runner has a client already; the connection closes after this.
 message Busy {
   uint32 pid = 1;  // the client that has it
@@ -174,5 +204,6 @@ message RunnerMessage {
     PlatformMessage platform_message = 6;
     SharedBuffers shared_buffers = 7;
     Busy busy = 8;
+    TextField text_field = 9;
   }
 }

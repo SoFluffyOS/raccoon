@@ -122,10 +122,13 @@ bool TextInput::Handle(const std::string& channel, const uint8_t* data,
   const json args = call.contains("args") ? call["args"] : json();
   if (method == "TextInput.setClient") {
     SetClient(args);
+    Changed();
   } else if (method == "TextInput.setEditingState") {
     SetEditingState(args);
+    Changed();
   } else if (method == "TextInput.clearClient") {
     client_id_ = -1;
+    Changed();
   }
   return true;
 }
@@ -142,6 +145,7 @@ void TextInput::SetClient(const json& args) {
   multiline_ = Str(type, "name", "") == "TextInputType.multiline";
   input_action_ = Str(config, "inputAction", "TextInputAction.done");
   delta_model_ = Flag(config, "enableDeltaModel");
+  obscure_ = Flag(config, "obscureText");
   text_.clear();
   base_ = extent_ = 0;
   composing_base_ = composing_extent_ = -1;
@@ -184,14 +188,53 @@ bool TextInput::HandleKey(uint64_t logical, const std::string& character,
     case kEscape:
       return false;
     default: {
-      if (character.empty()) return false;
+      // A composing client types through its input method, which brings
+      // the characters by ApplyEditing.
+      if (composer_ || character.empty()) return false;
       const unsigned char first = character[0];
       if (first < 0x20 || first == 0x7F) return false;
       AddText(ToUtf16(character));
     }
   }
   SendEditingState(before);
+  Changed();
   return true;
+}
+
+void TextInput::ApplyEditing(const std::string& text, int selection_base,
+                             int selection_extent, int composing_base,
+                             int composing_extent) {
+  if (client_id_ < 0) return;
+  const std::u16string before = text_;
+  text_ = ToUtf16(text);
+  const int size = static_cast<int>(text_.size());
+  auto clamp = [size](int value) {
+    return value < 0 ? size : std::min(value, size);
+  };
+  base_ = clamp(selection_base);
+  extent_ = clamp(selection_extent);
+  composing_base_ = composing_base;
+  composing_extent_ = composing_extent;
+  SendEditingState(before);
+  Changed();
+}
+
+TextFieldState TextInput::state() const {
+  TextFieldState state;
+  state.active = client_id_ >= 0;
+  state.text = ToUtf8(text_);
+  state.selection_base = base_;
+  state.selection_extent = extent_;
+  state.composing_base = composing_base_;
+  state.composing_extent = composing_extent_;
+  state.multiline = multiline_;
+  state.input_action = input_action_;
+  state.obscure = obscure_;
+  return state;
+}
+
+void TextInput::Changed() {
+  if (listener_) listener_(state());
 }
 
 void TextInput::DeleteSelection() {

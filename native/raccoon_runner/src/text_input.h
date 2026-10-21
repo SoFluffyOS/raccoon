@@ -16,6 +16,19 @@
 
 namespace raccoon {
 
+// The active field as a client sees it; see TextInput::SetStateListener.
+struct TextFieldState {
+  bool active = false;
+  std::string text;  // UTF-8
+  int selection_base = 0;
+  int selection_extent = 0;
+  int composing_base = -1;
+  int composing_extent = -1;
+  bool multiline = false;
+  std::string input_action;
+  bool obscure = false;
+};
+
 class TextInput {
  public:
   // Delivers a message to the framework on |channel|; the JSON method calls
@@ -23,6 +36,23 @@ class TextInput {
   using Sender =
       std::function<void(const std::string& channel, const std::string& json)>;
   void SetSender(Sender sender) { sender_ = std::move(sender); }
+
+  // Told the active field's state whenever it changes.
+  using StateListener = std::function<void(const TextFieldState&)>;
+  void SetStateListener(StateListener listener) {
+    listener_ = std::move(listener);
+  }
+  TextFieldState state() const;
+
+  // Whether the client composes text with its own input method: then keys
+  // type nothing here and the field takes what ApplyEditing brings.
+  void SetComposer(bool composes) { composer_ = composes; }
+  bool composer() const { return composer_; }
+
+  // The client's input method produced this value for the active field.
+  void ApplyEditing(const std::string& text, int selection_base,
+                    int selection_extent, int composing_base,
+                    int composing_extent);
 
   // Answers a flutter/textinput message into |reply| and returns true;
   // returns false for any other channel.
@@ -52,9 +82,14 @@ class TextInput {
   void SendEditingState(const std::u16string& before);
   void PerformAction();
 
+  void Changed();
+
   Sender sender_;
+  StateListener listener_;
+  bool composer_ = false;
   int client_id_ = -1;
   bool multiline_ = false;
+  bool obscure_ = false;
   bool delta_model_ = false;
   std::string input_action_ = "TextInputAction.done";
   std::u16string text_;
