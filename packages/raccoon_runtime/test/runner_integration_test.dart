@@ -474,6 +474,123 @@ void main() {
         : 'build the runner and example first',
     timeout: const Timeout(Duration(minutes: 1)),
   );
+
+  test(
+    'a composing client mirrors the active field and types through it',
+    () async {
+      final textAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'text',
+        'build',
+        'flutter_assets',
+      );
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: textAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      runner.stderr.listen(output.add);
+      final client = await RunnerClient.connect(endpoint, composes: true);
+      try {
+        // The field has autofocus: its state arrives as it becomes active.
+        final field = await client.textFields
+            .firstWhere((field) => field.active)
+            .timeout(const Duration(seconds: 15));
+        expect(field.text, '');
+        expect(field.multiline, isFalse);
+        Future<void> texts(List<String> expected) async {
+          final deadline = DateTime.now().add(const Duration(seconds: 10));
+          while (!output.any(
+                (line) => line.contains('TEXT:${expected.last}'),
+              ) &&
+              DateTime.now().isBefore(deadline)) {
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+          }
+          expect(
+            output
+                .where((line) => line.contains('TEXT:'))
+                .map((line) => line.substring(line.indexOf('TEXT:'))),
+            [for (final text in expected) 'TEXT:$text'],
+          );
+        }
+
+        // The host's input method composes "tiế", then commits "tiếng".
+        client.sendTextEditing(
+          TextEditing(
+            text: 'tiế',
+            selectionBase: 3,
+            selectionExtent: 3,
+            composingBase: 0,
+            composingExtent: 3,
+          ),
+        );
+        await texts(['tiế']);
+        client.sendTextEditing(
+          TextEditing(
+            text: 'tiếng',
+            selectionBase: 5,
+            selectionExtent: 5,
+            composingBase: -1,
+            composingExtent: -1,
+          ),
+        );
+        await texts(['tiế', 'tiếng']);
+        final mirrored = await client.textFields
+            .firstWhere((field) => field.text == 'tiếng')
+            .timeout(const Duration(seconds: 5));
+        expect(mirrored.selectionBase, 5);
+        expect(mirrored.composingBase, -1);
+
+        // A character key types nothing for a composing client; Backspace is
+        // still the framework's.
+        Future<void> key(int logical, int physical, String character) async {
+          for (final kind in [KeyKind.KEY_KIND_DOWN, KeyKind.KEY_KIND_UP]) {
+            client.sendKey(
+              KeyEvent(
+                kind: kind,
+                physical: Int64(physical),
+                logical: Int64(logical),
+                character: kind == KeyKind.KEY_KIND_DOWN ? character : '',
+                timestampMicros: Int64(DateTime.now().microsecondsSinceEpoch),
+              ),
+            );
+            await Future<void>.delayed(const Duration(milliseconds: 60));
+          }
+        }
+
+        await key(0x78, 0x0007001b, 'x');
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        await key(0x100000008, 0x0007002a, '');
+        await texts(['tiế', 'tiếng', 'tiến']);
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready &&
+            Directory(
+              p.join(
+                p.dirname(p.dirname(p.dirname(assets))),
+                'text',
+                'build',
+                'flutter_assets',
+              ),
+            ).existsSync()
+        ? false
+        : 'build the runner and the text example first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 }
 
 /// The SDK behind `FLUTTER_ROOT`, else behind the `flutter` on the PATH.

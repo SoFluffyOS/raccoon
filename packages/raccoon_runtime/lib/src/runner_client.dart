@@ -16,8 +16,8 @@ typedef PlatformChannelHandler = Future<Uint8List?> Function(Uint8List data);
 
 /// A connection to one runner: frames, logs and platform messages in; resize,
 /// input and platform replies out.
-final class RunnerClient implements RunnerConnection {
-  RunnerClient._(this._transport) {
+final class RunnerClient implements RunnerConnection, TextInputConnection {
+  RunnerClient._(this._transport, {required this.composes}) {
     _subscription = _transport.inbound.listen(
       _onInbound,
       onDone: _onDone,
@@ -27,6 +27,7 @@ final class RunnerClient implements RunnerConnection {
       ClientMessage(
         hello: ClientHello(
           pid: io.pid,
+          composes: composes,
           protocolVersion: RaccoonProtocol.version,
           clientName: 'raccoon_runtime',
           sharedBuffers: _transport.receivesHandles,
@@ -36,8 +37,20 @@ final class RunnerClient implements RunnerConnection {
   }
 
   /// Connects to the runner at [endpoint] and sends the client hello.
-  static Future<RunnerClient> connect(RunnerEndpoint endpoint) async =>
-      RunnerClient._(await RunnerTransport.connect(endpoint));
+  /// Connects to the runner at [endpoint] and sends the client hello. With
+  /// [composes] the client promises to mirror the app's active text field in
+  /// its own input method and to send what it produces; the runner then
+  /// leaves typing characters to it.
+  static Future<RunnerClient> connect(
+    RunnerEndpoint endpoint, {
+    bool composes = false,
+  }) async => RunnerClient._(
+    await RunnerTransport.connect(endpoint),
+    composes: composes,
+  );
+
+  @override
+  final bool composes;
 
   final RunnerTransport _transport;
   final _handles = <RandomAccessFile>[];
@@ -93,6 +106,23 @@ final class RunnerClient implements RunnerConnection {
   @override
   void sendKey(KeyEvent event) => send(ClientMessage(key: event));
 
+  @override
+  void sendTextEditing(TextEditing editing) =>
+      send(ClientMessage(textEditing: editing));
+
+  TextField? _latestTextField;
+
+  @override
+  TextField? get latestTextField => _latestTextField;
+
+  @override
+  Stream<TextField> get textFields async* {
+    if (_latestTextField case final field?) yield field;
+    yield* messages
+        .where((message) => message.hasTextField())
+        .map((message) => message.textField);
+  }
+
   /// Asks the runner to stop.
   void shutdown() => send(ClientMessage(shutdown: Shutdown()));
 
@@ -134,6 +164,7 @@ final class RunnerClient implements RunnerConnection {
         _latestFrame = frame;
       }
       if (message.hasVmService()) _vmServiceUri = message.vmService.uri;
+      if (message.hasTextField()) _latestTextField = message.textField;
       if (message.hasPlatformMessage()) {
         unawaited(_servePlatformMessage(message.platformMessage));
       }
