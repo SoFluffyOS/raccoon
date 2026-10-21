@@ -129,7 +129,7 @@ jobs:
           RACCOON_RUNNER: ${{ github.workspace }}/native/raccoon_runner/build/raccoon_runner
         run: dart test --reporter expanded
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: raccoon_runner-${{ matrix.name }}
           path: native/raccoon_runner/build/raccoon_runner

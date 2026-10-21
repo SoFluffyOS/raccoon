@@ -75,7 +75,7 @@ jobs:
       - name: Package
         run: tool/package.sh dist
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: raccoon_runner-${{ matrix.name }}
           path: dist/*.tar.gz
@@ -86,7 +86,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v6
         with:
           path: dist
           merge-multiple: true
