@@ -10,17 +10,21 @@ import 'package:raccoon_view/src/input_mapping.dart';
 
 /// Shows the app a runner hosts and sends it the view's size, pointer and key
 /// events. The runner renders at this widget's size times the device pixel
-/// ratio.
+/// ratio, [pixelRatio] when given, else the display's.
 class RaccoonView extends StatefulWidget {
   const RaccoonView({
     super.key,
     required this.connection,
     this.autofocus = true,
+    this.pixelRatio,
   });
 
   final RunnerConnection connection;
 
   final bool autofocus;
+
+  /// Overrides the display's device pixel ratio, to preview a denser screen.
+  final double? pixelRatio;
 
   @override
   State<RaccoonView> createState() => _RaccoonViewState();
@@ -111,7 +115,8 @@ class _RaccoonViewState extends State<RaccoonView> {
 
   @override
   Widget build(BuildContext context) {
-    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final pixelRatio =
+        widget.pixelRatio ?? MediaQuery.devicePixelRatioOf(context);
     return LayoutBuilder(
       builder: (context, constraints) {
         final size = constraints.biggest;

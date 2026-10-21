@@ -58,6 +58,26 @@ void main() {
     expect(connection.resizes, [(600, 400, 2.0)]);
   });
 
+  testWidgets('a pixel ratio override replaces the display ratio', (
+    tester,
+  ) async {
+    final connection = _FakeConnection();
+    await tester.pumpWidget(
+      MediaQuery(
+        data: const MediaQueryData(devicePixelRatio: 2),
+        child: Center(
+          child: SizedBox(
+            width: 100,
+            height: 50,
+            child: RaccoonView(connection: connection, pixelRatio: 3),
+          ),
+        ),
+      ),
+    );
+
+    expect(connection.resizes, [(300, 150, 3.0)]);
+  });
+
   testWidgets('shows the latest decoded frame', (tester) async {
     final connection = _FakeConnection();
     // Decoding needs the real event loop, and stream events are delivered in
