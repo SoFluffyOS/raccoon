@@ -25,6 +25,7 @@ final class RunnerClient implements RunnerConnection {
     send(
       ClientMessage(
         hello: ClientHello(
+          pid: pid,
           protocolVersion: RaccoonProtocol.version,
           clientName: 'raccoon_runtime',
           sharedBuffers: _transport.receivesHandles,
@@ -43,7 +44,7 @@ final class RunnerClient implements RunnerConnection {
   var _sharedFrames = 0;
   final _unframer = MessageUnframer();
   final _messages = StreamController<RunnerMessage>.broadcast();
-  final _hello = Completer<RunnerHello>();
+  final _hello = Completer<RunnerHello>()..future.ignore();
   final _closed = Completer<void>();
   final _channels = <String, PlatformChannelHandler>{};
   late final StreamSubscription<Inbound> _subscription;
@@ -120,6 +121,9 @@ final class RunnerClient implements RunnerConnection {
       if (message.hasHello() && !_hello.isCompleted) {
         _pid = message.hello.pid;
         _hello.complete(message.hello);
+      }
+      if (message.hasBusy() && !_hello.isCompleted) {
+        _hello.completeError(RunnerBusy(message.busy.pid));
       }
       if (message.hasSharedBuffers()) _takeBuffers(message.sharedBuffers);
       if (message.hasFrame()) {
@@ -204,4 +208,15 @@ final class RunnerClient implements RunnerConnection {
     _buffers = [];
     unawaited(_messages.close());
   }
+}
+
+/// Another client has the runner: it said so and hung up. [pid] is that
+/// client's process, 0 when it did not name itself.
+class RunnerBusy implements Exception {
+  const RunnerBusy(this.pid);
+
+  final int pid;
+
+  @override
+  String toString() => 'another client (pid $pid) has this runner';
 }

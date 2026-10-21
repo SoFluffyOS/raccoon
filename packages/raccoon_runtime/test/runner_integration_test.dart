@@ -395,6 +395,81 @@ void main() {
         : 'build the runner and the text example first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
+
+  test(
+    'a second client is told who has the runner, then hung up on',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final first = await RunnerClient.connect(endpoint);
+      try {
+        await first.hello.timeout(const Duration(seconds: 10));
+        Object? failure;
+        RunnerClient? second;
+        try {
+          second = await RunnerClient.connect(endpoint);
+          await second.hello.timeout(const Duration(seconds: 5));
+        } on Object catch (error) {
+          failure = error;
+        }
+        expect(failure, isA<RunnerBusy>().having((b) => b.pid, 'pid', pid));
+        await second?.closed.timeout(const Duration(seconds: 5));
+        await second?.close();
+      } finally {
+        first.shutdown();
+        await first.close();
+        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
+  test(
+    'the runner stops when its parent is gone',
+    () async {
+      // A shell between the test and the runner stands in for the Flutter
+      // tool; killing it leaves the runner without its parent.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final wrapper = File(p.join(temp.path, 'parent.sh'))
+        ..writeAsStringSync('#!/bin/bash\n"$binary" "\$@" &\nwait \$!\n');
+      await Process.run('chmod', ['+x', wrapper.path]);
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: wrapper.path,
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        Process.killPid(runner.pid, ProcessSignal.sigkill);
+        await client.closed.timeout(const Duration(seconds: 5));
+      } finally {
+        await client.close();
+        await runner.exitCode.timeout(const Duration(seconds: 10));
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready && !Platform.isWindows
+        ? false
+        : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
 }
 
 /// The SDK behind `FLUTTER_ROOT`, else behind the `flutter` on the PATH.
