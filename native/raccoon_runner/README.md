@@ -97,3 +97,7 @@ descriptor (eventfd or a pipe), socket flags, the shared buffers' backing
 (a memfd, or an unlinked temporary file on macOS, whose POSIX shared memory
 cannot be read with `read()`), the engine library's name and the pixel
 order. Windows follows the same seams.
+
+## Issues
+
+Report here: [SoFluffyOS/raccoon](https://github.com/SoFluffyOS/raccoon/issues). One tracker for every Raccoon repository, whichever piece the bug is in. Issues are off on this one.
