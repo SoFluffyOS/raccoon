@@ -28,6 +28,7 @@ class ClientHello extends $pb.GeneratedMessage {
     $core.bool? sharedBuffers,
     $core.int? pid,
     $core.bool? composes,
+    $core.bool? gpuBuffers,
   }) {
     final result = ClientHello._();
     if (protocolVersion != null) result.protocolVersion = protocolVersion;
@@ -35,6 +36,7 @@ class ClientHello extends $pb.GeneratedMessage {
     if (sharedBuffers != null) result.sharedBuffers = sharedBuffers;
     if (pid != null) result.pid = pid;
     if (composes != null) result.composes = composes;
+    if (gpuBuffers != null) result.gpuBuffers = gpuBuffers;
     return result;
   }
 
@@ -57,6 +59,7 @@ class ClientHello extends $pb.GeneratedMessage {
     ..aOB(3, _omitFieldNames ? '' : 'sharedBuffers')
     ..aI(4, _omitFieldNames ? '' : 'pid', fieldType: $pb.PbFieldType.OU3)
     ..aOB(5, _omitFieldNames ? '' : 'composes')
+    ..aOB(6, _omitFieldNames ? '' : 'gpuBuffers')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -130,15 +133,29 @@ class ClientHello extends $pb.GeneratedMessage {
   $core.bool hasComposes() => $_has(4);
   @$pb.TagNumber(5)
   void clearComposes() => $_clearField(5);
+
+  /// The client can import GPU buffers (DRM dmabufs on Linux) and will take
+  /// their file descriptors from the runner's GPU socket; frames then arrive
+  /// as buffer indices, no pixels.
+  @$pb.TagNumber(6)
+  $core.bool get gpuBuffers => $_getBF(5);
+  @$pb.TagNumber(6)
+  set gpuBuffers($core.bool value) => $_setBool(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasGpuBuffers() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearGpuBuffers() => $_clearField(6);
 }
 
 /// Gives a shared buffer back to the runner once its pixels were read.
 class ReleaseBuffer extends $pb.GeneratedMessage {
   factory ReleaseBuffer({
     $core.int? index,
+    $core.int? generation,
   }) {
     final result = ReleaseBuffer._();
     if (index != null) result.index = index;
+    if (generation != null) result.generation = generation;
     return result;
   }
 
@@ -156,6 +173,7 @@ class ReleaseBuffer extends $pb.GeneratedMessage {
       package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
       createEmptyInstance: ReleaseBuffer.$_createMessage)
     ..aI(1, _omitFieldNames ? '' : 'index', fieldType: $pb.PbFieldType.OU3)
+    ..aI(2, _omitFieldNames ? '' : 'generation', fieldType: $pb.PbFieldType.OU3)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -188,6 +206,16 @@ class ReleaseBuffer extends $pb.GeneratedMessage {
   $core.bool hasIndex() => $_has(0);
   @$pb.TagNumber(1)
   void clearIndex() => $_clearField(1);
+
+  /// Which GPU buffer set the index belongs to; 0 for shared buffers.
+  @$pb.TagNumber(2)
+  $core.int get generation => $_getIZ(1);
+  @$pb.TagNumber(2)
+  set generation($core.int value) => $_setUnsignedInt32(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasGeneration() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearGeneration() => $_clearField(2);
 }
 
 class Resize extends $pb.GeneratedMessage {
@@ -1086,6 +1114,8 @@ class Frame extends $pb.GeneratedMessage {
     $fixnum.Int64? timestampMicros,
     $core.bool? inSharedBuffer,
     $core.int? bufferIndex,
+    $core.bool? inGpuBuffer,
+    $core.int? gpuGeneration,
   }) {
     final result = Frame._();
     if (sequence != null) result.sequence = sequence;
@@ -1097,6 +1127,8 @@ class Frame extends $pb.GeneratedMessage {
     if (timestampMicros != null) result.timestampMicros = timestampMicros;
     if (inSharedBuffer != null) result.inSharedBuffer = inSharedBuffer;
     if (bufferIndex != null) result.bufferIndex = bufferIndex;
+    if (inGpuBuffer != null) result.inGpuBuffer = inGpuBuffer;
+    if (gpuGeneration != null) result.gpuGeneration = gpuGeneration;
     return result;
   }
 
@@ -1128,6 +1160,9 @@ class Frame extends $pb.GeneratedMessage {
         defaultOrMaker: $fixnum.Int64.ZERO)
     ..aOB(8, _omitFieldNames ? '' : 'inSharedBuffer')
     ..aI(9, _omitFieldNames ? '' : 'bufferIndex',
+        fieldType: $pb.PbFieldType.OU3)
+    ..aOB(10, _omitFieldNames ? '' : 'inGpuBuffer')
+    ..aI(11, _omitFieldNames ? '' : 'gpuGeneration',
         fieldType: $pb.PbFieldType.OU3)
     ..hasRequiredFields = false;
 
@@ -1231,6 +1266,172 @@ class Frame extends $pb.GeneratedMessage {
   $core.bool hasBufferIndex() => $_has(8);
   @$pb.TagNumber(9)
   void clearBufferIndex() => $_clearField(9);
+
+  /// The frame is GPU buffer buffer_index of GpuBuffers generation
+  /// gpu_generation; pixels are empty.
+  @$pb.TagNumber(10)
+  $core.bool get inGpuBuffer => $_getBF(9);
+  @$pb.TagNumber(10)
+  set inGpuBuffer($core.bool value) => $_setBool(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasInGpuBuffer() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearInGpuBuffer() => $_clearField(10);
+
+  @$pb.TagNumber(11)
+  $core.int get gpuGeneration => $_getIZ(10);
+  @$pb.TagNumber(11)
+  set gpuGeneration($core.int value) => $_setUnsignedInt32(10, value);
+  @$pb.TagNumber(11)
+  $core.bool hasGpuGeneration() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearGpuGeneration() => $_clearField(11);
+}
+
+/// A set of same-sized GPU buffers the engine renders into, one frame each,
+/// exported as DRM dmabufs. Their file descriptors are not here: a native
+/// client takes them from the runner's GPU socket, where this message is sent
+/// again with one descriptor per buffer riding along, in index order. A new
+/// set, with a higher generation, replaces the old one on resize.
+class GpuBuffers extends $pb.GeneratedMessage {
+  factory GpuBuffers({
+    $core.int? generation,
+    $core.int? count,
+    $core.int? width,
+    $core.int? height,
+    $core.int? fourcc,
+    $fixnum.Int64? modifier,
+    $core.Iterable<$core.int>? strides,
+    $core.Iterable<$core.int>? offsets,
+    $core.String? socket,
+  }) {
+    final result = GpuBuffers._();
+    if (generation != null) result.generation = generation;
+    if (count != null) result.count = count;
+    if (width != null) result.width = width;
+    if (height != null) result.height = height;
+    if (fourcc != null) result.fourcc = fourcc;
+    if (modifier != null) result.modifier = modifier;
+    if (strides != null) result.strides.addAll(strides);
+    if (offsets != null) result.offsets.addAll(offsets);
+    if (socket != null) result.socket = socket;
+    return result;
+  }
+
+  GpuBuffers._();
+
+  factory GpuBuffers.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GpuBuffers()..mergeFromBuffer(data, registry);
+  factory GpuBuffers.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GpuBuffers()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'GpuBuffers',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
+      createEmptyInstance: GpuBuffers.$_createMessage)
+    ..aI(1, _omitFieldNames ? '' : 'generation', fieldType: $pb.PbFieldType.OU3)
+    ..aI(2, _omitFieldNames ? '' : 'count', fieldType: $pb.PbFieldType.OU3)
+    ..aI(3, _omitFieldNames ? '' : 'width', fieldType: $pb.PbFieldType.OU3)
+    ..aI(4, _omitFieldNames ? '' : 'height', fieldType: $pb.PbFieldType.OU3)
+    ..aI(5, _omitFieldNames ? '' : 'fourcc', fieldType: $pb.PbFieldType.OU3)
+    ..a<$fixnum.Int64>(
+        6, _omitFieldNames ? '' : 'modifier', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..p<$core.int>(7, _omitFieldNames ? '' : 'strides', $pb.PbFieldType.KU3)
+    ..p<$core.int>(8, _omitFieldNames ? '' : 'offsets', $pb.PbFieldType.KU3)
+    ..aOS(9, _omitFieldNames ? '' : 'socket')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GpuBuffers clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GpuBuffers copyWith(void Function(GpuBuffers) updates) =>
+      super.copyWith((message) => updates(message as GpuBuffers)) as GpuBuffers;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use GpuBuffers() / GpuBuffers.new instead')
+  static GpuBuffers create() => GpuBuffers._();
+  static $pb.GeneratedMessage $_createMessage() => GpuBuffers._();
+  @$core.override
+  GpuBuffers createEmptyInstance() => GpuBuffers._();
+  @$core.pragma('dart2js:noInline')
+  static GpuBuffers getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<GpuBuffers>(GpuBuffers.$_createMessage);
+  static GpuBuffers? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.int get generation => $_getIZ(0);
+  @$pb.TagNumber(1)
+  set generation($core.int value) => $_setUnsignedInt32(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasGeneration() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearGeneration() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.int get count => $_getIZ(1);
+  @$pb.TagNumber(2)
+  set count($core.int value) => $_setUnsignedInt32(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasCount() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearCount() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.int get width => $_getIZ(2);
+  @$pb.TagNumber(3)
+  set width($core.int value) => $_setUnsignedInt32(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasWidth() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearWidth() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.int get height => $_getIZ(3);
+  @$pb.TagNumber(4)
+  set height($core.int value) => $_setUnsignedInt32(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasHeight() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearHeight() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $core.int get fourcc => $_getIZ(4);
+  @$pb.TagNumber(5)
+  set fourcc($core.int value) => $_setUnsignedInt32(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasFourcc() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearFourcc() => $_clearField(5);
+
+  @$pb.TagNumber(6)
+  $fixnum.Int64 get modifier => $_getI64(5);
+  @$pb.TagNumber(6)
+  set modifier($fixnum.Int64 value) => $_setInt64(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasModifier() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearModifier() => $_clearField(6);
+
+  @$pb.TagNumber(7)
+  $pb.PbList<$core.int> get strides => $_getList(6);
+
+  @$pb.TagNumber(8)
+  $pb.PbList<$core.int> get offsets => $_getList(7);
+
+  @$pb.TagNumber(9)
+  $core.String get socket => $_getSZ(8);
+  @$pb.TagNumber(9)
+  set socket($core.String value) => $_setString(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasSocket() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearSocket() => $_clearField(9);
 }
 
 /// A set of same-sized shared buffers. Their file descriptors travel with this
@@ -1788,6 +1989,7 @@ enum RunnerMessage_Message {
   sharedBuffers,
   busy,
   textField,
+  gpuBuffers,
   notSet
 }
 
@@ -1802,6 +2004,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
     SharedBuffers? sharedBuffers,
     Busy? busy,
     TextField? textField,
+    GpuBuffers? gpuBuffers,
   }) {
     final result = RunnerMessage._();
     if (hello != null) result.hello = hello;
@@ -1813,6 +2016,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
     if (sharedBuffers != null) result.sharedBuffers = sharedBuffers;
     if (busy != null) result.busy = busy;
     if (textField != null) result.textField = textField;
+    if (gpuBuffers != null) result.gpuBuffers = gpuBuffers;
     return result;
   }
 
@@ -1836,13 +2040,14 @@ class RunnerMessage extends $pb.GeneratedMessage {
     7: RunnerMessage_Message.sharedBuffers,
     8: RunnerMessage_Message.busy,
     9: RunnerMessage_Message.textField,
+    10: RunnerMessage_Message.gpuBuffers,
     0: RunnerMessage_Message.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'RunnerMessage',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
       createEmptyInstance: RunnerMessage.$_createMessage)
-    ..oo(0, [1, 2, 3, 4, 5, 6, 7, 8, 9])
+    ..oo(0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
     ..aOM<RunnerHello>(1, _omitFieldNames ? '' : 'hello',
         subBuilder: RunnerHello.$_createMessage)
     ..aOM<Frame>(2, _omitFieldNames ? '' : 'frame',
@@ -1861,6 +2066,8 @@ class RunnerMessage extends $pb.GeneratedMessage {
         subBuilder: Busy.$_createMessage)
     ..aOM<TextField>(9, _omitFieldNames ? '' : 'textField',
         subBuilder: TextField.$_createMessage)
+    ..aOM<GpuBuffers>(10, _omitFieldNames ? '' : 'gpuBuffers',
+        subBuilder: GpuBuffers.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1894,6 +2101,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(7)
   @$pb.TagNumber(8)
   @$pb.TagNumber(9)
+  @$pb.TagNumber(10)
   RunnerMessage_Message whichMessage() =>
       _RunnerMessage_MessageByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(1)
@@ -1905,6 +2113,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(7)
   @$pb.TagNumber(8)
   @$pb.TagNumber(9)
+  @$pb.TagNumber(10)
   void clearMessage() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -2005,6 +2214,17 @@ class RunnerMessage extends $pb.GeneratedMessage {
   void clearTextField() => $_clearField(9);
   @$pb.TagNumber(9)
   TextField ensureTextField() => $_ensure(8);
+
+  @$pb.TagNumber(10)
+  GpuBuffers get gpuBuffers => $_getN(9);
+  @$pb.TagNumber(10)
+  set gpuBuffers(GpuBuffers value) => $_setField(10, value);
+  @$pb.TagNumber(10)
+  $core.bool hasGpuBuffers() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearGpuBuffers() => $_clearField(10);
+  @$pb.TagNumber(10)
+  GpuBuffers ensureGpuBuffers() => $_ensure(9);
 }
 
 const $core.bool _omitFieldNames =

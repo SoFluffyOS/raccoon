@@ -90,6 +90,7 @@ const ClientHello$json = {
     {'1': 'client_name', '3': 2, '4': 1, '5': 9, '10': 'clientName'},
     {'1': 'shared_buffers', '3': 3, '4': 1, '5': 8, '10': 'sharedBuffers'},
     {'1': 'composes', '3': 5, '4': 1, '5': 8, '10': 'composes'},
+    {'1': 'gpu_buffers', '3': 6, '4': 1, '5': 8, '10': 'gpuBuffers'},
     {'1': 'pid', '3': 4, '4': 1, '5': 13, '10': 'pid'},
   ],
 };
@@ -98,20 +99,22 @@ const ClientHello$json = {
 final $typed_data.Uint8List clientHelloDescriptor = $convert.base64Decode(
     'CgtDbGllbnRIZWxsbxIpChBwcm90b2NvbF92ZXJzaW9uGAEgASgNUg9wcm90b2NvbFZlcnNpb2'
     '4SHwoLY2xpZW50X25hbWUYAiABKAlSCmNsaWVudE5hbWUSJQoOc2hhcmVkX2J1ZmZlcnMYAyAB'
-    'KAhSDXNoYXJlZEJ1ZmZlcnMSGgoIY29tcG9zZXMYBSABKAhSCGNvbXBvc2VzEhAKA3BpZBgEIA'
-    'EoDVIDcGlk');
+    'KAhSDXNoYXJlZEJ1ZmZlcnMSGgoIY29tcG9zZXMYBSABKAhSCGNvbXBvc2VzEh8KC2dwdV9idW'
+    'ZmZXJzGAYgASgIUgpncHVCdWZmZXJzEhAKA3BpZBgEIAEoDVIDcGlk');
 
 @$core.Deprecated('Use releaseBufferDescriptor instead')
 const ReleaseBuffer$json = {
   '1': 'ReleaseBuffer',
   '2': [
     {'1': 'index', '3': 1, '4': 1, '5': 13, '10': 'index'},
+    {'1': 'generation', '3': 2, '4': 1, '5': 13, '10': 'generation'},
   ],
 };
 
 /// Descriptor for `ReleaseBuffer`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List releaseBufferDescriptor = $convert
-    .base64Decode('Cg1SZWxlYXNlQnVmZmVyEhQKBWluZGV4GAEgASgNUgVpbmRleA==');
+final $typed_data.Uint8List releaseBufferDescriptor = $convert.base64Decode(
+    'Cg1SZWxlYXNlQnVmZmVyEhQKBWluZGV4GAEgASgNUgVpbmRleBIeCgpnZW5lcmF0aW9uGAIgAS'
+    'gNUgpnZW5lcmF0aW9u');
 
 @$core.Deprecated('Use resizeDescriptor instead')
 const Resize$json = {
@@ -367,6 +370,8 @@ const Frame$json = {
     {'1': 'timestamp_micros', '3': 7, '4': 1, '5': 4, '10': 'timestampMicros'},
     {'1': 'in_shared_buffer', '3': 8, '4': 1, '5': 8, '10': 'inSharedBuffer'},
     {'1': 'buffer_index', '3': 9, '4': 1, '5': 13, '10': 'bufferIndex'},
+    {'1': 'in_gpu_buffer', '3': 10, '4': 1, '5': 8, '10': 'inGpuBuffer'},
+    {'1': 'gpu_generation', '3': 11, '4': 1, '5': 13, '10': 'gpuGeneration'},
   ],
 };
 
@@ -377,7 +382,32 @@ final $typed_data.Uint8List frameDescriptor = $convert.base64Decode(
     'LwoGZm9ybWF0GAUgASgOMhcucmFjY29vbi52MS5QaXhlbEZvcm1hdFIGZm9ybWF0EhYKBnBpeG'
     'VscxgGIAEoDFIGcGl4ZWxzEikKEHRpbWVzdGFtcF9taWNyb3MYByABKARSD3RpbWVzdGFtcE1p'
     'Y3JvcxIoChBpbl9zaGFyZWRfYnVmZmVyGAggASgIUg5pblNoYXJlZEJ1ZmZlchIhCgxidWZmZX'
-    'JfaW5kZXgYCSABKA1SC2J1ZmZlckluZGV4');
+    'JfaW5kZXgYCSABKA1SC2J1ZmZlckluZGV4EiIKDWluX2dwdV9idWZmZXIYCiABKAhSC2luR3B1'
+    'QnVmZmVyEiUKDmdwdV9nZW5lcmF0aW9uGAsgASgNUg1ncHVHZW5lcmF0aW9u');
+
+@$core.Deprecated('Use gpuBuffersDescriptor instead')
+const GpuBuffers$json = {
+  '1': 'GpuBuffers',
+  '2': [
+    {'1': 'generation', '3': 1, '4': 1, '5': 13, '10': 'generation'},
+    {'1': 'count', '3': 2, '4': 1, '5': 13, '10': 'count'},
+    {'1': 'width', '3': 3, '4': 1, '5': 13, '10': 'width'},
+    {'1': 'height', '3': 4, '4': 1, '5': 13, '10': 'height'},
+    {'1': 'fourcc', '3': 5, '4': 1, '5': 13, '10': 'fourcc'},
+    {'1': 'modifier', '3': 6, '4': 1, '5': 4, '10': 'modifier'},
+    {'1': 'strides', '3': 7, '4': 3, '5': 13, '10': 'strides'},
+    {'1': 'offsets', '3': 8, '4': 3, '5': 13, '10': 'offsets'},
+    {'1': 'socket', '3': 9, '4': 1, '5': 9, '10': 'socket'},
+  ],
+};
+
+/// Descriptor for `GpuBuffers`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List gpuBuffersDescriptor = $convert.base64Decode(
+    'CgpHcHVCdWZmZXJzEh4KCmdlbmVyYXRpb24YASABKA1SCmdlbmVyYXRpb24SFAoFY291bnQYAi'
+    'ABKA1SBWNvdW50EhQKBXdpZHRoGAMgASgNUgV3aWR0aBIWCgZoZWlnaHQYBCABKA1SBmhlaWdo'
+    'dBIWCgZmb3VyY2MYBSABKA1SBmZvdXJjYxIaCghtb2RpZmllchgGIAEoBFIIbW9kaWZpZXISGA'
+    'oHc3RyaWRlcxgHIAMoDVIHc3RyaWRlcxIYCgdvZmZzZXRzGAggAygNUgdvZmZzZXRzEhYKBnNv'
+    'Y2tldBgJIAEoCVIGc29ja2V0');
 
 @$core.Deprecated('Use sharedBuffersDescriptor instead')
 const SharedBuffers$json = {
@@ -567,6 +597,15 @@ const RunnerMessage$json = {
       '9': 0,
       '10': 'textField'
     },
+    {
+      '1': 'gpu_buffers',
+      '3': 10,
+      '4': 1,
+      '5': 11,
+      '6': '.raccoon.v1.GpuBuffers',
+      '9': 0,
+      '10': 'gpuBuffers'
+    },
   ],
   '8': [
     {'1': 'message'},
@@ -583,5 +622,6 @@ final $typed_data.Uint8List runnerMessageDescriptor = $convert.base64Decode(
     'sucmFjY29vbi52MS5QbGF0Zm9ybU1lc3NhZ2VIAFIPcGxhdGZvcm1NZXNzYWdlEkIKDnNoYXJl'
     'ZF9idWZmZXJzGAcgASgLMhkucmFjY29vbi52MS5TaGFyZWRCdWZmZXJzSABSDXNoYXJlZEJ1Zm'
     'ZlcnMSJgoEYnVzeRgIIAEoCzIQLnJhY2Nvb24udjEuQnVzeUgAUgRidXN5EjYKCnRleHRfZmll'
-    'bGQYCSABKAsyFS5yYWNjb29uLnYxLlRleHRGaWVsZEgAUgl0ZXh0RmllbGRCCQoHbWVzc2FnZQ'
-    '==');
+    'bGQYCSABKAsyFS5yYWNjb29uLnYxLlRleHRGaWVsZEgAUgl0ZXh0RmllbGQSOQoLZ3B1X2J1Zm'
+    'ZlcnMYCiABKAsyFi5yYWNjb29uLnYxLkdwdUJ1ZmZlcnNIAFIKZ3B1QnVmZmVyc0IJCgdtZXNz'
+    'YWdl');
