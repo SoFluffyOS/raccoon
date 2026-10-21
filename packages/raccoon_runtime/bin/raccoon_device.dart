@@ -1,22 +1,52 @@
-// Registers the "raccoon" custom device with the Flutter tool.
+// Developer commands for the Raccoon runtime.
 //
 //   dart run raccoon_runtime:raccoon_device setup --helper <path/to/raccoon-device>
+//   dart run raccoon_runtime:raccoon_device doctor [project directory]
 
 import 'dart:io';
 
 import 'package:raccoon_runtime/raccoon_runtime.dart';
 
 void main(List<String> arguments) {
-  if (arguments.length < 3 ||
-      arguments[0] != 'setup' ||
-      arguments[1] != '--helper') {
-    stderr.writeln(
-      'usage: raccoon_device setup --helper <path/to/raccoon-device>',
-    );
-    exitCode = 2;
+  switch (arguments) {
+    case ['setup', '--helper', final helper]:
+      final file = CustomDevicesFile.forHost(Platform.environment);
+      file.upsert(CustomDeviceConfig(deviceHelper: helper));
+      stdout.writeln('wrote ${file.path}: ${file.ids().join(', ')}');
+    case ['doctor', ...final rest]:
+      _doctor(rest.firstOrNull ?? Directory.current.path);
+    default:
+      stderr.writeln(
+        'usage: raccoon_device setup --helper <path/to/raccoon-device>\n'
+        '       raccoon_device doctor [project directory]',
+      );
+      exitCode = 2;
+  }
+}
+
+void _doctor(String project) {
+  final which = Process.runSync('which', ['flutter']).stdout.toString().trim();
+  if (which.isEmpty) {
+    stdout.writeln('flutter: not on PATH');
     return;
   }
-  final file = CustomDevicesFile.forHost(Platform.environment);
-  file.upsert(CustomDeviceConfig(deviceHelper: arguments[2]));
-  stdout.writeln('wrote ${file.path}: ${file.ids().join(', ')}');
+  final sdk = RuntimeStore.sdkRootOfFlutter(which);
+  final revision = RuntimeStore.revisionOfSdk(sdk);
+  final store = RuntimeStore.forHost(Platform.environment);
+  final runtime = revision == null ? null : store.installed(revision);
+  stdout
+    ..writeln('flutter sdk: $sdk')
+    ..writeln('engine revision: ${revision ?? 'unknown'}')
+    ..writeln('runtime: ${runtime?.directory ?? 'not installed'}')
+    ..writeln('icu data: ${File(RuntimeStore.icuDataOfSdk(sdk)).existsSync()}')
+    ..writeln(
+      'custom devices: ${CustomDevicesFile.forHost(Platform.environment).ids().join(', ')}',
+    );
+  final report = const PluginCompatibility().forProject(project);
+  stdout.writeln(
+    'plugins in $project: ${report.isEmpty ? 'none recorded' : ''}',
+  );
+  for (final status in report) {
+    stdout.writeln('  $status');
+  }
 }
