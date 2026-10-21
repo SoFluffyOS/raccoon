@@ -11,6 +11,7 @@
 #include "flutter_embedder.h"
 #include "platform_task_runner.h"
 #include "software_frame.h"
+#include "text_input.h"
 #include "user_defaults_channels.h"
 #include "window_channels.h"
 
@@ -59,7 +60,14 @@ class EngineHost {
 
   void Resize(size_t width, size_t height, double pixel_ratio);
   void SendPointer(const FlutterPointerEvent& event);
+  // Sends the key to the framework, then the legacy flutter/keyevent message
+  // the framework waits for before dispatching it. A key down it does not
+  // handle goes to the text field, when one is active.
   void SendKey(const FlutterKeyEvent& event);
+  // Sends a message to the framework; |on_reply| gets its answer, if asked.
+  void SendPlatformMessage(
+      const std::string& channel, const uint8_t* data, size_t size,
+      std::function<void(const uint8_t* data, size_t size)> on_reply = nullptr);
   void Shutdown();
 
   // Microseconds on the engine's clock.
@@ -82,7 +90,15 @@ class EngineHost {
   EngineLoader loader_;
   std::unique_ptr<PlatformTaskRunner> platform_;
   SoftwareFrame frame_;
+  void TrackModifiers(const FlutterKeyEvent& event);
+  std::string RawKeyMessage(const FlutterKeyEvent& event,
+                            const std::string& character) const;
   WindowChannels windows_;
+  TextInput text_input_;
+  bool shift_ = false;
+  bool control_ = false;
+  bool alt_ = false;
+  bool meta_ = false;
   UserDefaultsChannels user_defaults_;
   FLUTTER_API_SYMBOL(FlutterEngine) engine_ = nullptr;
   LogCallback on_log_;

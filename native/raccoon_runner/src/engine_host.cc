@@ -1,5 +1,7 @@
 #include "engine_host.h"
 
+#include <nlohmann/json.hpp>
+
 namespace raccoon {
 
 namespace {
@@ -59,6 +61,10 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
     return false;
   }
   platform_->SetEngine(engine_);
+  text_input_.SetSender([this](const std::string& channel, const std::string& json) {
+    SendPlatformMessage(channel, reinterpret_cast<const uint8_t*>(json.data()),
+                        json.size());
+  });
   // Report one display, as desktop embedders do once the engine runs; apps
   // that read PlatformDispatcher.displays (Wonderous does) find it. Calling
   // this before the engine runs crashes inside the engine.
@@ -91,9 +97,136 @@ void EngineHost::SendPointer(const FlutterPointerEvent& event) {
   loader_.procs().SendPointerEvent(engine_, &event, 1);
 }
 
+namespace {
+
+struct ReplyContext {
+  std::function<void(const uint8_t* data, size_t size)> on_reply;
+};
+
+void OnReply(const uint8_t* data, size_t size, void* user_data) {
+  auto* context = static_cast<ReplyContext*>(user_data);
+  context->on_reply(data, size);
+  delete context;
+}
+
+// The first code point of a UTF-8 string, 0 for none.
+uint32_t FirstCodePoint(const std::string& utf8) {
+  if (utf8.empty()) return 0;
+  const unsigned char c = utf8[0];
+  size_t length = 1;
+  uint32_t code = c;
+  if ((c & 0xE0) == 0xC0) {
+    length = 2;
+    code = c & 0x1F;
+  } else if ((c & 0xF0) == 0xE0) {
+    length = 3;
+    code = c & 0x0F;
+  } else if ((c & 0xF8) == 0xF0) {
+    length = 4;
+    code = c & 0x07;
+  }
+  if (utf8.size() < length) return 0;
+  for (size_t k = 1; k < length; ++k) {
+    code = (code << 6) | (static_cast<unsigned char>(utf8[k]) & 0x3F);
+  }
+  return code;
+}
+
+}  // namespace
+
+void EngineHost::TrackModifiers(const FlutterKeyEvent& event) {
+  const bool down = event.type != kFlutterKeyEventTypeUp;
+  switch (event.logical) {
+    case 0x200000100: case 0x200000101: control_ = down; break;
+    case 0x200000102: case 0x200000103: shift_ = down; break;
+    case 0x200000104: case 0x200000105: alt_ = down; break;
+    case 0x200000106: case 0x200000107: meta_ = down; break;
+    default: break;
+  }
+}
+
+std::string EngineHost::RawKeyMessage(const FlutterKeyEvent& event,
+                                      const std::string& character) const {
+  // The framework reads this message by host keymap; only the logical key
+  // and the character matter to it, the rest feeds the deprecated RawKeyboard.
+  nlohmann::json message;
+  message["type"] = event.type == kFlutterKeyEventTypeUp ? "keyup" : "keydown";
+  message["specifiedLogicalKey"] = event.logical;
+#if defined(__APPLE__)
+  message["keymap"] = "macos";
+  message["keyCode"] = 0;
+  message["characters"] = character;
+  message["charactersIgnoringModifiers"] = character;
+  message["modifiers"] = (shift_ ? 0x20000 : 0) | (control_ ? 0x40000 : 0) |
+                         (alt_ ? 0x80000 : 0) | (meta_ ? 0x100000 : 0);
+#elif defined(_WIN32)
+  message["keymap"] = "windows";
+  message["keyCode"] = 0;
+  message["scanCode"] = 0;
+  message["characterCodePoint"] = FirstCodePoint(character);
+  message["modifiers"] = 0;
+#else
+  message["keymap"] = "linux";
+  message["toolkit"] = "gtk";
+  message["keyCode"] = 0;
+  message["scanCode"] = 0;
+  message["unicodeScalarValues"] = FirstCodePoint(character);
+  message["modifiers"] = (shift_ ? 1 << 0 : 0) | (control_ ? 1 << 2 : 0) |
+                         (alt_ ? 1 << 3 : 0) | (meta_ ? 1 << 26 : 0);
+#endif
+  return message.dump();
+}
+
 void EngineHost::SendKey(const FlutterKeyEvent& event) {
+  TrackModifiers(event);
   loader_.procs().SendKeyEvent(
       engine_, &event, [](bool /*handled*/, void* /*user_data*/) {}, nullptr);
+  if (event.synthesized) return;
+  // The framework holds key data until the legacy flutter/keyevent message
+  // for the same key arrives, and answers that one with whether it handled
+  // the key. A key down it leaves alone edits the text field, if any.
+  const std::string character =
+      event.character == nullptr ? std::string() : event.character;
+  const bool down = event.type != kFlutterKeyEventTypeUp;
+  const std::string raw = RawKeyMessage(event, character);
+  const uint64_t logical = event.logical;
+  SendPlatformMessage(
+      "flutter/keyevent", reinterpret_cast<const uint8_t*>(raw.data()),
+      raw.size(), [this, down, logical, character](const uint8_t* data, size_t size) {
+        if (!down) return;
+        const auto reply = nlohmann::json::parse(data, data + size, nullptr, false);
+        const bool handled = reply.is_object() && reply.contains("handled") &&
+                             reply["handled"].is_boolean() &&
+                             reply["handled"].get<bool>();
+        if (handled) return;
+        text_input_.HandleKey(logical, character, shift_, control_, alt_, meta_);
+      });
+}
+
+void EngineHost::SendPlatformMessage(
+    const std::string& channel, const uint8_t* data, size_t size,
+    std::function<void(const uint8_t* data, size_t size)> on_reply) {
+  if (engine_ == nullptr) return;
+  const auto& procs = loader_.procs();
+  FlutterPlatformMessageResponseHandle* handle = nullptr;
+  if (on_reply) {
+    auto* context = new ReplyContext{std::move(on_reply)};
+    if (procs.PlatformMessageCreateResponseHandle(engine_, OnReply, context,
+                                                  &handle) != kSuccess) {
+      delete context;
+      handle = nullptr;
+    }
+  }
+  FlutterPlatformMessage message{};
+  message.struct_size = sizeof(FlutterPlatformMessage);
+  message.channel = channel.c_str();
+  message.message = data;
+  message.message_size = size;
+  message.response_handle = handle;
+  procs.SendPlatformMessage(engine_, &message);
+  if (handle != nullptr) {
+    procs.PlatformMessageReleaseResponseHandle(engine_, handle);
+  }
 }
 
 void EngineHost::Respond(const FlutterPlatformMessageResponseHandle* handle,
@@ -113,7 +246,9 @@ void EngineHost::OnPlatformMessage(const FlutterPlatformMessage* message,
   if (host->windows_.Handle(channel, message->message, message->message_size,
                             &reply) ||
       host->user_defaults_.Handle(channel, message->message,
-                                  message->message_size, &reply)) {
+                                  message->message_size, &reply) ||
+      host->text_input_.Handle(channel, message->message,
+                               message->message_size, &reply)) {
     host->Respond(message->response_handle, reply.data(), reply.size());
     return;
   }

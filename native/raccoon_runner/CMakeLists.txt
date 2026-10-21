@@ -55,6 +55,14 @@ FetchContent_Declare(protobuf
 )
 FetchContent_MakeAvailable(protobuf)
 
+# JSON for the channels the framework speaks JSON on (text input, key events).
+set(JSON_BuildTests OFF CACHE INTERNAL "")
+FetchContent_Declare(json
+  URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_MakeAvailable(json)
+
 set(RACCOON_PROTO ${CMAKE_SOURCE_DIR}/proto/raccoon/v1/runner.proto)
 set(RACCOON_GEN_DIR ${CMAKE_BINARY_DIR}/gen)
 add_custom_command(
@@ -78,6 +86,7 @@ add_executable(raccoon_runner
   src/shared_buffers.cc
   src/software_frame.cc
   src/standard_codec.cc
+  src/text_input.cc
   src/user_defaults_channels.cc
   src/window_channels.cc
 )
@@ -86,3 +95,4 @@ target_compile_definitions(raccoon_runner PRIVATE RACCOON_RUNNER_VERSION="${RACC
 target_compile_options(raccoon_runner PRIVATE -Wall -Wextra)
 find_package(Threads REQUIRED)
 target_link_libraries(raccoon_runner PRIVATE raccoon_proto ${CMAKE_DL_LIBS} Threads::Threads)
+target_link_libraries(raccoon_runner PRIVATE nlohmann_json::nlohmann_json)

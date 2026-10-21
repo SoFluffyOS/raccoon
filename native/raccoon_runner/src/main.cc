@@ -265,7 +265,13 @@ int Serve(const Options& options) {
     }
     host.SendPointer(ToFlutterPointer(pointer, host.NowMicros()));
   };
-  handler.on_key = [&host](const raccoon::v1::KeyEvent& key) {
+  handler.on_key = [&host, trace](const raccoon::v1::KeyEvent& key) {
+    if (trace) {
+      std::fprintf(stderr, "raccoon_runner: key kind=%d logical=%llx character=%s\n",
+                   static_cast<int>(key.kind()),
+                   static_cast<unsigned long long>(key.logical()),
+                   key.character().c_str());
+    }
     host.SendKey(ToFlutterKey(key, host.NowMicros()));
   };
   handler.on_shutdown = [&stop] { stop = true; };

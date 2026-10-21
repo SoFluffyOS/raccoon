@@ -30,6 +30,12 @@ Design notes: `docs/internal_docs/raccoon/`.
     reports macOS), kept in `--data-dir` when given (`tool/raccoon-device`
     passes one per app), in memory otherwise.
   `example/channels` checks the answers.
+- Delivers keys the way the framework expects: the key data, then the
+  legacy `flutter/keyevent` message it waits for before dispatching. Without
+  the second, no key ever reaches the app.
+- Types: it answers `flutter/textinput` and keeps the active field's editing
+  state, so the keys the framework leaves unhandled insert text, delete,
+  move and act; `example/text` shows it. Composition (an IME) is not here yet.
 - `render`: writes one frame to a PPM file, for tests and a quick look.
 - `tool/raccoon-device`: ping, install, uninstall and run for the Flutter
   tool's custom device, so a stock `flutter run -d raccoon` works.
