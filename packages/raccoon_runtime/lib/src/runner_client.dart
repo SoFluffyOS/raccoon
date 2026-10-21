@@ -6,6 +6,7 @@ import 'package:raccoon/raccoon.dart';
 import 'package:raccoon_runtime/src/message_framing.dart';
 import 'package:raccoon_runtime/src/runner_connection.dart';
 import 'package:raccoon_runtime/src/runner_endpoint.dart';
+import 'package:raccoon_runtime/src/runner_transport.dart';
 
 /// Serves one platform channel for the hosted app, the way a desktop
 /// embedder's plugin would. Returns the reply bytes, or null for "no plugin",
@@ -15,9 +16,9 @@ typedef PlatformChannelHandler = Future<Uint8List?> Function(Uint8List data);
 /// A connection to one runner: frames, logs and platform messages in; resize,
 /// input and platform replies out.
 final class RunnerClient implements RunnerConnection {
-  RunnerClient._(this._socket) {
-    _subscription = _socket.listen(
-      _onBytes,
+  RunnerClient._(this._transport) {
+    _subscription = _transport.inbound.listen(
+      _onInbound,
       onDone: _onDone,
       onError: _onError,
     );
@@ -26,33 +27,26 @@ final class RunnerClient implements RunnerConnection {
         hello: ClientHello(
           protocolVersion: RaccoonProtocol.version,
           clientName: 'raccoon_runtime',
+          sharedBuffers: _transport.receivesHandles,
         ),
       ),
     );
   }
 
   /// Connects to the runner at [endpoint] and sends the client hello.
-  static Future<RunnerClient> connect(RunnerEndpoint endpoint) async {
-    final socket = switch (endpoint) {
-      UnixSocketEndpoint(:final path) => await Socket.connect(
-        InternetAddress(path, type: InternetAddressType.unix),
-        0,
-      ),
-      LoopbackTcpEndpoint(:final port) => await Socket.connect(
-        InternetAddress.loopbackIPv4,
-        port,
-      ),
-    };
-    return RunnerClient._(socket);
-  }
+  static Future<RunnerClient> connect(RunnerEndpoint endpoint) async =>
+      RunnerClient._(await RunnerTransport.connect(endpoint));
 
-  final Socket _socket;
+  final RunnerTransport _transport;
+  final _handles = <RandomAccessFile>[];
+  var _buffers = <RandomAccessFile>[];
+  var _sharedFrames = 0;
   final _unframer = MessageUnframer();
   final _messages = StreamController<RunnerMessage>.broadcast();
   final _hello = Completer<RunnerHello>();
   final _closed = Completer<void>();
   final _channels = <String, PlatformChannelHandler>{};
-  late final StreamSubscription<List<int>> _subscription;
+  late final StreamSubscription<Inbound> _subscription;
   Frame? _latestFrame;
   String? _vmServiceUri;
 
@@ -73,6 +67,9 @@ final class RunnerClient implements RunnerConnection {
 
   /// The Dart VM service URI once the runner reported it.
   String? get vmServiceUri => _vmServiceUri;
+
+  /// Frames that arrived through shared buffers rather than inline.
+  int get sharedFrames => _sharedFrames;
 
   /// Completes when the runner closed the connection.
   Future<void> get closed => _closed.future;
@@ -103,22 +100,29 @@ final class RunnerClient implements RunnerConnection {
 
   void send(ClientMessage message) {
     if (_closed.isCompleted) return;
-    _socket.add(MessageFraming.frame(message.writeToBuffer()));
+    _transport.write(MessageFraming.frame(message.writeToBuffer()));
   }
 
   Future<void> close() async {
     await _subscription.cancel();
-    await _socket.close();
+    await _transport.close();
     _finish();
   }
 
-  void _onBytes(List<int> chunk) {
-    for (final payload in _unframer.add(chunk)) {
+  void _onInbound(Inbound inbound) {
+    _handles.addAll(inbound.handles);
+    for (final payload in _unframer.add(inbound.bytes)) {
       final message = RunnerMessage.fromBuffer(payload);
       if (message.hasHello() && !_hello.isCompleted) {
         _hello.complete(message.hello);
       }
-      if (message.hasFrame()) _latestFrame = message.frame;
+      if (message.hasSharedBuffers()) _takeBuffers(message.sharedBuffers);
+      if (message.hasFrame()) {
+        final frame = _resolveFrame(message.frame);
+        if (frame == null) continue;
+        message.frame = frame;
+        _latestFrame = frame;
+      }
       if (message.hasVmService()) _vmServiceUri = message.vmService.uri;
       if (message.hasPlatformMessage()) {
         unawaited(_servePlatformMessage(message.platformMessage));
@@ -149,6 +153,36 @@ final class RunnerClient implements RunnerConnection {
     );
   }
 
+  /// Adopts the descriptors that travelled with [buffers], in index order.
+  void _takeBuffers(SharedBuffers buffers) {
+    for (final old in _buffers) {
+      old.closeSync();
+    }
+    final count = buffers.count;
+    if (_handles.length < count) {
+      _buffers = [];
+      _handles.clear();
+      return;
+    }
+    _buffers = _handles.sublist(0, count);
+    _handles.removeRange(0, count);
+  }
+
+  /// Reads a shared-buffer frame's pixels and gives the buffer back; an
+  /// inline frame is returned as is.
+  Frame? _resolveFrame(Frame frame) {
+    if (!frame.inSharedBuffer) return frame;
+    final index = frame.bufferIndex;
+    if (index >= _buffers.length) return null;
+    final file = _buffers[index]..setPositionSync(0);
+    final pixels = file.readSync(frame.rowBytes * frame.height);
+    send(ClientMessage(releaseBuffer: ReleaseBuffer(index: index)));
+    _sharedFrames++;
+    return frame.deepCopy()
+      ..pixels = pixels
+      ..inSharedBuffer = false;
+  }
+
   void _onDone() => _finish();
 
   void _onError(Object error, StackTrace stackTrace) {
@@ -159,6 +193,10 @@ final class RunnerClient implements RunnerConnection {
   void _finish() {
     if (_closed.isCompleted) return;
     _closed.complete();
+    for (final buffer in _buffers) {
+      buffer.closeSync();
+    }
+    _buffers = [];
     unawaited(_messages.close());
   }
 }

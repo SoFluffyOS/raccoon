@@ -6,4 +6,5 @@ export 'package:raccoon_runtime/src/runner_connection.dart';
 export 'package:raccoon_runtime/src/runner_discovery.dart';
 export 'package:raccoon_runtime/src/runner_endpoint.dart';
 export 'package:raccoon_runtime/src/runner_process.dart';
+export 'package:raccoon_runtime/src/runner_transport.dart';
 export 'package:raccoon_runtime/src/runtime_store.dart';

@@ -113,6 +113,11 @@ void main() {
             .firstWhere((f) => _pixel(f, 400, 300) == _green)
             .timeout(const Duration(seconds: 10));
         expect(_pixel(toggled, 5, 5), _blue);
+        expect(
+          client.sharedFrames,
+          greaterThan(0),
+          reason: 'frames should travel through shared buffers',
+        );
       } finally {
         client.shutdown();
         await client.close();
