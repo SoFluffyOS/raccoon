@@ -12,7 +12,7 @@ if(NOT RACCOON_ENGINE_DIR)
   message(FATAL_ERROR "Set -DRACCOON_ENGINE_DIR to a directory holding flutter_embedder.h (see tool/engine_dir.sh)")
 endif()
 
-# protoc for the C++ message code. tool/protoc.sh installs a user-local one.
+# protoc for the C++ message code; tool/protoc.sh installs a user-local one.
 set(RACCOON_PROTOC "$ENV{HOME}/.local/raccoon/protoc/bin/protoc" CACHE FILEPATH "protoc binary")
 
 # protobuf-lite, built from source so the runner needs no system package. The
