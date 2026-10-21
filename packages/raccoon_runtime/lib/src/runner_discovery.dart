@@ -68,19 +68,24 @@ final class RunnerDiscovery {
     return found;
   }
 
-  /// The current runners, then the list again whenever it changes.
+  /// The current runners, then the list again whenever one appears, goes,
+  /// or is replaced under the same path, as every `flutter run` of the same
+  /// app does.
   Stream<List<UnixSocketEndpoint>> watch() {
     final dir = Directory(directory);
     if (!dir.existsSync()) dir.createSync(recursive: true);
     StreamSubscription<FileSystemEvent>? events;
     Timer? timer;
-    List<String>? lastPaths;
+    List<_Seen>? last;
     late final StreamController<List<UnixSocketEndpoint>> controller;
     void emitIfChanged() {
       final found = list();
-      final paths = [for (final endpoint in found) endpoint.path];
-      if (lastPaths case final last? when _samePaths(last, paths)) return;
-      lastPaths = paths;
+      final seen = [
+        for (final endpoint in found)
+          (path: endpoint.path, changed: _changedAt(endpoint.path)),
+      ];
+      if (last case final previous? when _sameRunners(previous, seen)) return;
+      last = seen;
       controller.add(found);
     }
 
@@ -113,11 +118,23 @@ final class RunnerDiscovery {
     return controller.stream;
   }
 
-  static bool _samePaths(List<String> a, List<String> b) {
+  /// When the socket was created, so a replacement under the same path
+  /// counts as a change; 0 once it is gone.
+  static int _changedAt(String path) {
+    final stat = FileStat.statSync(path);
+    return switch (stat.type) {
+      FileSystemEntityType.notFound => 0,
+      _ => stat.changed.microsecondsSinceEpoch,
+    };
+  }
+
+  static bool _sameRunners(List<_Seen> a, List<_Seen> b) {
     if (a.length != b.length) return false;
     for (var i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
+      if (a[i].path != b[i].path || a[i].changed != b[i].changed) return false;
     }
     return true;
   }
 }
+
+typedef _Seen = ({String path, int changed});
