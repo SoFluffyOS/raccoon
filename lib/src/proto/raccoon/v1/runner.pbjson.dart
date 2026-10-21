@@ -88,13 +88,27 @@ const ClientHello$json = {
   '2': [
     {'1': 'protocol_version', '3': 1, '4': 1, '5': 13, '10': 'protocolVersion'},
     {'1': 'client_name', '3': 2, '4': 1, '5': 9, '10': 'clientName'},
+    {'1': 'shared_buffers', '3': 3, '4': 1, '5': 8, '10': 'sharedBuffers'},
   ],
 };
 
 /// Descriptor for `ClientHello`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List clientHelloDescriptor = $convert.base64Decode(
     'CgtDbGllbnRIZWxsbxIpChBwcm90b2NvbF92ZXJzaW9uGAEgASgNUg9wcm90b2NvbFZlcnNpb2'
-    '4SHwoLY2xpZW50X25hbWUYAiABKAlSCmNsaWVudE5hbWU=');
+    '4SHwoLY2xpZW50X25hbWUYAiABKAlSCmNsaWVudE5hbWUSJQoOc2hhcmVkX2J1ZmZlcnMYAyAB'
+    'KAhSDXNoYXJlZEJ1ZmZlcnM=');
+
+@$core.Deprecated('Use releaseBufferDescriptor instead')
+const ReleaseBuffer$json = {
+  '1': 'ReleaseBuffer',
+  '2': [
+    {'1': 'index', '3': 1, '4': 1, '5': 13, '10': 'index'},
+  ],
+};
+
+/// Descriptor for `ReleaseBuffer`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List releaseBufferDescriptor = $convert
+    .base64Decode('Cg1SZWxlYXNlQnVmZmVyEhQKBWluZGV4GAEgASgNUgVpbmRleA==');
 
 @$core.Deprecated('Use resizeDescriptor instead')
 const Resize$json = {
@@ -259,6 +273,15 @@ const ClientMessage$json = {
       '9': 0,
       '10': 'platformResponse'
     },
+    {
+      '1': 'release_buffer',
+      '3': 7,
+      '4': 1,
+      '5': 11,
+      '6': '.raccoon.v1.ReleaseBuffer',
+      '9': 0,
+      '10': 'releaseBuffer'
+    },
   ],
   '8': [
     {'1': 'message'},
@@ -273,7 +296,8 @@ final $typed_data.Uint8List clientMessageDescriptor = $convert.base64Decode(
     'oDa2V5GAQgASgLMhQucmFjY29vbi52MS5LZXlFdmVudEgAUgNrZXkSMgoIc2h1dGRvd24YBSAB'
     'KAsyFC5yYWNjb29uLnYxLlNodXRkb3duSABSCHNodXRkb3duEksKEXBsYXRmb3JtX3Jlc3Bvbn'
     'NlGAYgASgLMhwucmFjY29vbi52MS5QbGF0Zm9ybVJlc3BvbnNlSABSEHBsYXRmb3JtUmVzcG9u'
-    'c2VCCQoHbWVzc2FnZQ==');
+    'c2USQgoOcmVsZWFzZV9idWZmZXIYByABKAsyGS5yYWNjb29uLnYxLlJlbGVhc2VCdWZmZXJIAF'
+    'INcmVsZWFzZUJ1ZmZlckIJCgdtZXNzYWdl');
 
 @$core.Deprecated('Use runnerHelloDescriptor instead')
 const RunnerHello$json = {
@@ -307,6 +331,8 @@ const Frame$json = {
     },
     {'1': 'pixels', '3': 6, '4': 1, '5': 12, '10': 'pixels'},
     {'1': 'timestamp_micros', '3': 7, '4': 1, '5': 4, '10': 'timestampMicros'},
+    {'1': 'in_shared_buffer', '3': 8, '4': 1, '5': 8, '10': 'inSharedBuffer'},
+    {'1': 'buffer_index', '3': 9, '4': 1, '5': 13, '10': 'bufferIndex'},
   ],
 };
 
@@ -316,7 +342,22 @@ final $typed_data.Uint8List frameDescriptor = $convert.base64Decode(
     'RoEhYKBmhlaWdodBgDIAEoDVIGaGVpZ2h0EhsKCXJvd19ieXRlcxgEIAEoDVIIcm93Qnl0ZXMS'
     'LwoGZm9ybWF0GAUgASgOMhcucmFjY29vbi52MS5QaXhlbEZvcm1hdFIGZm9ybWF0EhYKBnBpeG'
     'VscxgGIAEoDFIGcGl4ZWxzEikKEHRpbWVzdGFtcF9taWNyb3MYByABKARSD3RpbWVzdGFtcE1p'
-    'Y3Jvcw==');
+    'Y3JvcxIoChBpbl9zaGFyZWRfYnVmZmVyGAggASgIUg5pblNoYXJlZEJ1ZmZlchIhCgxidWZmZX'
+    'JfaW5kZXgYCSABKA1SC2J1ZmZlckluZGV4');
+
+@$core.Deprecated('Use sharedBuffersDescriptor instead')
+const SharedBuffers$json = {
+  '1': 'SharedBuffers',
+  '2': [
+    {'1': 'count', '3': 1, '4': 1, '5': 13, '10': 'count'},
+    {'1': 'size', '3': 2, '4': 1, '5': 4, '10': 'size'},
+  ],
+};
+
+/// Descriptor for `SharedBuffers`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List sharedBuffersDescriptor = $convert.base64Decode(
+    'Cg1TaGFyZWRCdWZmZXJzEhQKBWNvdW50GAEgASgNUgVjb3VudBISCgRzaXplGAIgASgEUgRzaX'
+    'pl');
 
 @$core.Deprecated('Use vmServiceDescriptor instead')
 const VmService$json = {
@@ -428,6 +469,15 @@ const RunnerMessage$json = {
       '9': 0,
       '10': 'platformMessage'
     },
+    {
+      '1': 'shared_buffers',
+      '3': 7,
+      '4': 1,
+      '5': 11,
+      '6': '.raccoon.v1.SharedBuffers',
+      '9': 0,
+      '10': 'sharedBuffers'
+    },
   ],
   '8': [
     {'1': 'message'},
@@ -441,5 +491,6 @@ final $typed_data.Uint8List runnerMessageDescriptor = $convert.base64Decode(
     'dm1fc2VydmljZRgDIAEoCzIVLnJhY2Nvb24udjEuVm1TZXJ2aWNlSABSCXZtU2VydmljZRInCg'
     'Nsb2cYBCABKAsyEy5yYWNjb29uLnYxLkxvZ0xpbmVIAFIDbG9nEiwKBmV4aXRlZBgFIAEoCzIS'
     'LnJhY2Nvb24udjEuRXhpdGVkSABSBmV4aXRlZBJIChBwbGF0Zm9ybV9tZXNzYWdlGAYgASgLMh'
-    'sucmFjY29vbi52MS5QbGF0Zm9ybU1lc3NhZ2VIAFIPcGxhdGZvcm1NZXNzYWdlQgkKB21lc3Nh'
-    'Z2U=');
+    'sucmFjY29vbi52MS5QbGF0Zm9ybU1lc3NhZ2VIAFIPcGxhdGZvcm1NZXNzYWdlEkIKDnNoYXJl'
+    'ZF9idWZmZXJzGAcgASgLMhkucmFjY29vbi52MS5TaGFyZWRCdWZmZXJzSABSDXNoYXJlZEJ1Zm'
+    'ZlcnNCCQoHbWVzc2FnZQ==');

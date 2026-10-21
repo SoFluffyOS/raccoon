@@ -25,10 +25,12 @@ class ClientHello extends $pb.GeneratedMessage {
   factory ClientHello({
     $core.int? protocolVersion,
     $core.String? clientName,
+    $core.bool? sharedBuffers,
   }) {
     final result = ClientHello._();
     if (protocolVersion != null) result.protocolVersion = protocolVersion;
     if (clientName != null) result.clientName = clientName;
+    if (sharedBuffers != null) result.sharedBuffers = sharedBuffers;
     return result;
   }
 
@@ -48,6 +50,7 @@ class ClientHello extends $pb.GeneratedMessage {
     ..aI(1, _omitFieldNames ? '' : 'protocolVersion',
         fieldType: $pb.PbFieldType.OU3)
     ..aOS(2, _omitFieldNames ? '' : 'clientName')
+    ..aOB(3, _omitFieldNames ? '' : 'sharedBuffers')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -89,6 +92,75 @@ class ClientHello extends $pb.GeneratedMessage {
   $core.bool hasClientName() => $_has(1);
   @$pb.TagNumber(2)
   void clearClientName() => $_clearField(2);
+
+  /// The client can take frames from shared buffers whose file descriptors
+  /// ride along the SharedBuffers message (Unix sockets only).
+  @$pb.TagNumber(3)
+  $core.bool get sharedBuffers => $_getBF(2);
+  @$pb.TagNumber(3)
+  set sharedBuffers($core.bool value) => $_setBool(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasSharedBuffers() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearSharedBuffers() => $_clearField(3);
+}
+
+/// Gives a shared buffer back to the runner once its pixels were read.
+class ReleaseBuffer extends $pb.GeneratedMessage {
+  factory ReleaseBuffer({
+    $core.int? index,
+  }) {
+    final result = ReleaseBuffer._();
+    if (index != null) result.index = index;
+    return result;
+  }
+
+  ReleaseBuffer._();
+
+  factory ReleaseBuffer.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ReleaseBuffer()..mergeFromBuffer(data, registry);
+  factory ReleaseBuffer.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ReleaseBuffer()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ReleaseBuffer',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
+      createEmptyInstance: ReleaseBuffer.$_createMessage)
+    ..aI(1, _omitFieldNames ? '' : 'index', fieldType: $pb.PbFieldType.OU3)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ReleaseBuffer clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ReleaseBuffer copyWith(void Function(ReleaseBuffer) updates) =>
+      super.copyWith((message) => updates(message as ReleaseBuffer))
+          as ReleaseBuffer;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ReleaseBuffer() / ReleaseBuffer.new instead')
+  static ReleaseBuffer create() => ReleaseBuffer._();
+  static $pb.GeneratedMessage $_createMessage() => ReleaseBuffer._();
+  @$core.override
+  ReleaseBuffer createEmptyInstance() => ReleaseBuffer._();
+  @$core.pragma('dart2js:noInline')
+  static ReleaseBuffer getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ReleaseBuffer>(
+          ReleaseBuffer.$_createMessage);
+  static ReleaseBuffer? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.int get index => $_getIZ(0);
+  @$pb.TagNumber(1)
+  set index($core.int value) => $_setUnsignedInt32(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasIndex() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearIndex() => $_clearField(1);
 }
 
 class Resize extends $pb.GeneratedMessage {
@@ -580,6 +652,7 @@ enum ClientMessage_Message {
   key,
   shutdown,
   platformResponse,
+  releaseBuffer,
   notSet
 }
 
@@ -591,6 +664,7 @@ class ClientMessage extends $pb.GeneratedMessage {
     KeyEvent? key,
     Shutdown? shutdown,
     PlatformResponse? platformResponse,
+    ReleaseBuffer? releaseBuffer,
   }) {
     final result = ClientMessage._();
     if (hello != null) result.hello = hello;
@@ -599,6 +673,7 @@ class ClientMessage extends $pb.GeneratedMessage {
     if (key != null) result.key = key;
     if (shutdown != null) result.shutdown = shutdown;
     if (platformResponse != null) result.platformResponse = platformResponse;
+    if (releaseBuffer != null) result.releaseBuffer = releaseBuffer;
     return result;
   }
 
@@ -619,13 +694,14 @@ class ClientMessage extends $pb.GeneratedMessage {
     4: ClientMessage_Message.key,
     5: ClientMessage_Message.shutdown,
     6: ClientMessage_Message.platformResponse,
+    7: ClientMessage_Message.releaseBuffer,
     0: ClientMessage_Message.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'ClientMessage',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
       createEmptyInstance: ClientMessage.$_createMessage)
-    ..oo(0, [1, 2, 3, 4, 5, 6])
+    ..oo(0, [1, 2, 3, 4, 5, 6, 7])
     ..aOM<ClientHello>(1, _omitFieldNames ? '' : 'hello',
         subBuilder: ClientHello.$_createMessage)
     ..aOM<Resize>(2, _omitFieldNames ? '' : 'resize',
@@ -638,6 +714,8 @@ class ClientMessage extends $pb.GeneratedMessage {
         subBuilder: Shutdown.$_createMessage)
     ..aOM<PlatformResponse>(6, _omitFieldNames ? '' : 'platformResponse',
         subBuilder: PlatformResponse.$_createMessage)
+    ..aOM<ReleaseBuffer>(7, _omitFieldNames ? '' : 'releaseBuffer',
+        subBuilder: ReleaseBuffer.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -668,6 +746,7 @@ class ClientMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   @$pb.TagNumber(5)
   @$pb.TagNumber(6)
+  @$pb.TagNumber(7)
   ClientMessage_Message whichMessage() =>
       _ClientMessage_MessageByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(1)
@@ -676,6 +755,7 @@ class ClientMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   @$pb.TagNumber(5)
   @$pb.TagNumber(6)
+  @$pb.TagNumber(7)
   void clearMessage() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -743,6 +823,17 @@ class ClientMessage extends $pb.GeneratedMessage {
   void clearPlatformResponse() => $_clearField(6);
   @$pb.TagNumber(6)
   PlatformResponse ensurePlatformResponse() => $_ensure(5);
+
+  @$pb.TagNumber(7)
+  ReleaseBuffer get releaseBuffer => $_getN(6);
+  @$pb.TagNumber(7)
+  set releaseBuffer(ReleaseBuffer value) => $_setField(7, value);
+  @$pb.TagNumber(7)
+  $core.bool hasReleaseBuffer() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearReleaseBuffer() => $_clearField(7);
+  @$pb.TagNumber(7)
+  ReleaseBuffer ensureReleaseBuffer() => $_ensure(6);
 }
 
 class RunnerHello extends $pb.GeneratedMessage {
@@ -815,6 +906,8 @@ class RunnerHello extends $pb.GeneratedMessage {
   void clearEngineRevision() => $_clearField(2);
 }
 
+/// A frame carries its pixels inline, or names the shared buffer that holds
+/// them; then pixels is empty and the client releases the buffer when done.
 class Frame extends $pb.GeneratedMessage {
   factory Frame({
     $fixnum.Int64? sequence,
@@ -824,6 +917,8 @@ class Frame extends $pb.GeneratedMessage {
     PixelFormat? format,
     $core.List<$core.int>? pixels,
     $fixnum.Int64? timestampMicros,
+    $core.bool? inSharedBuffer,
+    $core.int? bufferIndex,
   }) {
     final result = Frame._();
     if (sequence != null) result.sequence = sequence;
@@ -833,6 +928,8 @@ class Frame extends $pb.GeneratedMessage {
     if (format != null) result.format = format;
     if (pixels != null) result.pixels = pixels;
     if (timestampMicros != null) result.timestampMicros = timestampMicros;
+    if (inSharedBuffer != null) result.inSharedBuffer = inSharedBuffer;
+    if (bufferIndex != null) result.bufferIndex = bufferIndex;
     return result;
   }
 
@@ -862,6 +959,9 @@ class Frame extends $pb.GeneratedMessage {
     ..a<$fixnum.Int64>(
         7, _omitFieldNames ? '' : 'timestampMicros', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aOB(8, _omitFieldNames ? '' : 'inSharedBuffer')
+    ..aI(9, _omitFieldNames ? '' : 'bufferIndex',
+        fieldType: $pb.PbFieldType.OU3)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -946,6 +1046,96 @@ class Frame extends $pb.GeneratedMessage {
   $core.bool hasTimestampMicros() => $_has(6);
   @$pb.TagNumber(7)
   void clearTimestampMicros() => $_clearField(7);
+
+  @$pb.TagNumber(8)
+  $core.bool get inSharedBuffer => $_getBF(7);
+  @$pb.TagNumber(8)
+  set inSharedBuffer($core.bool value) => $_setBool(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasInSharedBuffer() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearInSharedBuffer() => $_clearField(8);
+
+  @$pb.TagNumber(9)
+  $core.int get bufferIndex => $_getIZ(8);
+  @$pb.TagNumber(9)
+  set bufferIndex($core.int value) => $_setUnsignedInt32(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasBufferIndex() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearBufferIndex() => $_clearField(9);
+}
+
+/// A set of same-sized shared buffers. Their file descriptors travel with this
+/// message as ancillary data, in index order. Replaces any earlier set.
+class SharedBuffers extends $pb.GeneratedMessage {
+  factory SharedBuffers({
+    $core.int? count,
+    $fixnum.Int64? size,
+  }) {
+    final result = SharedBuffers._();
+    if (count != null) result.count = count;
+    if (size != null) result.size = size;
+    return result;
+  }
+
+  SharedBuffers._();
+
+  factory SharedBuffers.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SharedBuffers()..mergeFromBuffer(data, registry);
+  factory SharedBuffers.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SharedBuffers()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SharedBuffers',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
+      createEmptyInstance: SharedBuffers.$_createMessage)
+    ..aI(1, _omitFieldNames ? '' : 'count', fieldType: $pb.PbFieldType.OU3)
+    ..a<$fixnum.Int64>(2, _omitFieldNames ? '' : 'size', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SharedBuffers clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SharedBuffers copyWith(void Function(SharedBuffers) updates) =>
+      super.copyWith((message) => updates(message as SharedBuffers))
+          as SharedBuffers;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SharedBuffers() / SharedBuffers.new instead')
+  static SharedBuffers create() => SharedBuffers._();
+  static $pb.GeneratedMessage $_createMessage() => SharedBuffers._();
+  @$core.override
+  SharedBuffers createEmptyInstance() => SharedBuffers._();
+  @$core.pragma('dart2js:noInline')
+  static SharedBuffers getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SharedBuffers>(
+          SharedBuffers.$_createMessage);
+  static SharedBuffers? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.int get count => $_getIZ(0);
+  @$pb.TagNumber(1)
+  set count($core.int value) => $_setUnsignedInt32(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasCount() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearCount() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $fixnum.Int64 get size => $_getI64(1);
+  @$pb.TagNumber(2)
+  set size($fixnum.Int64 value) => $_setInt64(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasSize() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearSize() => $_clearField(2);
 }
 
 class VmService extends $pb.GeneratedMessage {
@@ -1219,6 +1409,7 @@ enum RunnerMessage_Message {
   log,
   exited,
   platformMessage,
+  sharedBuffers,
   notSet
 }
 
@@ -1230,6 +1421,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
     LogLine? log,
     Exited? exited,
     PlatformMessage? platformMessage,
+    SharedBuffers? sharedBuffers,
   }) {
     final result = RunnerMessage._();
     if (hello != null) result.hello = hello;
@@ -1238,6 +1430,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
     if (log != null) result.log = log;
     if (exited != null) result.exited = exited;
     if (platformMessage != null) result.platformMessage = platformMessage;
+    if (sharedBuffers != null) result.sharedBuffers = sharedBuffers;
     return result;
   }
 
@@ -1258,13 +1451,14 @@ class RunnerMessage extends $pb.GeneratedMessage {
     4: RunnerMessage_Message.log,
     5: RunnerMessage_Message.exited,
     6: RunnerMessage_Message.platformMessage,
+    7: RunnerMessage_Message.sharedBuffers,
     0: RunnerMessage_Message.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'RunnerMessage',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
       createEmptyInstance: RunnerMessage.$_createMessage)
-    ..oo(0, [1, 2, 3, 4, 5, 6])
+    ..oo(0, [1, 2, 3, 4, 5, 6, 7])
     ..aOM<RunnerHello>(1, _omitFieldNames ? '' : 'hello',
         subBuilder: RunnerHello.$_createMessage)
     ..aOM<Frame>(2, _omitFieldNames ? '' : 'frame',
@@ -1277,6 +1471,8 @@ class RunnerMessage extends $pb.GeneratedMessage {
         subBuilder: Exited.$_createMessage)
     ..aOM<PlatformMessage>(6, _omitFieldNames ? '' : 'platformMessage',
         subBuilder: PlatformMessage.$_createMessage)
+    ..aOM<SharedBuffers>(7, _omitFieldNames ? '' : 'sharedBuffers',
+        subBuilder: SharedBuffers.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1307,6 +1503,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   @$pb.TagNumber(5)
   @$pb.TagNumber(6)
+  @$pb.TagNumber(7)
   RunnerMessage_Message whichMessage() =>
       _RunnerMessage_MessageByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(1)
@@ -1315,6 +1512,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   @$pb.TagNumber(5)
   @$pb.TagNumber(6)
+  @$pb.TagNumber(7)
   void clearMessage() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -1382,6 +1580,17 @@ class RunnerMessage extends $pb.GeneratedMessage {
   void clearPlatformMessage() => $_clearField(6);
   @$pb.TagNumber(6)
   PlatformMessage ensurePlatformMessage() => $_ensure(5);
+
+  @$pb.TagNumber(7)
+  SharedBuffers get sharedBuffers => $_getN(6);
+  @$pb.TagNumber(7)
+  set sharedBuffers(SharedBuffers value) => $_setField(7, value);
+  @$pb.TagNumber(7)
+  $core.bool hasSharedBuffers() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearSharedBuffers() => $_clearField(7);
+  @$pb.TagNumber(7)
+  SharedBuffers ensureSharedBuffers() => $_ensure(6);
 }
 
 const $core.bool _omitFieldNames =
