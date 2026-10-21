@@ -26,11 +26,13 @@ class ClientHello extends $pb.GeneratedMessage {
     $core.int? protocolVersion,
     $core.String? clientName,
     $core.bool? sharedBuffers,
+    $core.int? pid,
   }) {
     final result = ClientHello._();
     if (protocolVersion != null) result.protocolVersion = protocolVersion;
     if (clientName != null) result.clientName = clientName;
     if (sharedBuffers != null) result.sharedBuffers = sharedBuffers;
+    if (pid != null) result.pid = pid;
     return result;
   }
 
@@ -51,6 +53,7 @@ class ClientHello extends $pb.GeneratedMessage {
         fieldType: $pb.PbFieldType.OU3)
     ..aOS(2, _omitFieldNames ? '' : 'clientName')
     ..aOB(3, _omitFieldNames ? '' : 'sharedBuffers')
+    ..aI(4, _omitFieldNames ? '' : 'pid', fieldType: $pb.PbFieldType.OU3)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -103,6 +106,15 @@ class ClientHello extends $pb.GeneratedMessage {
   $core.bool hasSharedBuffers() => $_has(2);
   @$pb.TagNumber(3)
   void clearSharedBuffers() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.int get pid => $_getIZ(3);
+  @$pb.TagNumber(4)
+  set pid($core.int value) => $_setUnsignedInt32(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasPid() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearPid() => $_clearField(4);
 }
 
 /// Gives a shared buffer back to the runner once its pixels were read.
@@ -1415,6 +1427,62 @@ class PlatformMessage extends $pb.GeneratedMessage {
   void clearData() => $_clearField(3);
 }
 
+/// The runner has a client already; the connection closes after this.
+class Busy extends $pb.GeneratedMessage {
+  factory Busy({
+    $core.int? pid,
+  }) {
+    final result = Busy._();
+    if (pid != null) result.pid = pid;
+    return result;
+  }
+
+  Busy._();
+
+  factory Busy.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      Busy()..mergeFromBuffer(data, registry);
+  factory Busy.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      Busy()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'Busy',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
+      createEmptyInstance: Busy.$_createMessage)
+    ..aI(1, _omitFieldNames ? '' : 'pid', fieldType: $pb.PbFieldType.OU3)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Busy clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Busy copyWith(void Function(Busy) updates) =>
+      super.copyWith((message) => updates(message as Busy)) as Busy;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Busy() / Busy.new instead')
+  static Busy create() => Busy._();
+  static $pb.GeneratedMessage $_createMessage() => Busy._();
+  @$core.override
+  Busy createEmptyInstance() => Busy._();
+  @$core.pragma('dart2js:noInline')
+  static Busy getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Busy>(Busy.$_createMessage);
+  static Busy? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.int get pid => $_getIZ(0);
+  @$pb.TagNumber(1)
+  set pid($core.int value) => $_setUnsignedInt32(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasPid() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearPid() => $_clearField(1);
+}
+
 enum RunnerMessage_Message {
   hello,
   frame,
@@ -1423,6 +1491,7 @@ enum RunnerMessage_Message {
   exited,
   platformMessage,
   sharedBuffers,
+  busy,
   notSet
 }
 
@@ -1435,6 +1504,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
     Exited? exited,
     PlatformMessage? platformMessage,
     SharedBuffers? sharedBuffers,
+    Busy? busy,
   }) {
     final result = RunnerMessage._();
     if (hello != null) result.hello = hello;
@@ -1444,6 +1514,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
     if (exited != null) result.exited = exited;
     if (platformMessage != null) result.platformMessage = platformMessage;
     if (sharedBuffers != null) result.sharedBuffers = sharedBuffers;
+    if (busy != null) result.busy = busy;
     return result;
   }
 
@@ -1465,13 +1536,14 @@ class RunnerMessage extends $pb.GeneratedMessage {
     5: RunnerMessage_Message.exited,
     6: RunnerMessage_Message.platformMessage,
     7: RunnerMessage_Message.sharedBuffers,
+    8: RunnerMessage_Message.busy,
     0: RunnerMessage_Message.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'RunnerMessage',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
       createEmptyInstance: RunnerMessage.$_createMessage)
-    ..oo(0, [1, 2, 3, 4, 5, 6, 7])
+    ..oo(0, [1, 2, 3, 4, 5, 6, 7, 8])
     ..aOM<RunnerHello>(1, _omitFieldNames ? '' : 'hello',
         subBuilder: RunnerHello.$_createMessage)
     ..aOM<Frame>(2, _omitFieldNames ? '' : 'frame',
@@ -1486,6 +1558,8 @@ class RunnerMessage extends $pb.GeneratedMessage {
         subBuilder: PlatformMessage.$_createMessage)
     ..aOM<SharedBuffers>(7, _omitFieldNames ? '' : 'sharedBuffers',
         subBuilder: SharedBuffers.$_createMessage)
+    ..aOM<Busy>(8, _omitFieldNames ? '' : 'busy',
+        subBuilder: Busy.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1517,6 +1591,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(5)
   @$pb.TagNumber(6)
   @$pb.TagNumber(7)
+  @$pb.TagNumber(8)
   RunnerMessage_Message whichMessage() =>
       _RunnerMessage_MessageByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(1)
@@ -1526,6 +1601,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(5)
   @$pb.TagNumber(6)
   @$pb.TagNumber(7)
+  @$pb.TagNumber(8)
   void clearMessage() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -1604,6 +1680,17 @@ class RunnerMessage extends $pb.GeneratedMessage {
   void clearSharedBuffers() => $_clearField(7);
   @$pb.TagNumber(7)
   SharedBuffers ensureSharedBuffers() => $_ensure(6);
+
+  @$pb.TagNumber(8)
+  Busy get busy => $_getN(7);
+  @$pb.TagNumber(8)
+  set busy(Busy value) => $_setField(8, value);
+  @$pb.TagNumber(8)
+  $core.bool hasBusy() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearBusy() => $_clearField(8);
+  @$pb.TagNumber(8)
+  Busy ensureBusy() => $_ensure(7);
 }
 
 const $core.bool _omitFieldNames =

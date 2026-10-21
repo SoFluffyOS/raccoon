@@ -89,6 +89,7 @@ const ClientHello$json = {
     {'1': 'protocol_version', '3': 1, '4': 1, '5': 13, '10': 'protocolVersion'},
     {'1': 'client_name', '3': 2, '4': 1, '5': 9, '10': 'clientName'},
     {'1': 'shared_buffers', '3': 3, '4': 1, '5': 8, '10': 'sharedBuffers'},
+    {'1': 'pid', '3': 4, '4': 1, '5': 13, '10': 'pid'},
   ],
 };
 
@@ -96,7 +97,7 @@ const ClientHello$json = {
 final $typed_data.Uint8List clientHelloDescriptor = $convert.base64Decode(
     'CgtDbGllbnRIZWxsbxIpChBwcm90b2NvbF92ZXJzaW9uGAEgASgNUg9wcm90b2NvbFZlcnNpb2'
     '4SHwoLY2xpZW50X25hbWUYAiABKAlSCmNsaWVudE5hbWUSJQoOc2hhcmVkX2J1ZmZlcnMYAyAB'
-    'KAhSDXNoYXJlZEJ1ZmZlcnM=');
+    'KAhSDXNoYXJlZEJ1ZmZlcnMSEAoDcGlkGAQgASgNUgNwaWQ=');
 
 @$core.Deprecated('Use releaseBufferDescriptor instead')
 const ReleaseBuffer$json = {
@@ -413,6 +414,18 @@ final $typed_data.Uint8List platformMessageDescriptor = $convert.base64Decode(
     'Cg9QbGF0Zm9ybU1lc3NhZ2USHwoLcmVzcG9uc2VfaWQYASABKARSCnJlc3BvbnNlSWQSGAoHY2'
     'hhbm5lbBgCIAEoCVIHY2hhbm5lbBISCgRkYXRhGAMgASgMUgRkYXRh');
 
+@$core.Deprecated('Use busyDescriptor instead')
+const Busy$json = {
+  '1': 'Busy',
+  '2': [
+    {'1': 'pid', '3': 1, '4': 1, '5': 13, '10': 'pid'},
+  ],
+};
+
+/// Descriptor for `Busy`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List busyDescriptor =
+    $convert.base64Decode('CgRCdXN5EhAKA3BpZBgBIAEoDVIDcGlk');
+
 @$core.Deprecated('Use runnerMessageDescriptor instead')
 const RunnerMessage$json = {
   '1': 'RunnerMessage',
@@ -480,6 +493,15 @@ const RunnerMessage$json = {
       '9': 0,
       '10': 'sharedBuffers'
     },
+    {
+      '1': 'busy',
+      '3': 8,
+      '4': 1,
+      '5': 11,
+      '6': '.raccoon.v1.Busy',
+      '9': 0,
+      '10': 'busy'
+    },
   ],
   '8': [
     {'1': 'message'},
@@ -495,4 +517,4 @@ final $typed_data.Uint8List runnerMessageDescriptor = $convert.base64Decode(
     'LnJhY2Nvb24udjEuRXhpdGVkSABSBmV4aXRlZBJIChBwbGF0Zm9ybV9tZXNzYWdlGAYgASgLMh'
     'sucmFjY29vbi52MS5QbGF0Zm9ybU1lc3NhZ2VIAFIPcGxhdGZvcm1NZXNzYWdlEkIKDnNoYXJl'
     'ZF9idWZmZXJzGAcgASgLMhkucmFjY29vbi52MS5TaGFyZWRCdWZmZXJzSABSDXNoYXJlZEJ1Zm'
-    'ZlcnNCCQoHbWVzc2FnZQ==');
+    'ZlcnMSJgoEYnVzeRgIIAEoCzIQLnJhY2Nvb24udjEuQnVzeUgAUgRidXN5QgkKB21lc3NhZ2U=');
