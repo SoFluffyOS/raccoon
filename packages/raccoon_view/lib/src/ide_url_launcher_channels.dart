@@ -1,10 +1,13 @@
 import 'package:flutter/services.dart';
 import 'package:raccoon_runtime/raccoon_runtime.dart';
+import 'package:raccoon_view/src/url_launcher_macos_codec.dart';
 import 'package:url_launcher/url_launcher.dart' as launcher;
 
 /// Opens the hosted app's URLs with this process's launcher. Serves the
-/// Pigeon channels of `url_launcher_linux`, so the plugin's Dart side works
-/// in the runtime without its native half.
+/// Pigeon channels of `url_launcher_linux` and `url_launcher_macos`, so the
+/// plugin's Dart side works in the runtime without its native half. The two
+/// APIs differ only in their replies: Linux answers a bool and an error
+/// string, macOS a result object.
 final class IdeUrlLauncherChannels {
   IdeUrlLauncherChannels({
     Future<bool> Function(Uri url)? canLaunch,
@@ -17,42 +20,69 @@ final class IdeUrlLauncherChannels {
              mode: launcher.LaunchMode.externalApplication,
            ));
 
-  static const String canLaunchChannel =
+  static const String linuxCanLaunchChannel =
       'dev.flutter.pigeon.url_launcher_linux.UrlLauncherApi.canLaunchUrl';
-  static const String launchChannel =
+  static const String linuxLaunchChannel =
       'dev.flutter.pigeon.url_launcher_linux.UrlLauncherApi.launchUrl';
+  static const String macosCanLaunchChannel =
+      'dev.flutter.pigeon.url_launcher_macos.UrlLauncherApi.canLaunchUrl';
+  static const String macosLaunchChannel =
+      'dev.flutter.pigeon.url_launcher_macos.UrlLauncherApi.launchUrl';
+
+  static const _invalidUrl = UrlLauncherMacosResult(false, invalidUrl: true);
 
   final Future<bool> Function(Uri url) _canLaunch;
   final Future<bool> Function(Uri url) _launch;
-  final MessageCodec<Object?> _codec = const StandardMessageCodec();
+  final MessageCodec<Object?> _linuxCodec = const StandardMessageCodec();
+  final MessageCodec<Object?> _macosCodec = const UrlLauncherMacosCodec();
 
   void register(RunnerClient client) {
-    client.registerChannel(canLaunchChannel, handleCanLaunch);
-    client.registerChannel(launchChannel, handleLaunch);
+    client
+      ..registerChannel(linuxCanLaunchChannel, handleLinuxCanLaunch)
+      ..registerChannel(linuxLaunchChannel, handleLinuxLaunch)
+      ..registerChannel(macosCanLaunchChannel, handleMacosCanLaunch)
+      ..registerChannel(macosLaunchChannel, handleMacosLaunch);
   }
 
-  Future<Uint8List?> handleCanLaunch(Uint8List data) async {
+  Future<Uint8List?> handleLinuxCanLaunch(Uint8List data) async {
     final url = _url(data);
-    if (url == null) return _reply(['bad-url', 'not a url', null]);
-    return _reply([await _canLaunch(url)]);
+    if (url == null) return _reply(_linuxCodec, ['bad-url', 'not a url', null]);
+    return _reply(_linuxCodec, [await _canLaunch(url)]);
   }
 
   /// Pigeon's launchUrl returns null on success, else an error message.
-  Future<Uint8List?> handleLaunch(Uint8List data) async {
+  Future<Uint8List?> handleLinuxLaunch(Uint8List data) async {
     final url = _url(data);
-    if (url == null) return _reply(['bad-url', 'not a url', null]);
+    if (url == null) return _reply(_linuxCodec, ['bad-url', 'not a url', null]);
     final launched = await _launch(url);
-    return _reply([launched ? null : 'could not launch $url']);
+    return _reply(_linuxCodec, [
+      switch (launched) {
+        true => null,
+        false => 'could not launch $url',
+      },
+    ]);
+  }
+
+  Future<Uint8List?> handleMacosCanLaunch(Uint8List data) async {
+    final url = _url(data);
+    if (url == null) return _reply(_macosCodec, [_invalidUrl]);
+    return _reply(_macosCodec, [UrlLauncherMacosResult(await _canLaunch(url))]);
+  }
+
+  Future<Uint8List?> handleMacosLaunch(Uint8List data) async {
+    final url = _url(data);
+    if (url == null) return _reply(_macosCodec, [_invalidUrl]);
+    return _reply(_macosCodec, [UrlLauncherMacosResult(await _launch(url))]);
   }
 
   Uri? _url(Uint8List data) {
-    final decoded = _codec.decodeMessage(ByteData.sublistView(data));
+    final decoded = _linuxCodec.decodeMessage(ByteData.sublistView(data));
     if (decoded case [final String url, ...]) return Uri.tryParse(url);
     return null;
   }
 
-  Uint8List _reply(List<Object?> envelope) {
-    final encoded = _codec.encodeMessage(envelope);
+  Uint8List _reply(MessageCodec<Object?> codec, List<Object?> envelope) {
+    final encoded = codec.encodeMessage(envelope);
     if (encoded == null) return Uint8List(0);
     return encoded.buffer.asUint8List(
       encoded.offsetInBytes,
