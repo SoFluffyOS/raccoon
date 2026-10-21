@@ -71,7 +71,7 @@ app_key() {
 
 # Prefixes each line with the time of day, to the millisecond.
 stamp() {
-  perl -pe 'use Time::HiRes qw(time); my $t = time; my @l = localtime($t);
+  perl -pe 'BEGIN { $| = 1 } use Time::HiRes qw(time); my $t = time; my @l = localtime($t);
             $_ = sprintf("%02d:%02d:%06.3f ", $l[2], $l[1], $l[0] + $t - int($t)) . $_'
 }
 
