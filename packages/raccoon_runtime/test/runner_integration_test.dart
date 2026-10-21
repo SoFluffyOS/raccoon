@@ -249,17 +249,18 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
-  // example/window calls desktop_window, window_manager and window_size at
-  // startup and shows a green box only when every answer was right.
-  final windowAssets = p.join(
+  // example/channels calls desktop_window, window_manager, window_size and
+  // shared_preferences_foundation at startup and shows a green box only when
+  // every answer was right.
+  final channelsAssets = p.join(
     runnerDir,
     'example',
-    'window',
+    'channels',
     'build',
     'flutter_assets',
   );
   test(
-    'the runner answers the window channels itself',
+    'the runner answers the window and shared preferences channels itself',
     () async {
       final temp = Directory.systemTemp.createTempSync('raccoon_test');
       final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
@@ -267,7 +268,7 @@ void main() {
         RunnerLaunch(
           runnerBinary: binary ?? '',
           engineDir: engineDir ?? '',
-          assets: windowAssets,
+          assets: channelsAssets,
           icuData: icu ?? '',
           endpoint: endpoint,
         ),
@@ -278,6 +279,8 @@ void main() {
         'desktop_window',
         'window_manager',
         'flutter/windowsize',
+        'dev.flutter.pigeon.shared_preferences_foundation.LegacyUserDefaultsApi.getAll',
+        'dev.flutter.pigeon.shared_preferences_foundation.UserDefaultsApi.getValue',
       ]) {
         client.registerChannel(channel, (data) async {
           forwarded.add(channel);
@@ -292,7 +295,7 @@ void main() {
         expect(
           _pixel(frame, 400, 300),
           _green,
-          reason: 'a window channel call failed; the runner logs which',
+          reason: 'a channel call failed; the app logs which',
         );
         expect(forwarded, isEmpty);
       } finally {
@@ -302,9 +305,9 @@ void main() {
         temp.deleteSync(recursive: true);
       }
     },
-    skip: ready && Directory(windowAssets).existsSync()
+    skip: ready && Directory(channelsAssets).existsSync()
         ? false
-        : 'build the runner and example/window first',
+        : 'build the runner and example/channels first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
 }
