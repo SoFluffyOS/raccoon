@@ -4,6 +4,13 @@ project(raccoon_runner CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# The runner's version, one line in VERSION: what --version prints, what the
+# release archives are named after (tool/package.sh), and what the Simulator
+# matches a prebuilt runner against. Semantic versioning; a -pre.N suffix
+# marks a prerelease.
+file(READ ${CMAKE_SOURCE_DIR}/VERSION RACCOON_RUNNER_VERSION)
+string(STRIP "${RACCOON_RUNNER_VERSION}" RACCOON_RUNNER_VERSION)
+
 # The runtime directory for the engine revision in use: flutter_embedder.h
 # next to libflutter_engine.so on Linux, FlutterEmbedder.framework on macOS.
 # The engine library itself is loaded at run time with --engine-dir, so one
@@ -75,6 +82,7 @@ add_executable(raccoon_runner
   src/window_channels.cc
 )
 target_include_directories(raccoon_runner PRIVATE ${RACCOON_EMBEDDER_INCLUDE_DIR} src)
+target_compile_definitions(raccoon_runner PRIVATE RACCOON_RUNNER_VERSION="${RACCOON_RUNNER_VERSION}")
 target_compile_options(raccoon_runner PRIVATE -Wall -Wextra)
 find_package(Threads REQUIRED)
 target_link_libraries(raccoon_runner PRIVATE raccoon_proto ${CMAKE_DL_LIBS} Threads::Threads)

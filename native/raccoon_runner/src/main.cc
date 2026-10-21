@@ -2,6 +2,7 @@
 //
 //   raccoon_runner render --engine-dir DIR --assets DIR --icu FILE [--out F]
 //   raccoon_runner serve  --engine-dir DIR --assets DIR --icu FILE --socket P
+//   raccoon_runner --version
 
 #include <unistd.h>
 
@@ -43,6 +44,7 @@ void Usage() {
                " --icu FILE [--out F] [--frames N] [--timeout-ms N] [--rgba]\n"
                "       raccoon_runner serve --engine-dir DIR --assets DIR"
                " --icu FILE --socket PATH\n"
+               "       raccoon_runner --version\n"
                "common: [--width N] [--height N] [--dpr X] [--data-dir DIR]"
                " [-- engine switches...]\n");
 }
@@ -395,6 +397,10 @@ int Serve(const Options& options) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  if (argc == 2 && std::strcmp(argv[1], "--version") == 0) {
+    std::printf("%s\n", RACCOON_RUNNER_VERSION);
+    return 0;
+  }
   Options options;
   if (!ParseOptions(argc, argv, &options)) {
     Usage();
