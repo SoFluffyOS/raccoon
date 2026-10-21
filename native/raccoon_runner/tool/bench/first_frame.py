@@ -54,21 +54,26 @@ def run(project, flutter, device, clean, timeout):
                 if event == 'app.started':
                     marks.setdefault('app.started', time.time() - t0)
 
-    threading.Thread(target=reader, daemon=True).start()
-    ok = done.wait(timeout)
-    if app_id[0]:
+    reading = threading.Thread(target=reader, daemon=True)
+    reading.start()
+    # Stop waiting as soon as flutter run exits, for example when the build fails.
+    deadline = time.time() + timeout
+    while not done.is_set() and time.time() < deadline and reading.is_alive():
+        done.wait(0.2)
+    ok = done.is_set()
+    if app_id[0] and p.poll() is None:
         try:
             p.stdin.write(json.dumps([{'id': 1, 'method': 'app.stop',
                                        'params': {'appId': app_id[0]}}]) + '\n')
             p.stdin.flush()
-        except OSError:
+        except (OSError, ValueError):
             pass
     try:
         p.wait(timeout=60)
     except subprocess.TimeoutExpired:
         p.kill()
     if not ok:
-        print(f'{device}: no first frame within {timeout}s; last lines:', flush=True)
+        print(f'{device}: no first frame (the run ended or {timeout}s passed); last lines:', flush=True)
         print('\n'.join(raw[-15:]), flush=True)
         return None
     return marks
