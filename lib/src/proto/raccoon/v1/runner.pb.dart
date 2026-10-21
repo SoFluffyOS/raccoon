@@ -487,7 +487,101 @@ class Shutdown extends $pb.GeneratedMessage {
   static Shutdown? _defaultInstance;
 }
 
-enum ClientMessage_Message { hello, resize, pointer, key, shutdown, notSet }
+/// Answers a PlatformMessage. handled=false means "no plugin": the app sees
+/// a null reply, as it would on a desktop without that plugin.
+class PlatformResponse extends $pb.GeneratedMessage {
+  factory PlatformResponse({
+    $fixnum.Int64? responseId,
+    $core.bool? handled,
+    $core.List<$core.int>? data,
+  }) {
+    final result = PlatformResponse._();
+    if (responseId != null) result.responseId = responseId;
+    if (handled != null) result.handled = handled;
+    if (data != null) result.data = data;
+    return result;
+  }
+
+  PlatformResponse._();
+
+  factory PlatformResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      PlatformResponse()..mergeFromBuffer(data, registry);
+  factory PlatformResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      PlatformResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'PlatformResponse',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
+      createEmptyInstance: PlatformResponse.$_createMessage)
+    ..a<$fixnum.Int64>(
+        1, _omitFieldNames ? '' : 'responseId', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aOB(2, _omitFieldNames ? '' : 'handled')
+    ..a<$core.List<$core.int>>(
+        3, _omitFieldNames ? '' : 'data', $pb.PbFieldType.OY)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  PlatformResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  PlatformResponse copyWith(void Function(PlatformResponse) updates) =>
+      super.copyWith((message) => updates(message as PlatformResponse))
+          as PlatformResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use PlatformResponse() / PlatformResponse.new instead')
+  static PlatformResponse create() => PlatformResponse._();
+  static $pb.GeneratedMessage $_createMessage() => PlatformResponse._();
+  @$core.override
+  PlatformResponse createEmptyInstance() => PlatformResponse._();
+  @$core.pragma('dart2js:noInline')
+  static PlatformResponse getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<PlatformResponse>(
+          PlatformResponse.$_createMessage);
+  static PlatformResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $fixnum.Int64 get responseId => $_getI64(0);
+  @$pb.TagNumber(1)
+  set responseId($fixnum.Int64 value) => $_setInt64(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasResponseId() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearResponseId() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.bool get handled => $_getBF(1);
+  @$pb.TagNumber(2)
+  set handled($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasHandled() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearHandled() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.List<$core.int> get data => $_getN(2);
+  @$pb.TagNumber(3)
+  set data($core.List<$core.int> value) => $_setBytes(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasData() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearData() => $_clearField(3);
+}
+
+enum ClientMessage_Message {
+  hello,
+  resize,
+  pointer,
+  key,
+  shutdown,
+  platformResponse,
+  notSet
+}
 
 class ClientMessage extends $pb.GeneratedMessage {
   factory ClientMessage({
@@ -496,6 +590,7 @@ class ClientMessage extends $pb.GeneratedMessage {
     PointerEvent? pointer,
     KeyEvent? key,
     Shutdown? shutdown,
+    PlatformResponse? platformResponse,
   }) {
     final result = ClientMessage._();
     if (hello != null) result.hello = hello;
@@ -503,6 +598,7 @@ class ClientMessage extends $pb.GeneratedMessage {
     if (pointer != null) result.pointer = pointer;
     if (key != null) result.key = key;
     if (shutdown != null) result.shutdown = shutdown;
+    if (platformResponse != null) result.platformResponse = platformResponse;
     return result;
   }
 
@@ -522,13 +618,14 @@ class ClientMessage extends $pb.GeneratedMessage {
     3: ClientMessage_Message.pointer,
     4: ClientMessage_Message.key,
     5: ClientMessage_Message.shutdown,
+    6: ClientMessage_Message.platformResponse,
     0: ClientMessage_Message.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'ClientMessage',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
       createEmptyInstance: ClientMessage.$_createMessage)
-    ..oo(0, [1, 2, 3, 4, 5])
+    ..oo(0, [1, 2, 3, 4, 5, 6])
     ..aOM<ClientHello>(1, _omitFieldNames ? '' : 'hello',
         subBuilder: ClientHello.$_createMessage)
     ..aOM<Resize>(2, _omitFieldNames ? '' : 'resize',
@@ -539,6 +636,8 @@ class ClientMessage extends $pb.GeneratedMessage {
         subBuilder: KeyEvent.$_createMessage)
     ..aOM<Shutdown>(5, _omitFieldNames ? '' : 'shutdown',
         subBuilder: Shutdown.$_createMessage)
+    ..aOM<PlatformResponse>(6, _omitFieldNames ? '' : 'platformResponse',
+        subBuilder: PlatformResponse.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -568,6 +667,7 @@ class ClientMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   @$pb.TagNumber(4)
   @$pb.TagNumber(5)
+  @$pb.TagNumber(6)
   ClientMessage_Message whichMessage() =>
       _ClientMessage_MessageByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(1)
@@ -575,6 +675,7 @@ class ClientMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   @$pb.TagNumber(4)
   @$pb.TagNumber(5)
+  @$pb.TagNumber(6)
   void clearMessage() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -631,6 +732,17 @@ class ClientMessage extends $pb.GeneratedMessage {
   void clearShutdown() => $_clearField(5);
   @$pb.TagNumber(5)
   Shutdown ensureShutdown() => $_ensure(4);
+
+  @$pb.TagNumber(6)
+  PlatformResponse get platformResponse => $_getN(5);
+  @$pb.TagNumber(6)
+  set platformResponse(PlatformResponse value) => $_setField(6, value);
+  @$pb.TagNumber(6)
+  $core.bool hasPlatformResponse() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearPlatformResponse() => $_clearField(6);
+  @$pb.TagNumber(6)
+  PlatformResponse ensurePlatformResponse() => $_ensure(5);
 }
 
 class RunnerHello extends $pb.GeneratedMessage {
@@ -1013,7 +1125,102 @@ class Exited extends $pb.GeneratedMessage {
   void clearCode() => $_clearField(1);
 }
 
-enum RunnerMessage_Message { hello, frame, vmService, log, exited, notSet }
+/// A platform channel message the app sent, for the client to answer. The
+/// client serves channels the way a desktop embedder's plugins would; a
+/// response_id of 0 means the app expects no reply.
+class PlatformMessage extends $pb.GeneratedMessage {
+  factory PlatformMessage({
+    $fixnum.Int64? responseId,
+    $core.String? channel,
+    $core.List<$core.int>? data,
+  }) {
+    final result = PlatformMessage._();
+    if (responseId != null) result.responseId = responseId;
+    if (channel != null) result.channel = channel;
+    if (data != null) result.data = data;
+    return result;
+  }
+
+  PlatformMessage._();
+
+  factory PlatformMessage.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      PlatformMessage()..mergeFromBuffer(data, registry);
+  factory PlatformMessage.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      PlatformMessage()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'PlatformMessage',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
+      createEmptyInstance: PlatformMessage.$_createMessage)
+    ..a<$fixnum.Int64>(
+        1, _omitFieldNames ? '' : 'responseId', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aOS(2, _omitFieldNames ? '' : 'channel')
+    ..a<$core.List<$core.int>>(
+        3, _omitFieldNames ? '' : 'data', $pb.PbFieldType.OY)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  PlatformMessage clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  PlatformMessage copyWith(void Function(PlatformMessage) updates) =>
+      super.copyWith((message) => updates(message as PlatformMessage))
+          as PlatformMessage;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use PlatformMessage() / PlatformMessage.new instead')
+  static PlatformMessage create() => PlatformMessage._();
+  static $pb.GeneratedMessage $_createMessage() => PlatformMessage._();
+  @$core.override
+  PlatformMessage createEmptyInstance() => PlatformMessage._();
+  @$core.pragma('dart2js:noInline')
+  static PlatformMessage getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<PlatformMessage>(
+          PlatformMessage.$_createMessage);
+  static PlatformMessage? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $fixnum.Int64 get responseId => $_getI64(0);
+  @$pb.TagNumber(1)
+  set responseId($fixnum.Int64 value) => $_setInt64(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasResponseId() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearResponseId() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.String get channel => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set channel($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasChannel() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearChannel() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.List<$core.int> get data => $_getN(2);
+  @$pb.TagNumber(3)
+  set data($core.List<$core.int> value) => $_setBytes(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasData() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearData() => $_clearField(3);
+}
+
+enum RunnerMessage_Message {
+  hello,
+  frame,
+  vmService,
+  log,
+  exited,
+  platformMessage,
+  notSet
+}
 
 class RunnerMessage extends $pb.GeneratedMessage {
   factory RunnerMessage({
@@ -1022,6 +1229,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
     VmService? vmService,
     LogLine? log,
     Exited? exited,
+    PlatformMessage? platformMessage,
   }) {
     final result = RunnerMessage._();
     if (hello != null) result.hello = hello;
@@ -1029,6 +1237,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
     if (vmService != null) result.vmService = vmService;
     if (log != null) result.log = log;
     if (exited != null) result.exited = exited;
+    if (platformMessage != null) result.platformMessage = platformMessage;
     return result;
   }
 
@@ -1048,13 +1257,14 @@ class RunnerMessage extends $pb.GeneratedMessage {
     3: RunnerMessage_Message.vmService,
     4: RunnerMessage_Message.log,
     5: RunnerMessage_Message.exited,
+    6: RunnerMessage_Message.platformMessage,
     0: RunnerMessage_Message.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'RunnerMessage',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
       createEmptyInstance: RunnerMessage.$_createMessage)
-    ..oo(0, [1, 2, 3, 4, 5])
+    ..oo(0, [1, 2, 3, 4, 5, 6])
     ..aOM<RunnerHello>(1, _omitFieldNames ? '' : 'hello',
         subBuilder: RunnerHello.$_createMessage)
     ..aOM<Frame>(2, _omitFieldNames ? '' : 'frame',
@@ -1065,6 +1275,8 @@ class RunnerMessage extends $pb.GeneratedMessage {
         subBuilder: LogLine.$_createMessage)
     ..aOM<Exited>(5, _omitFieldNames ? '' : 'exited',
         subBuilder: Exited.$_createMessage)
+    ..aOM<PlatformMessage>(6, _omitFieldNames ? '' : 'platformMessage',
+        subBuilder: PlatformMessage.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1094,6 +1306,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   @$pb.TagNumber(4)
   @$pb.TagNumber(5)
+  @$pb.TagNumber(6)
   RunnerMessage_Message whichMessage() =>
       _RunnerMessage_MessageByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(1)
@@ -1101,6 +1314,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   @$pb.TagNumber(4)
   @$pb.TagNumber(5)
+  @$pb.TagNumber(6)
   void clearMessage() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -1157,6 +1371,17 @@ class RunnerMessage extends $pb.GeneratedMessage {
   void clearExited() => $_clearField(5);
   @$pb.TagNumber(5)
   Exited ensureExited() => $_ensure(4);
+
+  @$pb.TagNumber(6)
+  PlatformMessage get platformMessage => $_getN(5);
+  @$pb.TagNumber(6)
+  set platformMessage(PlatformMessage value) => $_setField(6, value);
+  @$pb.TagNumber(6)
+  $core.bool hasPlatformMessage() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearPlatformMessage() => $_clearField(6);
+  @$pb.TagNumber(6)
+  PlatformMessage ensurePlatformMessage() => $_ensure(5);
 }
 
 const $core.bool _omitFieldNames =

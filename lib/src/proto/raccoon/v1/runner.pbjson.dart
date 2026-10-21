@@ -186,6 +186,21 @@ const Shutdown$json = {
 final $typed_data.Uint8List shutdownDescriptor =
     $convert.base64Decode('CghTaHV0ZG93bg==');
 
+@$core.Deprecated('Use platformResponseDescriptor instead')
+const PlatformResponse$json = {
+  '1': 'PlatformResponse',
+  '2': [
+    {'1': 'response_id', '3': 1, '4': 1, '5': 4, '10': 'responseId'},
+    {'1': 'handled', '3': 2, '4': 1, '5': 8, '10': 'handled'},
+    {'1': 'data', '3': 3, '4': 1, '5': 12, '10': 'data'},
+  ],
+};
+
+/// Descriptor for `PlatformResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List platformResponseDescriptor = $convert.base64Decode(
+    'ChBQbGF0Zm9ybVJlc3BvbnNlEh8KC3Jlc3BvbnNlX2lkGAEgASgEUgpyZXNwb25zZUlkEhgKB2'
+    'hhbmRsZWQYAiABKAhSB2hhbmRsZWQSEgoEZGF0YRgDIAEoDFIEZGF0YQ==');
+
 @$core.Deprecated('Use clientMessageDescriptor instead')
 const ClientMessage$json = {
   '1': 'ClientMessage',
@@ -235,6 +250,15 @@ const ClientMessage$json = {
       '9': 0,
       '10': 'shutdown'
     },
+    {
+      '1': 'platform_response',
+      '3': 6,
+      '4': 1,
+      '5': 11,
+      '6': '.raccoon.v1.PlatformResponse',
+      '9': 0,
+      '10': 'platformResponse'
+    },
   ],
   '8': [
     {'1': 'message'},
@@ -247,7 +271,9 @@ final $typed_data.Uint8List clientMessageDescriptor = $convert.base64Decode(
     'gAUgVoZWxsbxIsCgZyZXNpemUYAiABKAsyEi5yYWNjb29uLnYxLlJlc2l6ZUgAUgZyZXNpemUS'
     'NAoHcG9pbnRlchgDIAEoCzIYLnJhY2Nvb24udjEuUG9pbnRlckV2ZW50SABSB3BvaW50ZXISKA'
     'oDa2V5GAQgASgLMhQucmFjY29vbi52MS5LZXlFdmVudEgAUgNrZXkSMgoIc2h1dGRvd24YBSAB'
-    'KAsyFC5yYWNjb29uLnYxLlNodXRkb3duSABSCHNodXRkb3duQgkKB21lc3NhZ2U=');
+    'KAsyFC5yYWNjb29uLnYxLlNodXRkb3duSABSCHNodXRkb3duEksKEXBsYXRmb3JtX3Jlc3Bvbn'
+    'NlGAYgASgLMhwucmFjY29vbi52MS5QbGF0Zm9ybVJlc3BvbnNlSABSEHBsYXRmb3JtUmVzcG9u'
+    'c2VCCQoHbWVzc2FnZQ==');
 
 @$core.Deprecated('Use runnerHelloDescriptor instead')
 const RunnerHello$json = {
@@ -329,6 +355,21 @@ const Exited$json = {
 final $typed_data.Uint8List exitedDescriptor =
     $convert.base64Decode('CgZFeGl0ZWQSEgoEY29kZRgBIAEoBVIEY29kZQ==');
 
+@$core.Deprecated('Use platformMessageDescriptor instead')
+const PlatformMessage$json = {
+  '1': 'PlatformMessage',
+  '2': [
+    {'1': 'response_id', '3': 1, '4': 1, '5': 4, '10': 'responseId'},
+    {'1': 'channel', '3': 2, '4': 1, '5': 9, '10': 'channel'},
+    {'1': 'data', '3': 3, '4': 1, '5': 12, '10': 'data'},
+  ],
+};
+
+/// Descriptor for `PlatformMessage`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List platformMessageDescriptor = $convert.base64Decode(
+    'Cg9QbGF0Zm9ybU1lc3NhZ2USHwoLcmVzcG9uc2VfaWQYASABKARSCnJlc3BvbnNlSWQSGAoHY2'
+    'hhbm5lbBgCIAEoCVIHY2hhbm5lbBISCgRkYXRhGAMgASgMUgRkYXRh');
+
 @$core.Deprecated('Use runnerMessageDescriptor instead')
 const RunnerMessage$json = {
   '1': 'RunnerMessage',
@@ -378,6 +419,15 @@ const RunnerMessage$json = {
       '9': 0,
       '10': 'exited'
     },
+    {
+      '1': 'platform_message',
+      '3': 6,
+      '4': 1,
+      '5': 11,
+      '6': '.raccoon.v1.PlatformMessage',
+      '9': 0,
+      '10': 'platformMessage'
+    },
   ],
   '8': [
     {'1': 'message'},
@@ -390,4 +440,6 @@ final $typed_data.Uint8List runnerMessageDescriptor = $convert.base64Decode(
     'gAUgVoZWxsbxIpCgVmcmFtZRgCIAEoCzIRLnJhY2Nvb24udjEuRnJhbWVIAFIFZnJhbWUSNgoK'
     'dm1fc2VydmljZRgDIAEoCzIVLnJhY2Nvb24udjEuVm1TZXJ2aWNlSABSCXZtU2VydmljZRInCg'
     'Nsb2cYBCABKAsyEy5yYWNjb29uLnYxLkxvZ0xpbmVIAFIDbG9nEiwKBmV4aXRlZBgFIAEoCzIS'
-    'LnJhY2Nvb24udjEuRXhpdGVkSABSBmV4aXRlZEIJCgdtZXNzYWdl');
+    'LnJhY2Nvb24udjEuRXhpdGVkSABSBmV4aXRlZBJIChBwbGF0Zm9ybV9tZXNzYWdlGAYgASgLMh'
+    'sucmFjY29vbi52MS5QbGF0Zm9ybU1lc3NhZ2VIAFIPcGxhdGZvcm1NZXNzYWdlQgkKB21lc3Nh'
+    'Z2U=');
