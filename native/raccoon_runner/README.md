@@ -37,12 +37,20 @@ Design notes: `docs/internal_docs/raccoon/`.
   state, so the keys the framework leaves unhandled insert text, delete,
   move and act; `example/text` shows it. Composition (an IME) is not here yet.
 - Rasterizes on the GPU where EGL offers one without a window (Linux, Mesa:
-  the surfaceless platform or a render node), reading each frame back as
-  BGRA, so clients see the same frames as from the software renderer. At
-  2400×1600 that halves the runner's CPU. `--renderer auto|gl|software`, or
+  the surfaceless platform or a render node). By default each frame is read
+  back as BGRA, so clients see the same frames as from the software
+  renderer; at 2400×1600 that halves the runner's CPU. A client that asks
+  for `gpu_buffers` gets a ring of four textures exported as DRM dmabufs
+  instead: the engine draws straight into them and a frame is the index of
+  its buffer, no pixels. The descriptors, and a native fence with every
+  frame where EGL has them, go over a second socket, the main one's path
+  with `.gpu` in place of `.sock` (its layout is in `main.cc`); a buffer
+  goes back on either socket, with a fence of its own on the second. The
+  raccoon_view plugin does this on Linux. `--renderer auto|gl|software`, or
   `RACCOON_RENDERER` in the environment: `auto` falls back to software; the
-  start-up log says which is in use. Built when `egl` and `glesv2` are
-  found by pkg-config (`libegl1-mesa-dev libgles2-mesa-dev` on Debian).
+  start-up log says which is in use, and `RACCOON_TRACE=1` traces every
+  frame's buffer. Built when `egl` and `glesv2` are found by pkg-config
+  (`libegl1-mesa-dev libgles2-mesa-dev` on Debian).
 - `render`: writes one frame to a PPM file, for tests and a quick look.
 - `tool/raccoon-device`: ping, install, uninstall and run for the Flutter
   tool's custom device, so a stock `flutter run -d raccoon` works.
