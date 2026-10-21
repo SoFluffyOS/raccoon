@@ -1,0 +1,10 @@
+name: spin
+description: The runner's animating example - a box that never stops turning, for frame-rate measurements.
+publish_to: "none"
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter

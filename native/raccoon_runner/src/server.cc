@@ -80,21 +80,17 @@ void RunnerServer::OnListenReadable() {
 }
 
 void RunnerServer::OnClientReadable(short revents) {
-  if (revents & (POLLHUP | POLLERR | POLLNVAL)) {
-    CloseClient();
-    return;
-  }
+  // A hang-up often arrives together with the last bytes, so drain first: a
+  // message sent right before the client closed is still dispatched.
   uint8_t buffer[64 * 1024];
+  bool closed = (revents & (POLLERR | POLLNVAL)) != 0;
   while (true) {
     const ssize_t got = read(client_fd_, buffer, sizeof(buffer));
     if (got > 0) {
       inbox_.insert(inbox_.end(), buffer, buffer + got);
       continue;
     }
-    if (got == 0 || (errno != EAGAIN && errno != EWOULDBLOCK)) {
-      CloseClient();
-      return;
-    }
+    closed = got == 0 || (errno != EAGAIN && errno != EWOULDBLOCK);
     break;
   }
   size_t offset = 0;
@@ -114,6 +110,7 @@ void RunnerServer::OnClientReadable(short revents) {
     if (client_fd_ < 0) return;
   }
   inbox_.erase(inbox_.begin(), inbox_.begin() + offset);
+  if (closed) CloseClient();
 }
 
 void RunnerServer::Dispatch(const v1::ClientMessage& message) {
