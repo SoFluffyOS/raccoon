@@ -3,6 +3,7 @@ include: package:lints/recommended.yaml
 analyzer:
   exclude:
     - build/**
+    - lib/src/proto/**
 
 linter:
   rules:
