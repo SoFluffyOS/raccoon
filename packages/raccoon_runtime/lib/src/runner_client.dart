@@ -16,7 +16,7 @@ typedef PlatformChannelHandler = Future<Uint8List?> Function(Uint8List data);
 
 /// A connection to one runner: frames, logs and platform messages in; resize,
 /// input and platform replies out.
-final class RunnerClient implements RunnerConnection, TextInputConnection {
+final class RunnerClient implements RunnerConnection, ComposingConnection {
   RunnerClient._(this._transport, {required this.composes}) {
     _subscription = _transport.inbound.listen(
       _onInbound,
