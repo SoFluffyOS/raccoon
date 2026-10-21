@@ -207,6 +207,9 @@ bool ReadValue(Reader* reader, CodecValue* out, int depth) {
       return true;
     }
     default:
+      // Pigeon writes a class as its type byte and then its fields as a
+      // list, an enum as its type byte and then its index.
+      if (type >= 128) return ReadValue(reader, out, depth + 1);
       return false;
   }
 }
@@ -375,6 +378,18 @@ bool DecodeMethodCall(const uint8_t* data, size_t size, MethodCall* call) {
   call->arguments = CodecValue();
   if (!reader.done() && !ReadValue(&reader, &call->arguments, 0)) return false;
   return reader.done();
+}
+
+bool DecodeValue(const uint8_t* data, size_t size, CodecValue* value) {
+  if (data == nullptr || size == 0) return false;
+  Reader reader(data, size);
+  return ReadValue(&reader, value, 0) && reader.done();
+}
+
+std::vector<uint8_t> EncodeValue(const CodecValue& value) {
+  Writer writer;
+  writer.Value(value);
+  return writer.Take();
 }
 
 std::vector<uint8_t> EncodeSuccess(const CodecValue& result) {

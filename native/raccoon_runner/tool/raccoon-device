@@ -14,6 +14,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 RUNNER="${RACCOON_RUNNER:-$ROOT/build/raccoon_runner}"
 APPS="${XDG_DATA_HOME:-$HOME/.local/share}/raccoon/apps"
+# What an app keeps across runs (its shared preferences); install replaces the
+# app's bundle but leaves this.
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}/raccoon/data"
 
 # The socket directory must be the one raccoon_runtime's RunnerDiscovery
 # watches: the XDG runtime directory on Linux, the user's temporary directory
@@ -70,6 +73,7 @@ case "${1:-}" in
       --assets "$APPS/$app/flutter_assets" \
       --icu "$(sdk_icu)" \
       --socket "$SOCKETS/$app.sock" \
+      --data-dir "$DATA/$app" \
       -- $@
     ;;
   *)

@@ -71,6 +71,7 @@ add_executable(raccoon_runner
   src/shared_buffers.cc
   src/software_frame.cc
   src/standard_codec.cc
+  src/user_defaults_channels.cc
   src/window_channels.cc
 )
 target_include_directories(raccoon_runner PRIVATE ${RACCOON_EMBEDDER_INCLUDE_DIR} src)

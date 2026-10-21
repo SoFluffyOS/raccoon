@@ -11,6 +11,7 @@
 #include "flutter_embedder.h"
 #include "platform_task_runner.h"
 #include "software_frame.h"
+#include "user_defaults_channels.h"
 #include "window_channels.h"
 
 namespace raccoon {
@@ -22,6 +23,9 @@ struct EngineOptions {
   size_t width = 800;
   size_t height = 600;
   double pixel_ratio = 1.0;
+  // Where the app's own data persists across runs (its shared preferences);
+  // empty keeps it in memory.
+  std::string data_dir;
   // Engine switches appended to the command line, e.g. --vm-service-port=N.
   std::vector<std::string> extra_args;
 };
@@ -33,8 +37,8 @@ class EngineHost {
       std::function<void(const std::string& tag, const std::string& message)>;
   // A platform channel message from the app. |handle| is null when the app
   // expects no reply; otherwise Respond must be called with it exactly once.
-  // The window channels never get here: the host answers them itself (see
-  // window_channels.h).
+  // The window and shared preferences channels never get here: the host
+  // answers them itself (see window_channels.h, user_defaults_channels.h).
   using PlatformMessageCallback = std::function<void(
       const std::string& channel, const uint8_t* data, size_t size,
       const FlutterPlatformMessageResponseHandle* handle)>;
@@ -79,6 +83,7 @@ class EngineHost {
   std::unique_ptr<PlatformTaskRunner> platform_;
   SoftwareFrame frame_;
   WindowChannels windows_;
+  UserDefaultsChannels user_defaults_;
   FLUTTER_API_SYMBOL(FlutterEngine) engine_ = nullptr;
   LogCallback on_log_;
   PlatformMessageCallback on_platform_message_;

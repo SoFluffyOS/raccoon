@@ -18,6 +18,9 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   on_log_ = std::move(on_log);
   on_wake_ = std::move(on_wake);
   assets_ = options.assets;
+  if (!options.data_dir.empty()) {
+    user_defaults_.SetStorePath(options.data_dir + "/shared_preferences.bin");
+  }
   icu_ = options.icu;
 
   platform_ = std::make_unique<PlatformTaskRunner>(procs);
@@ -103,11 +106,14 @@ void EngineHost::OnPlatformMessage(const FlutterPlatformMessage* message,
                                    void* user_data) {
   auto* host = static_cast<EngineHost*>(user_data);
   const std::string channel = message->channel == nullptr ? "" : message->channel;
-  // The window channels are the runner's own: it is the app's window host,
-  // and apps call them at startup, before a client may be connected.
+  // The window and shared preferences channels are the runner's own: it is
+  // the app's window host, and apps call them at startup, before a client may
+  // be connected.
   std::vector<uint8_t> reply;
   if (host->windows_.Handle(channel, message->message, message->message_size,
-                            &reply)) {
+                            &reply) ||
+      host->user_defaults_.Handle(channel, message->message,
+                                  message->message_size, &reply)) {
     host->Respond(message->response_handle, reply.data(), reply.size());
     return;
   }

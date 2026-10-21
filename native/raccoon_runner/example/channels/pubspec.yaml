@@ -1,0 +1,10 @@
+name: channels
+description: The runner's channel example - calls the channels the runner answers itself (window plugins, shared preferences) at startup, as desktop apps do, and shows whether every answer came back right.
+publish_to: "none"
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter

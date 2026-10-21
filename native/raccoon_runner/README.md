@@ -18,12 +18,16 @@ Design notes: `docs/internal_docs/raccoon/`.
   client takes them; resize, pointer and key events in; the app's platform
   channel messages out and the client's answers back; the VM service URI;
   shutdown.
-- Answers the window plugins' channels itself (`desktop_window`,
-  `window_manager`, `window_size`), in both commands and with or without a
-  client: the app's window is the client's pane, so sizes come from the view
-  and requests to resize, move or go full screen are recorded, not applied.
-  Desktop apps call these at startup (Wonderous before its first frame), and
-  an unanswered call throws. `example/window` checks the answers.
+- Answers some plugins' channels itself, in both commands and with or
+  without a client, because apps call them at startup (Wonderous before its
+  first frame) and an unanswered call throws:
+  - the window plugins (`desktop_window`, `window_manager`, `window_size`):
+    the app's window is the client's pane, so sizes come from the view and
+    requests to resize, move or go full screen are recorded, not applied;
+  - `shared_preferences_foundation`, which a Mac host's Dart VM picks (it
+    reports macOS), kept in `--data-dir` when given (`tool/raccoon-device`
+    passes one per app), in memory otherwise.
+  `example/channels` checks the answers.
 - `render`: writes one frame to a PPM file, for tests and a quick look.
 - `tool/raccoon-device`: ping, install, uninstall and run for the Flutter
   tool's custom device, so a stock `flutter run -d raccoon` works.

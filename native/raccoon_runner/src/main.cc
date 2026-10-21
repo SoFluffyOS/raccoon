@@ -43,7 +43,7 @@ void Usage() {
                " --icu FILE [--out F] [--frames N] [--timeout-ms N] [--rgba]\n"
                "       raccoon_runner serve --engine-dir DIR --assets DIR"
                " --icu FILE --socket PATH\n"
-               "common: [--width N] [--height N] [--dpr X]"
+               "common: [--width N] [--height N] [--dpr X] [--data-dir DIR]"
                " [-- engine switches...]\n");
 }
 
@@ -68,6 +68,7 @@ bool ParseOptions(int argc, char** argv, Options* options) {
     else if (arg == "--width") options->engine.width = std::strtoul(v, nullptr, 10);
     else if (arg == "--height") options->engine.height = std::strtoul(v, nullptr, 10);
     else if (arg == "--dpr") options->engine.pixel_ratio = std::strtod(v, nullptr);
+    else if (arg == "--data-dir") options->engine.data_dir = v;
     else if (arg == "--out") options->out = v;
     else if (arg == "--socket") options->socket = v;
     else if (arg == "--frames") options->frames = std::strtoul(v, nullptr, 10);

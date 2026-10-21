@@ -57,6 +57,12 @@ struct MethodCall {
 // Decodes a StandardMethodCodec call; false when the bytes are not one.
 bool DecodeMethodCall(const uint8_t* data, size_t size, MethodCall* call);
 
+// One StandardMessageCodec value, the whole message; false when the bytes
+// are not one. Pigeon's own types (type bytes from 128) decode as the list or
+// number they wrap.
+bool DecodeValue(const uint8_t* data, size_t size, CodecValue* value);
+std::vector<uint8_t> EncodeValue(const CodecValue& value);
+
 // The StandardMethodCodec envelopes.
 std::vector<uint8_t> EncodeSuccess(const CodecValue& result);
 std::vector<uint8_t> EncodeError(const std::string& code,
