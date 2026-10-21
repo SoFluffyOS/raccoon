@@ -6,7 +6,9 @@ import 'package:raccoon/raccoon.dart' as rc;
 import 'package:raccoon_view/src/frame_decoder.dart';
 import 'package:raccoon_view/src/disconnected_overlay.dart';
 import 'package:raccoon_view/src/frame_view.dart';
-import 'package:raccoon_runtime/raccoon_runtime.dart' show RunnerConnection;
+import 'package:raccoon_runtime/raccoon_runtime.dart'
+    show RunnerConnection, ComposingConnection;
+import 'package:raccoon_view/src/hosted_text_input.dart';
 import 'package:raccoon_view/src/input_mapping.dart';
 
 /// Shows the app a runner hosts and sends it the view's size, pointer and key
@@ -38,6 +40,8 @@ class RaccoonView extends StatefulWidget {
 
 class _RaccoonViewState extends State<RaccoonView> {
   StreamSubscription<rc.Frame>? _frames;
+  StreamSubscription<rc.TextField>? _fields;
+  HostedTextInput? _text;
   ui.Image? _image;
   rc.Frame? _pending;
   bool _decoding = false;
@@ -56,6 +60,7 @@ class _RaccoonViewState extends State<RaccoonView> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.connection == widget.connection) return;
     unawaited(_frames?.cancel());
+    _unsubscribeText();
     _sentSize = null;
     _subscribe();
   }
@@ -63,17 +68,37 @@ class _RaccoonViewState extends State<RaccoonView> {
   @override
   void dispose() {
     unawaited(_frames?.cancel());
+    _unsubscribeText();
     _image?.dispose();
     super.dispose();
   }
 
   void _subscribe() {
+    _subscribeText();
     _lost = false;
     _frames = widget.connection.frames.listen(
       _onFrame,
       onError: (Object _) => _onLost(),
       onDone: _onLost,
     );
+  }
+
+  /// A connection that composes mirrors the app's active field in the
+  /// host's input method.
+  void _subscribeText() {
+    final connection = widget.connection;
+    if (connection is! ComposingConnection) return;
+    if (!connection.composes) return;
+    final text = HostedTextInput(connection);
+    _text = text;
+    _fields = connection.textFields.listen(text.field);
+  }
+
+  void _unsubscribeText() {
+    unawaited(_fields?.cancel());
+    _fields = null;
+    _text?.detach();
+    _text = null;
   }
 
   void _onLost() {
@@ -127,8 +152,25 @@ class _RaccoonViewState extends State<RaccoonView> {
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    final text = _text;
+    if (text == null || !text.attached) {
+      widget.connection.sendKey(toRunnerKey(event));
+      return KeyEventResult.handled;
+    }
+    // With the host's input method open for the app's field: characters go
+    // to both, the method types them and the app sees the key; editing
+    // keys are the app's, unless the method is composing, when they are
+    // its own.
+    if (isEditingKey(event)) {
+      if (text.composing) return KeyEventResult.ignored;
+      widget.connection.sendKey(toRunnerKey(event));
+      return KeyEventResult.handled;
+    }
     widget.connection.sendKey(toRunnerKey(event));
-    return KeyEventResult.handled;
+    return switch (event.character) {
+      final character? when character.isNotEmpty => KeyEventResult.ignored,
+      _ => KeyEventResult.handled,
+    };
   }
 
   @override

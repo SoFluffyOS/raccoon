@@ -54,3 +54,22 @@ rc.KeyEvent toRunnerKey(KeyEvent event) {
     synthesized: event.synthesized,
   );
 }
+
+/// Whether a key edits text rather than typing it: Backspace, Delete, the
+/// arrows, Home, End, Enter, Tab, Escape.
+bool isEditingKey(KeyEvent event) => _editingKeys.contains(event.logicalKey);
+
+final _editingKeys = <LogicalKeyboardKey>{
+  LogicalKeyboardKey.backspace,
+  LogicalKeyboardKey.delete,
+  LogicalKeyboardKey.arrowLeft,
+  LogicalKeyboardKey.arrowRight,
+  LogicalKeyboardKey.arrowUp,
+  LogicalKeyboardKey.arrowDown,
+  LogicalKeyboardKey.home,
+  LogicalKeyboardKey.end,
+  LogicalKeyboardKey.enter,
+  LogicalKeyboardKey.numpadEnter,
+  LogicalKeyboardKey.tab,
+  LogicalKeyboardKey.escape,
+};
