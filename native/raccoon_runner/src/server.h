@@ -47,6 +47,11 @@ class RunnerServer {
   void OnListenReadable();
   void OnClientReadable(short revents);
   void CloseClient();
+  // Parses and dispatches every whole message in the inbox.
+  void DispatchInbox();
+  // Reads what the client sent until there is nothing more right now.
+  // Returns true when the client hung up or the socket failed.
+  bool ReadAvailable();
   bool WriteAll(const uint8_t* data, size_t size);
   void Dispatch(const v1::ClientMessage& message);
 
@@ -56,6 +61,7 @@ class RunnerServer {
   int listen_fd_ = -1;
   int client_fd_ = -1;
   uint32_t client_pid_ = 0;
+  bool closing_ = false;
   static bool WriteAllTo(int fd, const uint8_t* data, size_t size);
   std::vector<uint8_t> inbox_;
 };

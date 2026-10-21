@@ -144,20 +144,28 @@ void RunnerServer::OnListenReadable() {
   if (handler_.on_client_connected) handler_.on_client_connected();
 }
 
-void RunnerServer::OnClientReadable(short revents) {
-  // A hang-up often arrives together with the last bytes, so drain first: a
-  // message sent right before the client closed is still dispatched.
+bool RunnerServer::ReadAvailable() {
   uint8_t buffer[64 * 1024];
-  bool closed = (revents & (POLLERR | POLLNVAL)) != 0;
   while (true) {
     const ssize_t got = read(client_fd_, buffer, sizeof(buffer));
     if (got > 0) {
       inbox_.insert(inbox_.end(), buffer, buffer + got);
       continue;
     }
-    closed = got == 0 || (errno != EAGAIN && errno != EWOULDBLOCK);
-    break;
+    return got == 0 || (errno != EAGAIN && errno != EWOULDBLOCK);
   }
+}
+
+void RunnerServer::OnClientReadable(short revents) {
+  // A hang-up often arrives together with the last bytes, so drain first: a
+  // message sent right before the client closed is still dispatched.
+  bool closed = (revents & (POLLERR | POLLNVAL)) != 0;
+  closed = ReadAvailable() || closed;
+  DispatchInbox();
+  if (closed) CloseClient();
+}
+
+void RunnerServer::DispatchInbox() {
   size_t offset = 0;
   while (inbox_.size() - offset >= kLengthPrefix) {
     const uint32_t length = ReadLength(inbox_.data() + offset);
@@ -175,7 +183,6 @@ void RunnerServer::OnClientReadable(short revents) {
     if (client_fd_ < 0) return;
   }
   inbox_.erase(inbox_.begin(), inbox_.begin() + offset);
-  if (closed) CloseClient();
 }
 
 void RunnerServer::Dispatch(const v1::ClientMessage& message) {
@@ -217,6 +224,13 @@ void RunnerServer::Dispatch(const v1::ClientMessage& message) {
 }
 
 void RunnerServer::CloseClient() {
+  if (client_fd_ < 0 || closing_) return;
+  closing_ = true;
+  // What the client sent before hanging up still counts, a Shutdown above
+  // all: a send that failed because the client is gone must not drop it.
+  ReadAvailable();
+  DispatchInbox();
+  closing_ = false;
   if (client_fd_ < 0) return;
   loop_.Unwatch(client_fd_);
   close(client_fd_);
