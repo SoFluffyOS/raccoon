@@ -1,0 +1,118 @@
+# Builds the runner on each host and packages it (tool/package.sh). A tag
+# v<VERSION> publishes the archives as a GitHub release, a prerelease when
+# VERSION carries a -pre.N suffix; workflow_dispatch only keeps them as
+# workflow artifacts, to check the packaging.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: 3.47.7
+  PROTOC_VERSION: "21.12"
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-latest
+          - name: macos-arm64
+            os: macos-latest
+          - name: macos-x64
+            os: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag must match VERSION
+        if: github.ref_type == 'tag'
+        run: |
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          if [ "v$VERSION" != "${{ github.ref_name }}" ]; then
+            echo "VERSION says $VERSION but the tag is ${{ github.ref_name }}" >&2
+            exit 1
+          fi
+
+      - name: Install CMake and Ninja
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - name: Install CMake and Ninja
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Cache the engine and protoc
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/raccoon
+            ~/.local/raccoon/protoc
+          key: raccoon-${{ matrix.name }}-flutter-${{ env.FLUTTER_VERSION }}-protoc-${{ env.PROTOC_VERSION }}
+
+      - name: Install protoc
+        run: tool/protoc.sh
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DRACCOON_ENGINE_DIR="$(tool/engine_dir.sh)"
+      - name: Build
+        run: ninja -C build
+      - name: Version
+        run: build/raccoon_runner --version
+
+      - name: Package
+        run: tool/package.sh dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raccoon_runner-${{ matrix.name }}
+          path: dist/*.tar.gz
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          (cd dist && sha256sum *.tar.gz > SHA256SUMS)
+          ls -l dist
+          cat > notes.md <<NOTES
+          Prebuilt \`raccoon_runner\` $VERSION for Linux x64, macOS arm64 and macOS x64. Each archive holds the binary, \`tool/raccoon-device\`, \`tool/engine_dir.sh\`, \`VERSION\` and \`LICENSE\`, and works as a runtime on its own once unpacked:
+
+              mkdir raccoon_runner && tar xzf raccoon_runner-$VERSION-<platform>.tar.gz -C raccoon_runner
+              raccoon_runner/raccoon_runner --version
+
+          A browser download on macOS needs \`xattr -d com.apple.quarantine raccoon_runner/raccoon_runner\` before Gatekeeper lets it run. The Raccoon Simulator downloads the archive for its host itself.
+          NOTES
+          case "$VERSION" in
+            *-*) flags=(--prerelease --title "raccoon_runner $VERSION (prerelease)") ;;
+            *) flags=(--title "raccoon_runner $VERSION") ;;
+          esac
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* "${flags[@]}" --notes-file notes.md --generate-notes
+          fi
