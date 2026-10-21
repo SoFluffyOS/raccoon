@@ -310,6 +310,91 @@ void main() {
         : 'build the runner and example/channels first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
+
+  test(
+    'keys reach the framework and typed characters reach a text field',
+    () async {
+      // example/text prints KEY:<event> for every key the framework
+      // dispatches and TEXT:<value> for every change of its field.
+      final textAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'text',
+        'build',
+        'flutter_assets',
+      );
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: textAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      runner.stderr.listen(output.add);
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.frames.first.timeout(const Duration(seconds: 15));
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        Future<void> key(int logical, int physical, String character) async {
+          for (final kind in [KeyKind.KEY_KIND_DOWN, KeyKind.KEY_KIND_UP]) {
+            client.sendKey(
+              KeyEvent(
+                kind: kind,
+                physical: Int64(physical),
+                logical: Int64(logical),
+                character: kind == KeyKind.KEY_KIND_DOWN ? character : '',
+                timestampMicros: Int64(DateTime.now().microsecondsSinceEpoch),
+              ),
+            );
+            await Future<void>.delayed(const Duration(milliseconds: 60));
+          }
+        }
+
+        await key(0x68, 0x0007000b, 'h');
+        await key(0x69, 0x0007000c, 'i');
+        // Backspace is the framework's: its shortcut deletes, not the runner.
+        await key(0x100000008, 0x0007002a, '');
+        await key(0x79, 0x0007001c, 'y');
+        final deadline = DateTime.now().add(const Duration(seconds: 10));
+        while (!output.any((line) => line.contains('TEXT:hy')) &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        final text = output
+            .where((line) => line.contains('TEXT:'))
+            .map((line) => line.substring(line.indexOf('TEXT:')))
+            .toList();
+        expect(text, ['TEXT:h', 'TEXT:hi', 'TEXT:h', 'TEXT:hy']);
+        expect(
+          output.where((line) => line.contains('KEY:KeyDownEvent')).length,
+          4,
+        );
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready &&
+            Directory(
+              p.join(
+                p.dirname(p.dirname(p.dirname(assets))),
+                'text',
+                'build',
+                'flutter_assets',
+              ),
+            ).existsSync()
+        ? false
+        : 'build the runner and the text example first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 }
 
 /// The SDK behind `FLUTTER_ROOT`, else behind the `flutter` on the PATH.
