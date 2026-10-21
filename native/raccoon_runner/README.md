@@ -62,6 +62,18 @@ flutter run -d raccoon
 
 The integration tests in `packages/raccoon_runtime` drive the real runner.
 
+## Benchmark: clean build to first frame
+
+Compares the host's desktop device with Raccoon on Flutter Wonderous:
+
+```sh
+P="$(tool/bench/wonderous.sh)"           # clone, add the first-frame probe, add the platform folder
+python3 tool/bench/first_frame.py "$P"   # 3 rounds each, flutter clean before every run
+python3 tool/bench/first_frame.py "$P" --warm   # the same without flutter clean
+```
+
+The Raccoon device must be registered first (see above).
+
 ## Protocol changes
 
 Edit `proto/raccoon/v1/runner.proto`, rebuild (CMake regenerates the C++),
