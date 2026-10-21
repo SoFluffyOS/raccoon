@@ -1,4 +1,5 @@
 export 'package:raccoon_view/src/frame_decoder.dart';
 export 'package:raccoon_view/src/frame_view.dart';
+export 'package:raccoon_view/src/ide_platform_channels.dart';
 export 'package:raccoon_view/src/input_mapping.dart';
 export 'package:raccoon_view/src/raccoon_view.dart';
