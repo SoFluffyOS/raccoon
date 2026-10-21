@@ -53,6 +53,18 @@ final class RunnerDiscovery {
   static String appNameOf(UnixSocketEndpoint endpoint) =>
       p.basenameWithoutExtension(endpoint.path);
 
+  /// The project behind an app name, without its instance: `wonders` for
+  /// `wonders@2`, the second run of the same project (see the device
+  /// helper's `--instance`).
+  static String projectOf(String appName) => appName.split('@').first;
+
+  /// Which run of its project an app name is: 1 for `wonders`, 2 for
+  /// `wonders@2`.
+  static int instanceOf(String appName) => switch (appName.split('@')) {
+    [_, final instance] => int.tryParse(instance) ?? 1,
+    _ => 1,
+  };
+
   /// Every runner socket present right now, sorted by path.
   List<UnixSocketEndpoint> list() {
     final dir = Directory(directory);

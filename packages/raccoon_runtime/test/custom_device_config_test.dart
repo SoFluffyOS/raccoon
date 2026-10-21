@@ -73,4 +73,50 @@ void main() {
 
     expect(file.ids(), ['pi', 'raccoon']);
   });
+
+  test('a second instance is raccoon-2 with --instance in its commands', () {
+    final config = CustomDeviceConfig(deviceHelper: '/h', instance: 2);
+    expect(config.id, 'raccoon-2');
+    expect(config.label, 'Raccoon 2');
+    final json = config.toJson();
+    expect(json['install'], [
+      '/h',
+      'install',
+      '--instance',
+      '2',
+      r'${localPath}',
+      r'${appName}',
+    ]);
+    expect(json['uninstall'], [
+      '/h',
+      'uninstall',
+      '--instance',
+      '2',
+      r'${appName}',
+    ]);
+    expect(json['runDebug'], [
+      '/h',
+      'run',
+      '--instance',
+      '2',
+      r'${appName}',
+      r'${engineOptions}',
+    ]);
+    final first = CustomDeviceConfig(deviceHelper: '/h').toJson();
+    expect(first['id'], 'raccoon');
+    expect(first['runDebug'], [
+      '/h',
+      'run',
+      r'${appName}',
+      r'${engineOptions}',
+    ]);
+  });
+
+  test('app names carry their instance', () {
+    expect(RunnerDiscovery.projectOf('wonders'), 'wonders');
+    expect(RunnerDiscovery.instanceOf('wonders'), 1);
+    expect(RunnerDiscovery.projectOf('wonders@2'), 'wonders');
+    expect(RunnerDiscovery.instanceOf('wonders@2'), 2);
+    expect(RunnerDiscovery.instanceOf('odd@x'), 1);
+  });
 }

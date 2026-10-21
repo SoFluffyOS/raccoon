@@ -11,7 +11,12 @@ void main(List<String> arguments) {
   switch (arguments) {
     case ['setup', '--helper', final helper]:
       final file = CustomDevicesFile.forHost(Platform.environment);
-      file.upsert(CustomDeviceConfig(deviceHelper: helper));
+      // raccoon, and raccoon-2 for a second run of the same project.
+      for (final instance in const [1, 2]) {
+        file.upsert(
+          CustomDeviceConfig(deviceHelper: helper, instance: instance),
+        );
+      }
       stdout.writeln('wrote ${file.path}: ${file.ids().join(', ')}');
     case ['doctor', ...final rest]:
       _doctor(rest.firstOrNull ?? Directory.current.path);

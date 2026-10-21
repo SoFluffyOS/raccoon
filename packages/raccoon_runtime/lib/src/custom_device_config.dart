@@ -10,11 +10,14 @@ import 'package:path/path.dart' as p;
 final class CustomDeviceConfig {
   CustomDeviceConfig({
     required this.deviceHelper,
-    this.id = 'raccoon',
-    this.label = 'Raccoon',
+    this.instance = 1,
+    String? id,
+    String? label,
     this.sdkNameAndVersion = 'Raccoon runtime',
     String? platform,
-  }) : platform = platform ?? hostPlatform;
+  }) : id = id ?? (instance == 1 ? 'raccoon' : 'raccoon-$instance'),
+       label = label ?? (instance == 1 ? 'Raccoon' : 'Raccoon $instance'),
+       platform = platform ?? hostPlatform;
 
   /// The tool's platform name for the host this process runs on.
   static final String hostPlatform = platformFor(Abi.current());
@@ -32,12 +35,20 @@ final class CustomDeviceConfig {
 
   /// Path to the `raccoon-device` helper (ping, install, uninstall, run).
   final String deviceHelper;
+
+  /// Which run of a project this device hosts. 1 is `raccoon`; `raccoon-N`
+  /// keeps a second run of the same project apart from the first, with its
+  /// own socket, app store and data directory (the helper's `--instance`).
+  final int instance;
   final String id;
   final String label;
   final String sdkNameAndVersion;
 
   /// What the tool is told, see [platformFor].
   final String platform;
+
+  List<String> get _instanceArgs =>
+      instance == 1 ? const [] : ['--instance', '$instance'];
 
   Map<String, Object?> toJson() => {
     'id': id,
@@ -48,9 +59,21 @@ final class CustomDeviceConfig {
     'ping': [deviceHelper, 'ping'],
     'pingSuccessRegex': null,
     'postBuild': null,
-    'install': [deviceHelper, 'install', r'${localPath}', r'${appName}'],
-    'uninstall': [deviceHelper, 'uninstall', r'${appName}'],
-    'runDebug': [deviceHelper, 'run', r'${appName}', r'${engineOptions}'],
+    'install': [
+      deviceHelper,
+      'install',
+      ..._instanceArgs,
+      r'${localPath}',
+      r'${appName}',
+    ],
+    'uninstall': [deviceHelper, 'uninstall', ..._instanceArgs, r'${appName}'],
+    'runDebug': [
+      deviceHelper,
+      'run',
+      ..._instanceArgs,
+      r'${appName}',
+      r'${engineOptions}',
+    ],
     'forwardPort': null,
     'forwardPortSuccessRegex': null,
     'screenshot': null,
