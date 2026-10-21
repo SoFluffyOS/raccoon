@@ -121,6 +121,32 @@ std::string GpuSocketPath(const std::string& socket) {
   return socket + ".gpu";
 }
 
+// What the GPU socket carries, so a native client needs no protobuf: little
+// endian, 'RGPU', generation, count, width, height, fourcc, modifier (64
+// bits), then count pairs of stride and offset; one descriptor per buffer
+// rides along, in index order.
+std::vector<uint8_t> GpuSocketPayload(const raccoon::GpuBufferSet& set) {
+  std::vector<uint8_t> out;
+  auto put32 = [&out](uint32_t value) {
+    for (int i = 0; i < 4; ++i) out.push_back(static_cast<uint8_t>(value >> (8 * i)));
+  };
+  auto put64 = [&out](uint64_t value) {
+    for (int i = 0; i < 8; ++i) out.push_back(static_cast<uint8_t>(value >> (8 * i)));
+  };
+  out.insert(out.end(), {'R', 'G', 'P', 'U'});
+  put32(set.generation);
+  put32(static_cast<uint32_t>(set.fds.size()));
+  put32(static_cast<uint32_t>(set.width));
+  put32(static_cast<uint32_t>(set.height));
+  put32(set.fourcc);
+  put64(set.modifier);
+  for (size_t i = 0; i < set.fds.size(); ++i) {
+    put32(set.strides[i]);
+    put32(set.offsets[i]);
+  }
+  return out;
+}
+
 void FillGpuBuffers(const raccoon::GpuBufferSet& set, const std::string& socket,
                     raccoon::v1::GpuBuffers* out) {
   out->set_generation(set.generation);
@@ -451,9 +477,7 @@ int Serve(const Options& options) {
             if (server.Send(message)) gpu_told = set.generation;
           }
           if (gpu_server.has_client() && set.generation != gpu_fds_sent) {
-            raccoon::v1::RunnerMessage message;
-            FillGpuBuffers(set, gpu_socket, message.mutable_gpu_buffers());
-            if (gpu_server.SendWithFds(message, set.fds)) {
+            if (gpu_server.SendBytesWithFds(GpuSocketPayload(set), set.fds)) {
               gpu_fds_sent = set.generation;
             }
           }

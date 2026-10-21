@@ -263,15 +263,21 @@ bool RunnerServer::WriteAllTo(int fd, const uint8_t* data, size_t size) {
 
 bool RunnerServer::SendWithFds(const v1::RunnerMessage& message,
                                const std::vector<int>& fds) {
+  std::string serialized;
+  if (!message.SerializeToString(&serialized)) return false;
+  return SendBytesWithFds(
+      std::vector<uint8_t>(serialized.begin(), serialized.end()), fds);
+}
+
+bool RunnerServer::SendBytesWithFds(const std::vector<uint8_t>& payload,
+                                    const std::vector<int>& fds) {
   if (client_fd_ < 0) return false;
-  std::string payload;
-  if (!message.SerializeToString(&payload)) return false;
   const uint32_t length = static_cast<uint32_t>(payload.size());
   uint8_t prefix[kLengthPrefix] = {
       static_cast<uint8_t>(length), static_cast<uint8_t>(length >> 8),
       static_cast<uint8_t>(length >> 16), static_cast<uint8_t>(length >> 24)};
   iovec parts[2] = {{prefix, kLengthPrefix},
-                    {payload.data(), payload.size()}};
+                    {const_cast<uint8_t*>(payload.data()), payload.size()}};
   std::vector<uint8_t> control(CMSG_SPACE(sizeof(int) * fds.size()));
   msghdr header{};
   header.msg_iov = parts;

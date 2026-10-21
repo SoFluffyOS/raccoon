@@ -42,6 +42,10 @@ class RunnerServer {
 
   // Sends |message| with |fds| attached as ancillary data (SCM_RIGHTS).
   bool SendWithFds(const v1::RunnerMessage& message, const std::vector<int>& fds);
+  // Sends |payload| framed like a message, with the descriptors riding on
+  // its first bytes: for a client that does not speak protobuf.
+  bool SendBytesWithFds(const std::vector<uint8_t>& payload,
+                        const std::vector<int>& fds);
 
  private:
   void OnListenReadable();
