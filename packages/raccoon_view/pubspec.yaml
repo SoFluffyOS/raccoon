@@ -15,6 +15,7 @@ dependencies:
     path: ../../pub_packages/raccoon
   raccoon_runtime:
     path: ../raccoon_runtime
+  url_launcher: ^6.3.0
 
 dev_dependencies:
   flutter_test:

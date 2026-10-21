@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:raccoon_runtime/raccoon_runtime.dart';
+import 'package:raccoon_view/src/ide_url_launcher_channels.dart';
 
 /// Serves the hosted app's `flutter/platform` channel with this process's own
 /// services: the clipboard is the IDE's clipboard, sounds and haptics are
@@ -11,8 +12,10 @@ final class IdePlatformChannels {
 
   static const String platformChannel = 'flutter/platform';
 
+  /// Registers this and the plugin channels the IDE serves.
   void register(RunnerClient client) {
     client.registerChannel(platformChannel, handlePlatform);
+    IdeUrlLauncherChannels().register(client);
   }
 
   Future<Uint8List?> handlePlatform(Uint8List data) async {
