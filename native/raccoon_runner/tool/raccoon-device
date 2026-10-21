@@ -12,7 +12,15 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
-RUNNER="${RACCOON_RUNNER:-$ROOT/build/raccoon_runner}"
+# The binary sits under build/ in a checkout and at the root of a release
+# archive (tool/package.sh); RACCOON_RUNNER overrides both.
+if [ -n "${RACCOON_RUNNER:-}" ]; then
+  RUNNER="$RACCOON_RUNNER"
+elif [ -x "$ROOT/build/raccoon_runner" ]; then
+  RUNNER="$ROOT/build/raccoon_runner"
+else
+  RUNNER="$ROOT/raccoon_runner"
+fi
 APPS="${XDG_DATA_HOME:-$HOME/.local/share}/raccoon/apps"
 # What an app keeps across runs (its shared preferences); install replaces the
 # app's bundle but leaves this.
