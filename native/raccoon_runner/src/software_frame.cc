@@ -107,4 +107,29 @@ bool SoftwareFrame::WritePpm(const std::string& path, bool bgra) const {
   return true;
 }
 
+
+void SoftwareFrame::PresentGpu(uint32_t generation, int index, size_t width,
+                               size_t height) {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    width_ = width;
+    height_ = height;
+    row_bytes_ = width * 4;
+    ++frame_count_;
+    if (pending_gpu_.index >= 0 && release_gpu_) {
+      release_gpu_(pending_gpu_.generation, pending_gpu_.index);
+    }
+    pending_gpu_ = {generation, index, width, height, frame_count_};
+  }
+  if (presented_) presented_();
+}
+
+bool SoftwareFrame::TakeGpu(Gpu* out) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (pending_gpu_.index < 0) return false;
+  *out = pending_gpu_;
+  pending_gpu_ = Gpu{};
+  return true;
+}
+
 }  // namespace raccoon

@@ -1,12 +1,17 @@
 #include "gl_renderer.h"
 
-#include <EGL/eglext.h>
-#include <GLES2/gl2ext.h>
+#include <unistd.h>
 
+#include <cstdio>
+#include <cstdlib>
+
+#include <algorithm>
 #include <cstring>
 
 namespace raccoon {
 namespace {
+
+const bool kTrace = std::getenv("RACCOON_TRACE") != nullptr;
 
 EGLDisplay OpenDisplay(std::string* how) {
   const auto get_platform_display =
@@ -48,6 +53,10 @@ EGLDisplay OpenDisplay(std::string* how) {
   }
   *how = "device";
   return get_platform_display(EGL_PLATFORM_DEVICE_EXT, devices[0], nullptr);
+}
+
+bool Has(const char* extensions, const char* name) {
+  return extensions != nullptr && std::strstr(extensions, name) != nullptr;
 }
 
 }  // namespace
@@ -101,18 +110,35 @@ bool GlRenderer::Init(std::string* error) {
   }
   const char* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
   const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
-  const char* extensions =
+  const char* gl_extensions =
       reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
-  reads_bgra_ = extensions != nullptr &&
-                std::strstr(extensions, "GL_EXT_read_format_bgra") != nullptr;
+  reads_bgra_ = Has(gl_extensions, "GL_EXT_read_format_bgra");
+  const char* egl_extensions = eglQueryString(display_, EGL_EXTENSIONS);
+  create_image_ = reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(
+      eglGetProcAddress("eglCreateImageKHR"));
+  destroy_image_ = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(
+      eglGetProcAddress("eglDestroyImageKHR"));
+  export_query_ = reinterpret_cast<PFNEGLEXPORTDMABUFIMAGEQUERYMESAPROC>(
+      eglGetProcAddress("eglExportDMABUFImageQueryMESA"));
+  export_image_ = reinterpret_cast<PFNEGLEXPORTDMABUFIMAGEMESAPROC>(
+      eglGetProcAddress("eglExportDMABUFImageMESA"));
+  can_export_ = Has(egl_extensions, "EGL_MESA_image_dma_buf_export") &&
+                Has(egl_extensions, "EGL_KHR_gl_texture_2D_image") &&
+                create_image_ != nullptr && destroy_image_ != nullptr &&
+                export_query_ != nullptr && export_image_ != nullptr;
   description_ = std::string(renderer == nullptr ? "?" : renderer) + ", " +
-                 (version == nullptr ? "?" : version) + ", EGL " + how;
+                 (version == nullptr ? "?" : version) + ", EGL " + how +
+                 (can_export_ ? ", exports dmabufs" : "");
   ClearCurrent();
   return true;
 }
 
 void GlRenderer::Shutdown() {
   if (display_ == EGL_NO_DISPLAY) return;
+  if (MakeCurrent()) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    DestroyPool();
+  }
   eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
   if (resource_context_ != EGL_NO_CONTEXT) {
     eglDestroyContext(display_, resource_context_);
@@ -168,12 +194,170 @@ bool GlRenderer::EnsureSize(size_t width, size_t height) {
   return true;
 }
 
+bool GlRenderer::EnablePool(size_t count, std::string* error) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!can_export_) {
+    *error = "this EGL display does not export textures as dmabufs";
+    return false;
+  }
+  pool_wanted_ = true;
+  pool_count_ = count;
+  return true;
+}
+
+void GlRenderer::DisablePool() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  pool_wanted_ = false;
+}
+
+bool GlRenderer::pool_set(GpuBufferSet* out) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (pool_.empty()) return false;
+  out->generation = generation_;
+  out->width = pool_width_;
+  out->height = pool_height_;
+  out->fourcc = fourcc_;
+  out->modifier = modifier_;
+  out->strides.clear();
+  out->offsets.clear();
+  out->fds.clear();
+  for (const Buffer& buffer : pool_) {
+    out->strides.push_back(buffer.stride);
+    out->offsets.push_back(buffer.offset);
+    out->fds.push_back(buffer.fd);
+  }
+  return true;
+}
+
+void GlRenderer::Release(uint32_t generation, int index) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (generation != generation_ || index < 0 ||
+      static_cast<size_t>(index) >= pool_.size()) {
+    return;
+  }
+  pool_[index].busy = false;
+  if (kTrace) std::fprintf(stderr, "raccoon_runner: gl release pool %d\n", index);
+}
+
+void GlRenderer::DestroyPool() {
+  for (Buffer& buffer : pool_) {
+    if (buffer.fd >= 0) close(buffer.fd);
+    if (buffer.image != EGL_NO_IMAGE_KHR) destroy_image_(display_, buffer.image);
+    if (buffer.texture != 0) glDeleteTextures(1, &buffer.texture);
+  }
+  if (pool_fbo_ != 0) {
+    glDeleteFramebuffers(1, &pool_fbo_);
+    pool_fbo_ = 0;
+  }
+  pool_.clear();
+  pool_width_ = pool_height_ = 0;
+}
+
+bool GlRenderer::BuildPool(size_t width, size_t height) {
+  DestroyPool();
+  glGenFramebuffers(1, &pool_fbo_);
+  std::vector<Buffer> buffers(pool_count_);
+  for (Buffer& buffer : buffers) {
+    glGenTextures(1, &buffer.texture);
+    glBindTexture(GL_TEXTURE_2D, buffer.texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, static_cast<GLsizei>(width),
+                 static_cast<GLsizei>(height), 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                 nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glBindFramebuffer(GL_FRAMEBUFFER, pool_fbo_);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           buffer.texture, 0);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+      break;
+    }
+    buffer.image = create_image_(
+        display_, context_, EGL_GL_TEXTURE_2D_KHR,
+        reinterpret_cast<EGLClientBuffer>(static_cast<uintptr_t>(buffer.texture)),
+        nullptr);
+    if (buffer.image == EGL_NO_IMAGE_KHR) break;
+    int fourcc = 0;
+    int planes = 0;
+    EGLuint64KHR modifier = 0;
+    if (!export_query_(display_, buffer.image, &fourcc, &planes, &modifier) ||
+        planes != 1) {
+      break;
+    }
+    int fds[4] = {-1, -1, -1, -1};
+    EGLint strides[4] = {0, 0, 0, 0};
+    EGLint offsets[4] = {0, 0, 0, 0};
+    if (!export_image_(display_, buffer.image, fds, strides, offsets)) break;
+    buffer.fd = fds[0];
+    buffer.stride = static_cast<uint32_t>(strides[0]);
+    buffer.offset = static_cast<uint32_t>(offsets[0]);
+    fourcc_ = static_cast<uint32_t>(fourcc);
+    modifier_ = modifier;
+  }
+  const bool complete =
+      !buffers.empty() && buffers.back().fd >= 0 &&
+      static_cast<size_t>(std::count_if(buffers.begin(), buffers.end(),
+                                        [](const Buffer& b) { return b.fd >= 0; })) ==
+          buffers.size();
+  pool_ = std::move(buffers);
+  if (!complete) {
+    DestroyPool();
+    return false;
+  }
+  pool_width_ = width;
+  pool_height_ = height;
+  ++generation_;
+  if (kTrace) {
+    std::fprintf(stderr, "raccoon_runner: gl pool %zu x %zux%zu generation %u\n",
+                 pool_.size(), width, height, generation_);
+  }
+  return true;
+}
+
 uint32_t GlRenderer::Fbo(size_t width, size_t height) {
   if (width == 0 || height == 0) return 0;
+  std::lock_guard<std::mutex> lock(mutex_);
+  current_ = -1;
+  if (!pool_wanted_ && !pool_.empty()) DestroyPool();
+  if (pool_wanted_ && can_export_) {
+    if (pool_.empty() || pool_width_ != width || pool_height_ != height) {
+      if (!BuildPool(width, height)) pool_wanted_ = false;
+    }
+    for (size_t i = 0; i < pool_.size(); ++i) {
+      if (pool_[i].busy) continue;
+      pool_[i].busy = true;
+      current_ = static_cast<int>(i);
+      glBindFramebuffer(GL_FRAMEBUFFER, pool_fbo_);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                             GL_TEXTURE_2D, pool_[i].texture, 0);
+      if (kTrace) std::fprintf(stderr, "raccoon_runner: gl fbo -> pool %zu\n", i);
+      return pool_fbo_;
+    }
+    // Every buffer is with the client: this frame goes by readback.
+  }
+  if (kTrace && pool_wanted_) std::fprintf(stderr, "raccoon_runner: gl fbo -> readback\n");
   return EnsureSize(width, height) ? fbo_ : 0;
 }
 
 bool GlRenderer::Present(const FrameCallback& callback) {
+  int index = -1;
+  uint32_t generation = 0;
+  size_t width = 0;
+  size_t height = 0;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    index = current_;
+    generation = generation_;
+    width = pool_width_;
+    height = pool_height_;
+    current_ = -1;
+  }
+  if (index >= 0) {
+    // The client reads the buffer from its own context; wait for the draw.
+    glFinish();
+    if (kTrace) std::fprintf(stderr, "raccoon_runner: gl present pool %d\n", index);
+    if (gpu_frame_) gpu_frame_(generation, index, width, height);
+    return true;
+  }
   if (fbo_ == 0) return false;
   glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
   glReadPixels(0, 0, static_cast<GLsizei>(width_), static_cast<GLsizei>(height_),

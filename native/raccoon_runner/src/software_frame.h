@@ -40,6 +40,22 @@ class SoftwareFrame {
     size_t sequence = 0;
   };
 
+  // A frame the engine drew into a GPU buffer, not yet sent.
+  struct Gpu {
+    uint32_t generation = 0;
+    int index = -1;
+    size_t width = 0;
+    size_t height = 0;
+    size_t sequence = 0;
+  };
+  // A GPU buffer frame was drawn; from the raster thread. A pending one not
+  // yet sent is superseded and its buffer released through the callback.
+  void PresentGpu(uint32_t generation, int index, size_t width, size_t height);
+  bool TakeGpu(Gpu* out);
+  void SetGpuReleaseCallback(std::function<void(uint32_t, int)> callback) {
+    release_gpu_ = std::move(callback);
+  }
+
   // Frames are presented into |pool|'s buffers from now on; null returns to
   // inline copies. The pool must outlive the setting.
   void SetSharedPool(SharedBufferPool* pool);
@@ -85,6 +101,8 @@ class SoftwareFrame {
   size_t inline_sequence_ = 0;
   SharedBufferPool* pool_ = nullptr;
   Shared pending_shared_;
+  Gpu pending_gpu_;
+  std::function<void(uint32_t, int)> release_gpu_;
 };
 
 }  // namespace raccoon

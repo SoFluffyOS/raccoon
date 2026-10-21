@@ -11,6 +11,21 @@
 #include "flutter_embedder.h"
 #if RACCOON_HAS_GL
 #include "gl_renderer.h"
+#else
+namespace raccoon {
+// Without a GPU renderer there are no GPU buffers; the type stays so callers
+// compile.
+struct GpuBufferSet {
+  uint32_t generation = 0;
+  size_t width = 0;
+  size_t height = 0;
+  uint32_t fourcc = 0;
+  uint64_t modifier = 0;
+  std::vector<uint32_t> strides;
+  std::vector<uint32_t> offsets;
+  std::vector<int> fds;
+};
+}  // namespace raccoon
 #endif
 #include "platform_task_runner.h"
 #include "software_frame.h"
@@ -83,6 +98,14 @@ class EngineHost {
   std::string vm_service_uri() const;
   // Which renderer rasterizes, for the log: "software", or "gl (...)".
   const std::string& renderer() const { return renderer_; }
+
+  // GPU buffers: the engine draws into a ring of exported buffers and frames
+  // are buffer indices (see GlRenderer). False, with why, without a GPU
+  // renderer that exports.
+  bool EnableGpuBuffers(size_t count, std::string* error);
+  void DisableGpuBuffers();
+  bool GpuBufferSetNow(GpuBufferSet* out) const;
+  void ReleaseGpuBuffer(uint32_t generation, int index);
 
   SoftwareFrame& frame() { return frame_; }
   TextInput& text_input() { return text_input_; }

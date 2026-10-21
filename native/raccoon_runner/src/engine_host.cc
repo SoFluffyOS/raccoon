@@ -62,8 +62,18 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
     gl.fbo_with_frame_info_callback = GlFbo;
     gl.present_with_info = GlPresent;
     gl.gl_proc_resolver = GlProc;
-    gl.fbo_reset_after_present = false;
+    // Ask for the framebuffer every frame: with a pool it is a different
+    // buffer each time.
+    gl.fbo_reset_after_present = true;
     renderer_ = "gl (" + gl_->description() + ")";
+    gl_->SetGpuFrameCallback(
+        [this](uint32_t generation, int index, size_t width, size_t height) {
+          frame_.PresentGpu(generation, index, width, height);
+        });
+    frame_.SetGpuReleaseCallback(
+        [this](uint32_t generation, int index) {
+          gl_->Release(generation, index);
+        });
 #endif
   } else {
     renderer.type = kSoftware;
@@ -161,6 +171,40 @@ void* EngineHost::GlProc(void* user_data, const char* name) {
   return static_cast<EngineHost*>(user_data)->gl_->ProcAddress(name);
 }
 #endif
+
+bool EngineHost::EnableGpuBuffers(size_t count, std::string* error) {
+#if RACCOON_HAS_GL
+  if (gl_) return gl_->EnablePool(count, error);
+#else
+  (void)count;
+#endif
+  *error = "the software renderer has no GPU buffers";
+  return false;
+}
+
+void EngineHost::DisableGpuBuffers() {
+#if RACCOON_HAS_GL
+  if (gl_) gl_->DisablePool();
+#endif
+}
+
+bool EngineHost::GpuBufferSetNow(GpuBufferSet* out) const {
+#if RACCOON_HAS_GL
+  if (gl_) return gl_->pool_set(out);
+#else
+  (void)out;
+#endif
+  return false;
+}
+
+void EngineHost::ReleaseGpuBuffer(uint32_t generation, int index) {
+#if RACCOON_HAS_GL
+  if (gl_) gl_->Release(generation, index);
+#else
+  (void)generation;
+  (void)index;
+#endif
+}
 
 void EngineHost::SendPointer(const FlutterPointerEvent& event) {
   loader_.procs().SendPointerEvent(engine_, &event, 1);

@@ -24,12 +24,18 @@ message ClientHello {
   // field; the runner then leaves typing characters to it. Keys still reach
   // the app.
   bool composes = 5;
+  // The client can import GPU buffers (DRM dmabufs on Linux) and will take
+  // their file descriptors from the runner's GPU socket; frames then arrive
+  // as buffer indices, no pixels.
+  bool gpu_buffers = 6;
   uint32 pid = 4;  // the client process, named to a later client
 }
 
 // Gives a shared buffer back to the runner once its pixels were read.
 message ReleaseBuffer {
   uint32 index = 1;
+  // Which GPU buffer set the index belongs to; 0 for shared buffers.
+  uint32 generation = 2;
 }
 
 message Resize {
@@ -144,6 +150,27 @@ message Frame {
   uint64 timestamp_micros = 7;
   bool in_shared_buffer = 8;
   uint32 buffer_index = 9;
+  // The frame is GPU buffer buffer_index of GpuBuffers generation
+  // gpu_generation; pixels are empty.
+  bool in_gpu_buffer = 10;
+  uint32 gpu_generation = 11;
+}
+
+// A set of same-sized GPU buffers the engine renders into, one frame each,
+// exported as DRM dmabufs. Their file descriptors are not here: a native
+// client takes them from the runner's GPU socket, where this message is sent
+// again with one descriptor per buffer riding along, in index order. A new
+// set, with a higher generation, replaces the old one on resize.
+message GpuBuffers {
+  uint32 generation = 1;
+  uint32 count = 2;
+  uint32 width = 3;
+  uint32 height = 4;
+  uint32 fourcc = 5;
+  uint64 modifier = 6;
+  repeated uint32 strides = 7;
+  repeated uint32 offsets = 8;
+  string socket = 9;
 }
 
 // A set of same-sized shared buffers. Their file descriptors travel with this
@@ -205,5 +232,6 @@ message RunnerMessage {
     SharedBuffers shared_buffers = 7;
     Busy busy = 8;
     TextField text_field = 9;
+    GpuBuffers gpu_buffers = 10;
   }
 }
