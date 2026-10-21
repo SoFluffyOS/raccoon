@@ -88,6 +88,9 @@ class GlRenderer {
   // |fence_fd|, when not -1, is signalled once the client's last use of the
   // buffer is done; the renderer owns it from here.
   void Release(uint32_t generation, int index, int fence_fd = -1);
+  // Every buffer is the renderer's again, fences dropped: for a client
+  // that went away holding some.
+  void ReleaseAll();
 
  private:
   struct Buffer {

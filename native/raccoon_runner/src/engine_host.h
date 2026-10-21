@@ -108,6 +108,8 @@ class EngineHost {
   // |fence_fd|, when not -1, is signalled once the client's last use of the
   // buffer is done; owned from here.
   void ReleaseGpuBuffer(uint32_t generation, int index, int fence_fd = -1);
+  // Every buffer is the runner's again: the client holding them is gone.
+  void ReleaseAllGpuBuffers();
 
   SoftwareFrame& frame() { return frame_; }
   TextInput& text_input() { return text_input_; }

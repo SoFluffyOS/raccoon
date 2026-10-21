@@ -262,6 +262,19 @@ void GlRenderer::Release(uint32_t generation, int index, int fence_fd) {
   }
 }
 
+void GlRenderer::ReleaseAll() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  for (size_t i = 0; i < pool_.size(); ++i) {
+    Buffer& buffer = pool_[i];
+    if (buffer.fence >= 0) close(buffer.fence);
+    buffer.fence = -1;
+    // The one being drawn stays taken until it is presented.
+    if (static_cast<int>(i) == current_) continue;
+    buffer.busy = false;
+  }
+  if (kTrace) std::fprintf(stderr, "raccoon_runner: gl release pool all\n");
+}
+
 int GlRenderer::ExportFence() {
   if (!has_fences_) return -1;
   const EGLSyncKHR sync =

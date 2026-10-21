@@ -469,7 +469,11 @@ int Serve(const Options& options) {
   const std::string gpu_socket = GpuSocketPath(options.socket);
   raccoon::RunnerServer::Handler gpu_handler;
   gpu_handler.on_client_connected = [&] { gpu_fds_sent = 0; };
-  gpu_handler.on_client_disconnected = [&] { gpu_fds_sent = 0; };
+  gpu_handler.on_client_disconnected = [&] {
+    gpu_fds_sent = 0;
+    // Whatever it held, nothing samples now.
+    host.ReleaseAllGpuBuffers();
+  };
   gpu_handler.on_raw = [&](const uint8_t* payload, size_t size, std::vector<int>& fds) {
     if (size >= 16 && std::memcmp(payload, "RREL", 4) == 0) {
       int fence = -1;

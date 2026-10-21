@@ -211,6 +211,12 @@ void EngineHost::ReleaseGpuBuffer(uint32_t generation, int index, int fence_fd) 
   if (fence_fd >= 0) close(fence_fd);
 }
 
+void EngineHost::ReleaseAllGpuBuffers() {
+#if RACCOON_HAS_GL
+  if (gl_) gl_->ReleaseAll();
+#endif
+}
+
 void EngineHost::SendPointer(const FlutterPointerEvent& event) {
   loader_.procs().SendPointerEvent(engine_, &event, 1);
 }
