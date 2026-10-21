@@ -37,6 +37,15 @@ void main() {
     });
   });
 
+  test('serves url_launcher by default', () {
+    final report = const PluginCompatibility().parse(_sample);
+
+    expect(
+      report.singleWhere((s) => s.name == 'url_launcher_linux').support,
+      PluginSupport.servedByRaccoon,
+    );
+  });
+
   test('tolerates a project without the file', () {
     expect(const PluginCompatibility().forProject('/nowhere'), isEmpty);
   });

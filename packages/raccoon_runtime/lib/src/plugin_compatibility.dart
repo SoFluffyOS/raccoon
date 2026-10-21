@@ -32,7 +32,11 @@ final class PluginStatus {
 /// Reads the Flutter tool's `.flutter-plugins-dependencies` and says, per
 /// plugin, what the runtime can do with it (see design note 004).
 final class PluginCompatibility {
-  const PluginCompatibility({this.servedByRaccoon = const {}});
+  const PluginCompatibility({this.servedByRaccoon = defaultServedByRaccoon});
+
+  /// Native Linux plugin packages the IDE serves over platform channels today
+  /// (see `IdePlatformChannels` and `IdeUrlLauncherChannels` in raccoon_view).
+  static const Set<String> defaultServedByRaccoon = {'url_launcher_linux'};
 
   /// Names of native Linux plugin packages Raccoon implements in Dart.
   final Set<String> servedByRaccoon;
