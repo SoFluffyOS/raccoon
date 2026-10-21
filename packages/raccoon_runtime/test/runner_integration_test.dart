@@ -203,6 +203,51 @@ void main() {
     skip: ready ? false : 'build the runner and example first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
+
+  test(
+    'frames stay right when the view shrinks after a large frame',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.frames.first.timeout(const Duration(seconds: 15));
+        for (final (w, h, ratio) in [
+          (1640, 2360, 2.0),
+          (395, 870, 1.0),
+          (780, 1688, 2.0),
+          (395, 870, 1.0),
+        ]) {
+          client.resize(w, h, ratio);
+          final frame = await client.frames
+              .firstWhere((f) => f.width == w && f.height == h)
+              .timeout(const Duration(seconds: 10));
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+          final latest = client.latestFrame ?? frame;
+          expect(latest.width, w);
+          expect(latest.pixels.length, latest.rowBytes * latest.height);
+          expect(_pixel(latest, latest.width ~/ 2, latest.height ~/ 2), _red);
+          expect(_pixel(latest, 3, 3), _blue);
+        }
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 }
 
 /// The SDK behind `FLUTTER_ROOT`, else behind the `flutter` on the PATH.
