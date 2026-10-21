@@ -41,14 +41,14 @@ jobs:
       # The runtime's integration tests expect the simulator's layout, with
       # the runner at native/raccoon_runner beside packages/raccoon_runtime
       # and pub_packages/raccoon.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: native/raccoon_runner
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: SoFluffyOS/raccoon
           path: pub_packages/raccoon
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: SoFluffyOS/raccoon_runtime
           path: packages/raccoon_runtime
@@ -68,7 +68,7 @@ jobs:
           cache: true
 
       - name: Cache the engine and protoc
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cache/raccoon
@@ -129,7 +129,7 @@ jobs:
           RACCOON_RUNNER: ${{ github.workspace }}/native/raccoon_runner/build/raccoon_runner
         run: dart test --reporter expanded
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: raccoon_runner-${{ matrix.name }}
           path: native/raccoon_runner/build/raccoon_runner

@@ -31,7 +31,7 @@ jobs:
           - name: macos-x64
             os: macos-15-intel
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: The tag must match VERSION
         if: github.ref_type == 'tag'
@@ -56,7 +56,7 @@ jobs:
           cache: true
 
       - name: Cache the engine and protoc
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cache/raccoon
@@ -75,7 +75,7 @@ jobs:
       - name: Package
         run: tool/package.sh dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: raccoon_runner-${{ matrix.name }}
           path: dist/*.tar.gz
@@ -85,8 +85,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
         with:
           path: dist
           merge-multiple: true
