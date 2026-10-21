@@ -142,4 +142,16 @@ void main() {
       LogicalKeyboardKey.keyA.keyId,
     );
   });
+
+  testWidgets('a runner hanging up shows as disconnected', (tester) async {
+    final connection = _FakeConnection();
+    var disconnected = 0;
+    await tester.pumpWidget(
+      RaccoonView(connection: connection, onDisconnected: () => disconnected++),
+    );
+    connection._frames.addError(StateError('hung up'));
+    await tester.pump();
+    expect(find.text('Runner disconnected'), findsOneWidget);
+    expect(disconnected, 1);
+  });
 }

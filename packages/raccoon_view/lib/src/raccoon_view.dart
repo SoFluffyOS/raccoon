@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/widgets.dart';
 import 'package:raccoon/raccoon.dart' as rc;
 import 'package:raccoon_view/src/frame_decoder.dart';
+import 'package:raccoon_view/src/disconnected_overlay.dart';
 import 'package:raccoon_view/src/frame_view.dart';
 import 'package:raccoon_runtime/raccoon_runtime.dart' show RunnerConnection;
 import 'package:raccoon_view/src/input_mapping.dart';
@@ -17,6 +18,7 @@ class RaccoonView extends StatefulWidget {
     required this.connection,
     this.autofocus = true,
     this.pixelRatio,
+    this.onDisconnected,
   });
 
   final RunnerConnection connection;
@@ -25,6 +27,10 @@ class RaccoonView extends StatefulWidget {
 
   /// Overrides the display's device pixel ratio, to preview a denser screen.
   final double? pixelRatio;
+
+  /// Called once when the runner hangs up or the frames end; the view keeps
+  /// its last frame under a "Runner disconnected" overlay.
+  final VoidCallback? onDisconnected;
 
   @override
   State<RaccoonView> createState() => _RaccoonViewState();
@@ -35,6 +41,7 @@ class _RaccoonViewState extends State<RaccoonView> {
   ui.Image? _image;
   rc.Frame? _pending;
   bool _decoding = false;
+  bool _lost = false;
   Size? _sentSize;
   double _pixelRatio = 1;
 
@@ -61,7 +68,18 @@ class _RaccoonViewState extends State<RaccoonView> {
   }
 
   void _subscribe() {
-    _frames = widget.connection.frames.listen(_onFrame);
+    _lost = false;
+    _frames = widget.connection.frames.listen(
+      _onFrame,
+      onError: (Object _) => _onLost(),
+      onDone: _onLost,
+    );
+  }
+
+  void _onLost() {
+    if (!mounted || _lost) return;
+    setState(() => _lost = true);
+    widget.onDisconnected?.call();
   }
 
   void _onFrame(rc.Frame frame) {
@@ -133,7 +151,13 @@ class _RaccoonViewState extends State<RaccoonView> {
             onPointerSignal: _onPointer,
             behavior: HitTestBehavior.opaque,
             child: SizedBox.expand(
-              child: RaccoonFrameView(frame: _image, fit: BoxFit.fill),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  RaccoonFrameView(frame: _image, fit: BoxFit.fill),
+                  if (_lost) const DisconnectedOverlay(),
+                ],
+              ),
             ),
           ),
         );
