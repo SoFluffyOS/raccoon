@@ -7,3 +7,7 @@ configuration, and the frame and input client. Pure Dart, no Flutter, so
 
 This package is developed inside the Lumide workspace (`packages/raccoon_runtime`)
 and resolves through it.
+
+## Issues
+
+Report here: [SoFluffyOS/raccoon](https://github.com/SoFluffyOS/raccoon/issues). One tracker for every Raccoon repository, whichever piece the bug is in. Issues are off on this one.
