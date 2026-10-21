@@ -1,0 +1,129 @@
+// The Raccoon runner protocol, version 1.
+//
+// One client talks to one runner over a local socket. Every message is
+// length-prefixed: a 4-byte little-endian length, then a serialized
+// ClientMessage (client to runner) or RunnerMessage (runner to client).
+// Frames carry pixels inline in v1; shared memory and GPU buffers come later
+// and will add new Frame fields, not change these.
+
+syntax = "proto3";
+
+package raccoon.v1;
+
+option optimize_for = LITE_RUNTIME;
+
+// Client to runner.
+
+message ClientHello {
+  uint32 protocol_version = 1;
+  string client_name = 2;
+}
+
+message Resize {
+  uint32 width = 1;
+  uint32 height = 2;
+  double pixel_ratio = 3;
+}
+
+enum PointerPhase {
+  POINTER_PHASE_UNSPECIFIED = 0;
+  POINTER_PHASE_ADD = 1;
+  POINTER_PHASE_REMOVE = 2;
+  POINTER_PHASE_HOVER = 3;
+  POINTER_PHASE_DOWN = 4;
+  POINTER_PHASE_MOVE = 5;
+  POINTER_PHASE_UP = 6;
+}
+
+enum PointerDevice {
+  POINTER_DEVICE_UNSPECIFIED = 0;
+  POINTER_DEVICE_MOUSE = 1;
+  POINTER_DEVICE_TOUCH = 2;
+}
+
+message PointerEvent {
+  PointerPhase phase = 1;
+  double x = 2;
+  double y = 3;
+  // Bit set of pressed buttons; bit 0 is the primary button.
+  int64 buttons = 4;
+  PointerDevice device = 5;
+  int32 pointer_id = 6;
+  uint64 timestamp_micros = 7;
+  double scroll_delta_x = 8;
+  double scroll_delta_y = 9;
+}
+
+enum KeyKind {
+  KEY_KIND_UNSPECIFIED = 0;
+  KEY_KIND_DOWN = 1;
+  KEY_KIND_UP = 2;
+  KEY_KIND_REPEAT = 3;
+}
+
+message KeyEvent {
+  KeyKind kind = 1;
+  uint64 physical = 2;
+  uint64 logical = 3;
+  string character = 4;
+  uint64 timestamp_micros = 5;
+  bool synthesized = 6;
+}
+
+message Shutdown {}
+
+message ClientMessage {
+  oneof message {
+    ClientHello hello = 1;
+    Resize resize = 2;
+    PointerEvent pointer = 3;
+    KeyEvent key = 4;
+    Shutdown shutdown = 5;
+  }
+}
+
+// Runner to client.
+
+message RunnerHello {
+  uint32 protocol_version = 1;
+  string engine_revision = 2;
+}
+
+enum PixelFormat {
+  PIXEL_FORMAT_UNSPECIFIED = 0;
+  PIXEL_FORMAT_BGRA8888 = 1;
+  PIXEL_FORMAT_RGBA8888 = 2;
+}
+
+message Frame {
+  uint64 sequence = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  uint32 row_bytes = 4;
+  PixelFormat format = 5;
+  bytes pixels = 6;
+  uint64 timestamp_micros = 7;
+}
+
+message VmService {
+  string uri = 1;
+}
+
+message LogLine {
+  string tag = 1;
+  string message = 2;
+}
+
+message Exited {
+  int32 code = 1;
+}
+
+message RunnerMessage {
+  oneof message {
+    RunnerHello hello = 1;
+    Frame frame = 2;
+    VmService vm_service = 3;
+    LogLine log = 4;
+    Exited exited = 5;
+  }
+}

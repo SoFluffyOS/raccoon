@@ -12,7 +12,7 @@ SDK_ENGINE="$(dirname "$(dirname "$(command -v flutter)")")/bin/cache/artifacts/
 cmake -S "$ROOT" -B "$ROOT/build" -G Ninja -DRACCOON_ENGINE_DIR="$ENGINE_DIR" >/dev/null
 ninja -C "$ROOT/build" >/dev/null
 
-"$ROOT/build/raccoon_runner" \
+"$ROOT/build/raccoon_runner" render \
   --engine-dir "$ENGINE_DIR" \
   --assets "$ROOT/example/hello/build/flutter_assets" \
   --icu "$SDK_ENGINE/icudtl.dat" \

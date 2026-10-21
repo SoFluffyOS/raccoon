@@ -1,7 +1,5 @@
 #include "platform_task_runner.h"
 
-#include <algorithm>
-
 namespace raccoon {
 
 PlatformTaskRunner::PlatformTaskRunner(const FlutterEngineProcTable& procs)
@@ -27,7 +25,7 @@ void PlatformTaskRunner::Post(FlutterTask task, uint64_t target_time) {
     std::lock_guard<std::mutex> lock(mutex_);
     queue_.push({target_time, task});
   }
-  wake_.notify_one();
+  if (wake_) wake_();
 }
 
 void PlatformTaskRunner::RunDueTasks() {
@@ -35,7 +33,8 @@ void PlatformTaskRunner::RunDueTasks() {
     FlutterTask task;
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      if (queue_.empty() || queue_.top().target_time > procs_.GetCurrentTime()) {
+      if (queue_.empty() ||
+          queue_.top().target_time > procs_.GetCurrentTime()) {
         return;
       }
       task = queue_.top().task;
@@ -45,24 +44,14 @@ void PlatformTaskRunner::RunDueTasks() {
   }
 }
 
-void PlatformTaskRunner::PumpUntil(const std::function<bool()>& done,
-                                   std::chrono::milliseconds timeout) {
-  const auto deadline = std::chrono::steady_clock::now() + timeout;
-  while (true) {
-    RunDueTasks();
-    if (done()) return;
-    const auto now = std::chrono::steady_clock::now();
-    if (now >= deadline) return;
-    auto wait_until = std::min(deadline, now + std::chrono::milliseconds(20));
-    std::unique_lock<std::mutex> lock(mutex_);
-    if (!queue_.empty()) {
-      const uint64_t due_in = queue_.top().target_time - procs_.GetCurrentTime();
-      const auto next_due = now + std::chrono::nanoseconds(
-          queue_.top().target_time > procs_.GetCurrentTime() ? due_in : 0);
-      wait_until = std::min(wait_until, next_due);
-    }
-    wake_.wait_until(lock, wait_until);
-  }
+int PlatformTaskRunner::MillisUntilNextTask() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (queue_.empty()) return -1;
+  const uint64_t now = procs_.GetCurrentTime();
+  const uint64_t target = queue_.top().target_time;
+  if (target <= now) return 0;
+  const uint64_t millis = (target - now + 999999) / 1000000;
+  return millis > 1000 ? 1000 : static_cast<int>(millis);
 }
 
 }  // namespace raccoon

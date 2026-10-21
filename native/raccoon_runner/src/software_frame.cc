@@ -16,14 +16,18 @@ void SoftwareFrame::Present(const void* allocation, size_t row_bytes,
     std::memcpy(pixels_.data(), allocation, row_bytes * height);
     ++frame_count_;
   }
-  presented_.notify_all();
+  if (presented_) presented_();
 }
 
-size_t SoftwareFrame::WaitForFrames(size_t count,
-                                    std::chrono::milliseconds timeout) {
-  std::unique_lock<std::mutex> lock(mutex_);
-  presented_.wait_for(lock, timeout, [&] { return frame_count_ >= count; });
-  return frame_count_;
+bool SoftwareFrame::CopyLatest(Copy* out, size_t after_sequence) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (frame_count_ == 0 || frame_count_ <= after_sequence) return false;
+  out->pixels = pixels_;
+  out->width = width_;
+  out->height = height_;
+  out->row_bytes = row_bytes_;
+  out->sequence = frame_count_;
+  return true;
 }
 
 size_t SoftwareFrame::FrameCount() const {
