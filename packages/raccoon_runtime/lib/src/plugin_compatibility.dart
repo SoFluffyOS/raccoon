@@ -5,17 +5,18 @@ import 'package:path/path.dart' as p;
 
 /// How a project's plugin fares in the runtime.
 enum PluginSupport {
-  /// Its Linux implementation is Dart, so it works unchanged.
+  /// Its implementation for this host is Dart, so it works unchanged.
   works,
 
-  /// Its Linux implementation is native and Raccoon provides one.
+  /// Its implementation for this host is native and Raccoon provides one.
   servedByRaccoon,
 
-  /// Its Linux implementation is native and nothing serves it yet; calls
-  /// throw `MissingPluginException`, as on an unsupported desktop today.
+  /// Its implementation for this host is native and nothing serves it yet;
+  /// calls throw `MissingPluginException`, as on an unsupported desktop today.
   unavailable,
 
-  /// The plugin has no Linux implementation at all (mobile or web only).
+  /// The plugin has no implementation for this host at all (mobile or web
+  /// only).
   notForThisPlatform,
 }
 
@@ -32,14 +33,33 @@ final class PluginStatus {
 /// Reads the Flutter tool's `.flutter-plugins-dependencies` and says, per
 /// plugin, what the runtime can do with it (see design note 004).
 final class PluginCompatibility {
-  const PluginCompatibility({this.servedByRaccoon = defaultServedByRaccoon});
+  PluginCompatibility({
+    this.servedByRaccoon = defaultServedByRaccoon,
+    String? platform,
+  }) : platform = platform ?? hostPlatform;
 
-  /// Native Linux plugin packages the IDE serves over platform channels today
-  /// (see `IdePlatformChannels` and `IdeUrlLauncherChannels` in raccoon_view).
-  static const Set<String> defaultServedByRaccoon = {'url_launcher_linux'};
+  /// Native plugin packages the IDE serves over platform channels today (see
+  /// `IdePlatformChannels` and `IdeUrlLauncherChannels` in raccoon_view).
+  static const Set<String> defaultServedByRaccoon = {
+    'url_launcher_linux',
+    'url_launcher_macos',
+  };
 
-  /// Names of native Linux plugin packages Raccoon implements in Dart.
+  /// The tool's name for the host this process runs on.
+  static final String hostPlatform = platformFor(Platform.operatingSystem);
+
+  /// The key the tool's file lists a desktop's plugins under.
+  static String platformFor(String operatingSystem) =>
+      switch (operatingSystem) {
+        'linux' || 'macos' || 'windows' => operatingSystem,
+        _ => throw UnsupportedError('no desktop plugins on $operatingSystem'),
+      };
+
+  /// Names of native plugin packages Raccoon implements in Dart.
   final Set<String> servedByRaccoon;
+
+  /// The platform whose plugin list the report reads.
+  final String platform;
 
   static const String fileName = '.flutter-plugins-dependencies';
 
@@ -51,7 +71,7 @@ final class PluginCompatibility {
     return parse(file.readAsStringSync());
   }
 
-  List<PluginStatus> parse(String json, {String platform = 'linux'}) {
+  List<PluginStatus> parse(String json) {
     final decoded = jsonDecode(json);
     if (decoded is! Map || decoded['plugins'] is! Map) return const [];
     final platforms = decoded['plugins'] as Map;

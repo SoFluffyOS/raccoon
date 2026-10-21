@@ -25,12 +25,11 @@ void main(List<String> arguments) {
 }
 
 void _doctor(String project) {
-  final which = Process.runSync('which', ['flutter']).stdout.toString().trim();
-  if (which.isEmpty) {
+  final sdk = RuntimeStore.sdkRootOnPath();
+  if (sdk == null) {
     stdout.writeln('flutter: not on PATH');
     return;
   }
-  final sdk = RuntimeStore.sdkRootOfFlutter(which);
   final revision = RuntimeStore.revisionOfSdk(sdk);
   final store = RuntimeStore.forHost(Platform.environment);
   final runtime = revision == null ? null : store.installed(revision);
@@ -42,7 +41,7 @@ void _doctor(String project) {
     ..writeln(
       'custom devices: ${CustomDevicesFile.forHost(Platform.environment).ids().join(', ')}',
     );
-  final report = const PluginCompatibility().forProject(project);
+  final report = PluginCompatibility().forProject(project);
   stdout.writeln(
     'plugins in $project: ${report.isEmpty ? 'none recorded' : ''}',
   );

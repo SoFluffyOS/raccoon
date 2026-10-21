@@ -9,14 +9,16 @@ import 'package:raccoon_runtime/src/runner_endpoint.dart';
 final class RunnerDiscovery {
   const RunnerDiscovery(this.directory);
 
-  /// The host's socket directory: `$XDG_RUNTIME_DIR/raccoon`, else
-  /// `<temporary directory>/raccoon`.
-  factory RunnerDiscovery.forHost(
-    Map<String, String> environment,
-    String temporaryDirectory,
-  ) {
+  /// The host's socket directory, next to [RunnerEndpoint.forHost]'s default
+  /// socket: `$XDG_RUNTIME_DIR/raccoon` on Linux, `<temporary
+  /// directory>/raccoon` elsewhere.
+  factory RunnerDiscovery.forHost({
+    required String operatingSystem,
+    required Map<String, String> environment,
+    required String temporaryDirectory,
+  }) {
     final endpoint = RunnerEndpoint.forHost(
-      operatingSystem: 'linux',
+      operatingSystem: operatingSystem,
       environment: environment,
       temporaryDirectory: temporaryDirectory,
     );

@@ -15,10 +15,20 @@ void main() {
 
   test('resolves the socket directory for the host', () {
     expect(
-      RunnerDiscovery.forHost({
-        'XDG_RUNTIME_DIR': '/run/user/7',
-      }, '/tmp').directory,
+      RunnerDiscovery.forHost(
+        operatingSystem: 'linux',
+        environment: {'XDG_RUNTIME_DIR': '/run/user/7'},
+        temporaryDirectory: '/tmp',
+      ).directory,
       '/run/user/7/raccoon',
+    );
+    expect(
+      RunnerDiscovery.forHost(
+        operatingSystem: 'macos',
+        environment: const {},
+        temporaryDirectory: '/var/folders/x/T',
+      ).directory,
+      '/var/folders/x/T/raccoon',
     );
   });
 

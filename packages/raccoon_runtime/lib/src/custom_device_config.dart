@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ffi' show Abi;
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -7,19 +8,35 @@ import 'package:path/path.dart' as p;
 /// `flutter run -d raccoon` builds the bundle, installs it with the device
 /// helper and starts the runner.
 final class CustomDeviceConfig {
-  const CustomDeviceConfig({
+  CustomDeviceConfig({
     required this.deviceHelper,
     this.id = 'raccoon',
     this.label = 'Raccoon',
     this.sdkNameAndVersion = 'Raccoon runtime',
-    this.platform = 'linux-x64',
-  });
+    String? platform,
+  }) : platform = platform ?? hostPlatform;
+
+  /// The tool's platform name for the host this process runs on.
+  static final String hostPlatform = platformFor(Abi.current());
+
+  /// The tool accepts only `linux-x64` and `linux-arm64` as a custom device's
+  /// platform, whatever the host. That is fine: a debug bundle is built from
+  /// the host's own snapshots regardless, and the runner loads the host's
+  /// engine. Naming the host's architecture keeps the tool's artifact paths
+  /// honest at least.
+  static String platformFor(Abi abi) => switch (abi) {
+    Abi.linuxArm64 || Abi.macosArm64 || Abi.windowsArm64 => 'linux-arm64',
+    Abi.linuxX64 || Abi.macosX64 || Abi.windowsX64 => 'linux-x64',
+    _ => throw UnsupportedError('no custom device platform for $abi'),
+  };
 
   /// Path to the `raccoon-device` helper (ping, install, uninstall, run).
   final String deviceHelper;
   final String id;
   final String label;
   final String sdkNameAndVersion;
+
+  /// What the tool is told, see [platformFor].
   final String platform;
 
   Map<String, Object?> toJson() => {

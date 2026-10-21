@@ -98,8 +98,23 @@ Future<void> main(List<String> arguments) async {
 
 const _ticksPerSecond = 100;
 
+/// CPU time of a process in hundredths of a second: user plus system ticks
+/// from procfs on Linux, the `[h:]m:ss.cc` column of ps on macOS.
 int _cpuTicks(int processId) {
-  final stat = File('/proc/$processId/stat').readAsStringSync();
-  final fields = stat.substring(stat.lastIndexOf(')') + 2).split(' ');
-  return int.parse(fields[11]) + int.parse(fields[12]);
+  if (Platform.isLinux) {
+    final stat = File('/proc/$processId/stat').readAsStringSync();
+    final fields = stat.substring(stat.lastIndexOf(')') + 2).split(' ');
+    return int.parse(fields[11]) + int.parse(fields[12]);
+  }
+  final time = Process.runSync('ps', [
+    '-p',
+    '$processId',
+    '-o',
+    'time=',
+  ]).stdout.toString().trim();
+  var seconds = 0.0;
+  for (final part in time.split(':')) {
+    seconds = seconds * 60 + double.parse(part);
+  }
+  return (seconds * _ticksPerSecond).round();
 }

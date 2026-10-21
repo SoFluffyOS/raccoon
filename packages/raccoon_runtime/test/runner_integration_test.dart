@@ -17,13 +17,18 @@ const _red = (r: 0xE5, g: 0x39, b: 0x35);
 const _green = (r: 0x43, g: 0xA0, b: 0x47);
 const _purple = (r: 0x8E, g: 0x24, b: 0xAA);
 
+/// The colour at ([x], [y]), whichever byte order the host rasters in.
 ({int r, int g, int b}) _pixel(Frame frame, int x, int y) {
   final offset = y * frame.rowBytes + x * 4;
-  return (
-    r: frame.pixels[offset + 2],
-    g: frame.pixels[offset + 1],
-    b: frame.pixels[offset],
-  );
+  final bytes = frame.pixels;
+  return switch (frame.format) {
+    PixelFormat.PIXEL_FORMAT_RGBA8888 => (
+      r: bytes[offset],
+      g: bytes[offset + 1],
+      b: bytes[offset + 2],
+    ),
+    _ => (r: bytes[offset + 2], g: bytes[offset + 1], b: bytes[offset]),
+  };
 }
 
 /// A JSON method-channel reply, as flutter/platform expects: a one-element
@@ -49,12 +54,23 @@ void main() {
     'build',
     'flutter_assets',
   );
+  final sdk = _sdkRoot(environment);
+  final revision = switch (sdk) {
+    final root? => RuntimeStore.revisionOfSdk(root),
+    null => null,
+  };
   final engineDir =
       environment['RACCOON_ENGINE_DIR'] ??
-      _firstEngineDir(
-        p.join(environment['HOME'] ?? '', '.cache', 'raccoon', 'engines'),
-      );
-  final icu = _firstExisting([environment['RACCOON_ICU'] ?? '', _sdkIcu()]);
+      switch (revision) {
+        final rev? => RuntimeStore.forHost(
+          environment,
+        ).installed(rev)?.directory,
+        null => null,
+      };
+  final icu = _firstExisting([
+    environment['RACCOON_ICU'] ?? '',
+    if (sdk != null) RuntimeStore.icuDataOfSdk(sdk),
+  ]);
   final ready =
       binary != null &&
       engineDir != null &&
@@ -85,7 +101,7 @@ void main() {
         );
         expect(frame.width, 800);
         expect(frame.height, 600);
-        expect(frame.format, PixelFormat.PIXEL_FORMAT_BGRA8888);
+        expect(frame.format, isNot(PixelFormat.PIXEL_FORMAT_UNSPECIFIED));
         expect(_pixel(frame, 5, 5), _blue);
         expect(_pixel(frame, 400, 300), _red);
 
@@ -187,39 +203,10 @@ void main() {
   );
 }
 
-String? _firstEngineDir(String cache) {
-  final root = Directory(cache);
-  if (!root.existsSync()) return null;
-  for (final revision in root.listSync().whereType<Directory>()) {
-    final dir = p.join(revision.path, 'linux-x64');
-    if (File(p.join(dir, 'libflutter_engine.so')).existsSync()) return dir;
+/// The SDK behind `FLUTTER_ROOT`, else behind the `flutter` on the PATH.
+String? _sdkRoot(Map<String, String> environment) {
+  if (environment['FLUTTER_ROOT'] case final root? when root.isNotEmpty) {
+    return root;
   }
-  return null;
-}
-
-String _sdkIcu() {
-  final flutter = Platform.environment['FLUTTER_ROOT'];
-  if (flutter != null) {
-    return p.join(
-      flutter,
-      'bin',
-      'cache',
-      'artifacts',
-      'engine',
-      'linux-x64',
-      'icudtl.dat',
-    );
-  }
-  final home = Platform.environment['HOME'] ?? '';
-  return p.join(
-    home,
-    'fvm',
-    'default',
-    'bin',
-    'cache',
-    'artifacts',
-    'engine',
-    'linux-x64',
-    'icudtl.dat',
-  );
+  return RuntimeStore.sdkRootOnPath();
 }

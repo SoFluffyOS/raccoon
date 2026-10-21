@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ffi' show Abi;
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -22,11 +23,27 @@ void main() {
     );
   });
 
+  test('tells the tool a linux platform of the host architecture', () {
+    expect(CustomDeviceConfig.platformFor(Abi.linuxX64), 'linux-x64');
+    expect(CustomDeviceConfig.platformFor(Abi.macosArm64), 'linux-arm64');
+    expect(CustomDeviceConfig.platformFor(Abi.macosX64), 'linux-x64');
+    expect(CustomDeviceConfig.platformFor(Abi.windowsArm64), 'linux-arm64');
+    expect(
+      CustomDeviceConfig(deviceHelper: '/a/raccoon-device').platform,
+      CustomDeviceConfig.hostPlatform,
+    );
+  });
+
   test('upsert creates the file and replaces its own entry', () {
     final file = CustomDevicesFile(p.join(temp.path, 'custom_devices.json'));
 
-    file.upsert(const CustomDeviceConfig(deviceHelper: '/a/raccoon-device'));
-    file.upsert(const CustomDeviceConfig(deviceHelper: '/b/raccoon-device'));
+    file.upsert(CustomDeviceConfig(deviceHelper: '/a/raccoon-device'));
+    file.upsert(
+      CustomDeviceConfig(
+        deviceHelper: '/b/raccoon-device',
+        platform: 'linux-x64',
+      ),
+    );
 
     final decoded = jsonDecode(File(file.path).readAsStringSync());
     final devices = (decoded as Map)['custom-devices'] as List;
@@ -52,7 +69,7 @@ void main() {
       }),
     );
 
-    file.upsert(const CustomDeviceConfig(deviceHelper: '/x/raccoon-device'));
+    file.upsert(CustomDeviceConfig(deviceHelper: '/x/raccoon-device'));
 
     expect(file.ids(), ['pi', 'raccoon']);
   });
