@@ -17,6 +17,12 @@ dependencies:
     path: ../raccoon_runtime
   url_launcher: ^6.3.0
 
+flutter:
+  plugin:
+    platforms:
+      linux:
+        pluginClass: RaccoonViewPlugin
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

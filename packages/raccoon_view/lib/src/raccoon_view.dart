@@ -7,7 +7,8 @@ import 'package:raccoon_view/src/frame_decoder.dart';
 import 'package:raccoon_view/src/disconnected_overlay.dart';
 import 'package:raccoon_view/src/frame_view.dart';
 import 'package:raccoon_runtime/raccoon_runtime.dart'
-    show RunnerConnection, ComposingConnection;
+    show RunnerConnection, ComposingConnection, GpuBufferConnection;
+import 'package:raccoon_view/src/host_gpu_textures.dart';
 import 'package:raccoon_view/src/hosted_text_input.dart';
 import 'package:raccoon_view/src/input_mapping.dart';
 
@@ -21,6 +22,7 @@ class RaccoonView extends StatefulWidget {
     this.autofocus = true,
     this.pixelRatio,
     this.onDisconnected,
+    this.gpuTextures,
   });
 
   final RunnerConnection connection;
@@ -34,12 +36,22 @@ class RaccoonView extends StatefulWidget {
   /// its last frame under a "Runner disconnected" overlay.
   final VoidCallback? onDisconnected;
 
+  /// The host's native side for GPU buffers, when the connection carries
+  /// them; null uses the host's own ([HostGpuTextures.forHost]).
+  final HostGpuTextures? gpuTextures;
+
   @override
   State<RaccoonView> createState() => _RaccoonViewState();
 }
 
 class _RaccoonViewState extends State<RaccoonView> {
   final _focus = FocusNode(debugLabel: 'RaccoonView');
+  StreamSubscription<rc.GpuBuffers>? _gpuSets;
+  HostGpuTextures? _gpu;
+  int? _textureId;
+  // Whether frames arrive as GPU buffers, and the buffer the texture shows.
+  bool _gpuLive = false;
+  (int, int)? _shown;
   StreamSubscription<rc.Frame>? _frames;
   StreamSubscription<rc.TextField>? _fields;
   HostedTextInput? _text;
@@ -62,6 +74,7 @@ class _RaccoonViewState extends State<RaccoonView> {
     if (oldWidget.connection == widget.connection) return;
     unawaited(_frames?.cancel());
     _unsubscribeText();
+    _unsubscribeGpu();
     _sentSize = null;
     _subscribe();
   }
@@ -70,6 +83,7 @@ class _RaccoonViewState extends State<RaccoonView> {
   void dispose() {
     unawaited(_frames?.cancel());
     _unsubscribeText();
+    _unsubscribeGpu();
     _focus.dispose();
     _image?.dispose();
     super.dispose();
@@ -77,6 +91,7 @@ class _RaccoonViewState extends State<RaccoonView> {
 
   void _subscribe() {
     _subscribeText();
+    _subscribeGpu();
     _lost = false;
     _frames = widget.connection.frames.listen(
       _onFrame,
@@ -96,6 +111,48 @@ class _RaccoonViewState extends State<RaccoonView> {
     _fields = connection.textFields.listen(text.field);
   }
 
+  /// A connection that carries GPU buffers shows them through the host's
+  /// texture; the first set names the socket the native side reads.
+  void _subscribeGpu() {
+    final connection = widget.connection;
+    if (connection is! GpuBufferConnection) return;
+    if (!connection.gpuBuffers) return;
+    final gpu = widget.gpuTextures ?? HostGpuTextures.forHost();
+    if (gpu == null) return;
+    _gpu = gpu;
+    _gpuSets = connection.gpuBufferSets.listen(
+      (set) => unawaited(_onGpuSet(set)),
+    );
+  }
+
+  Future<void> _onGpuSet(rc.GpuBuffers set) async {
+    final gpu = _gpu;
+    if (gpu == null) return;
+    if (_textureId == null) {
+      final id = await gpu.create();
+      if (!mounted || id < 0) return;
+      _textureId = id;
+      await gpu.connect(id, set.socket);
+    }
+  }
+
+  void _unsubscribeGpu() {
+    unawaited(_gpuSets?.cancel());
+    _gpuSets = null;
+    final connection = widget.connection;
+    if (_shown case (
+      final generation,
+      final index,
+    ) when connection is GpuBufferConnection) {
+      connection.releaseGpuBuffer(generation, index);
+    }
+    _shown = null;
+    if (_textureId case final id?) unawaited(_gpu?.dispose(id));
+    _textureId = null;
+    _gpu = null;
+    _gpuLive = false;
+  }
+
   void _unsubscribeText() {
     unawaited(_fields?.cancel());
     _fields = null;
@@ -110,8 +167,31 @@ class _RaccoonViewState extends State<RaccoonView> {
   }
 
   void _onFrame(rc.Frame frame) {
+    if (frame.inGpuBuffer) {
+      unawaited(_showGpuFrame(frame));
+      return;
+    }
     _pending = frame;
     unawaited(_decodePending());
+  }
+
+  /// Names the frame's buffer to the host's texture, then gives the one
+  /// shown before back to the runner.
+  Future<void> _showGpuFrame(rc.Frame frame) async {
+    final gpu = _gpu;
+    final id = _textureId;
+    final connection = widget.connection;
+    if (gpu == null || id == null || connection is! GpuBufferConnection) {
+      return;
+    }
+    final previous = _shown;
+    _shown = (frame.gpuGeneration, frame.bufferIndex);
+    await gpu.show(id, frame.gpuGeneration, frame.bufferIndex);
+    if (previous case (final generation, final index)) {
+      connection.releaseGpuBuffer(generation, index);
+    }
+    if (!mounted) return;
+    if (!_gpuLive) setState(() => _gpuLive = true);
   }
 
   Future<void> _decodePending() async {
@@ -203,7 +283,10 @@ class _RaccoonViewState extends State<RaccoonView> {
                 alignment: Alignment.topLeft,
                 fit: StackFit.expand,
                 children: [
-                  RaccoonFrameView(frame: _image, fit: BoxFit.fill),
+                  switch ((_gpuLive, _textureId)) {
+                    (true, final id?) => Texture(textureId: id),
+                    _ => RaccoonFrameView(frame: _image, fit: BoxFit.fill),
+                  },
                   if (_lost) const DisconnectedOverlay(),
                 ],
               ),

@@ -1,5 +1,6 @@
 export 'package:raccoon_view/src/frame_decoder.dart';
 export 'package:raccoon_view/src/frame_view.dart';
+export 'package:raccoon_view/src/host_gpu_textures.dart';
 export 'package:raccoon_view/src/ide_platform_channels.dart';
 export 'package:raccoon_view/src/ide_url_launcher_channels.dart';
 export 'package:raccoon_view/src/input_mapping.dart';
