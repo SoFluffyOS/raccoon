@@ -698,9 +698,15 @@ void main() {
         final described = MessageUnframer();
         final messages = described.add(Uint8List.fromList(bytes)).toList();
         expect(messages, isNotEmpty);
-        final again = RunnerMessage.fromBuffer(messages.first);
-        expect(again.hasGpuBuffers(), isTrue);
-        expect(again.gpuBuffers.generation, set.generation);
+        // A fixed layout, so a native client needs no protobuf.
+        final data = ByteData.sublistView(messages.first);
+        expect(String.fromCharCodes(messages.first.sublist(0, 4)), 'RGPU');
+        expect(data.getUint32(4, Endian.little), set.generation);
+        expect(data.getUint32(8, Endian.little), 3);
+        expect(data.getUint32(12, Endian.little), set.width);
+        expect(data.getUint32(16, Endian.little), set.height);
+        expect(data.getUint32(20, Endian.little), set.fourcc);
+        expect(messages.first.length, 32 + 3 * 8);
         expect(handles.length, 3);
         await gpuSocket.close();
       } finally {
