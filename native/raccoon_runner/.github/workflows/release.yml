@@ -44,7 +44,7 @@ jobs:
 
       - name: Install CMake and Ninja
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libegl1-mesa-dev libgles2-mesa-dev
       - name: Install CMake and Ninja
         if: runner.os == 'macOS'
         run: brew install cmake ninja
