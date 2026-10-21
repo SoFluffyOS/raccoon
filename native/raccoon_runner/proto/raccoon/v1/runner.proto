@@ -105,6 +105,8 @@ message ClientMessage {
 message RunnerHello {
   uint32 protocol_version = 1;
   string engine_revision = 2;
+  // The runner's process id, so the client can watch its memory.
+  uint32 pid = 3;
 }
 
 enum PixelFormat {

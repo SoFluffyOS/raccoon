@@ -3,6 +3,8 @@
 //   raccoon_runner render --engine-dir DIR --assets DIR --icu FILE [--out F]
 //   raccoon_runner serve  --engine-dir DIR --assets DIR --icu FILE --socket P
 
+#include <unistd.h>
+
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -269,6 +271,7 @@ int Serve(const Options& options) {
   handler.on_client_connected = [&] {
     raccoon::v1::RunnerMessage hello;
     hello.mutable_hello()->set_protocol_version(kProtocolVersion);
+    hello.mutable_hello()->set_pid(static_cast<uint32_t>(getpid()));
     server_ptr->Send(hello);
     last_sent = 0;
     vm_sent = false;
