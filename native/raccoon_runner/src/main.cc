@@ -175,7 +175,13 @@ int Render(const Options& options) {
       std::fprintf(stderr, "raccoon_runner: first frame after %ld ms\n",
                    MillisBetween(host.started(), std::chrono::steady_clock::now()));
     }
-    loop.RunOnce(host.platform().MillisUntilNextTask());
+    // An idle app posts no tasks, so never wait past the deadline.
+    const long remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               deadline - std::chrono::steady_clock::now())
+                               .count();
+    const int next_task = host.platform().MillisUntilNextTask();
+    const int cap = static_cast<int>(remaining < 0 ? 0 : remaining);
+    loop.RunOnce(next_task < 0 || next_task > cap ? cap : next_task);
   }
   std::fprintf(stderr, "raccoon_runner: %zu frames presented, %zux%zu\n",
                host.frame().FrameCount(), host.frame().width(),

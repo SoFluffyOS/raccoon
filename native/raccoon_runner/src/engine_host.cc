@@ -5,6 +5,8 @@ namespace raccoon {
 namespace {
 
 constexpr char kVmServiceMarker[] = "listening on ";
+// The one display the runner reports; window metrics name it.
+constexpr FlutterEngineDisplayId kDisplayId = 0;
 
 }  // namespace
 
@@ -54,6 +56,19 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
     return false;
   }
   platform_->SetEngine(engine_);
+  // Report one display, as desktop embedders do once the engine runs; apps
+  // that read PlatformDispatcher.displays (Wonderous does) find it. Calling
+  // this before the engine runs crashes inside the engine.
+  FlutterEngineDisplay display{};
+  display.struct_size = sizeof(FlutterEngineDisplay);
+  display.display_id = kDisplayId;
+  display.single_display = true;
+  display.refresh_rate = 60.0;
+  display.width = options.width;
+  display.height = options.height;
+  display.device_pixel_ratio = options.pixel_ratio;
+  procs.NotifyDisplayUpdate(engine_, kFlutterEngineDisplaysUpdateTypeStartup,
+                            &display, 1);
   Resize(options.width, options.height, options.pixel_ratio);
   return true;
 }
@@ -64,6 +79,7 @@ void EngineHost::Resize(size_t width, size_t height, double pixel_ratio) {
   metrics.width = width;
   metrics.height = height;
   metrics.pixel_ratio = pixel_ratio;
+  metrics.display_id = kDisplayId;
   loader_.procs().SendWindowMetricsEvent(engine_, &metrics);
 }
 
