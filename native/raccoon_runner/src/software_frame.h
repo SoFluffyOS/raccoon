@@ -81,6 +81,8 @@ class SoftwareFrame {
   size_t height_ = 0;
   size_t row_bytes_ = 0;
   size_t frame_count_ = 0;
+  // The frame whose pixels are in pixels_, 0 when none.
+  size_t inline_sequence_ = 0;
   SharedBufferPool* pool_ = nullptr;
   Shared pending_shared_;
 };

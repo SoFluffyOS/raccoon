@@ -326,26 +326,6 @@ int Serve(const Options& options) {
           vm_sent = true;
         }
       }
-      // Shared buffers, sized for the current frame; replaced on resize.
-      const size_t need = host.frame().LatestSizeBytes();
-      if (client_shared && need > 0 && (!pool || pool->size() != need)) {
-        host.frame().SetSharedPool(nullptr);
-        auto fresh = std::make_unique<raccoon::SharedBufferPool>();
-        std::string pool_error;
-        if (fresh->Allocate(2, need, &pool_error)) {
-          raccoon::v1::RunnerMessage message;
-          message.mutable_shared_buffers()->set_count(2);
-          message.mutable_shared_buffers()->set_size(need);
-          if (server.SendWithFds(message, fresh->fds())) {
-            pool = std::move(fresh);
-            host.frame().SetSharedPool(pool.get());
-          }
-        } else {
-          std::fprintf(stderr, "raccoon_runner: %s; frames stay inline\n",
-                       pool_error.c_str());
-          client_shared = false;
-        }
-      }
       raccoon::SoftwareFrame::Shared shared;
       if (host.frame().TakeShared(&shared)) {
         raccoon::v1::RunnerMessage message;
@@ -374,6 +354,28 @@ int Serve(const Options& options) {
         frame->set_timestamp_micros(host.NowMicros());
         server.Send(message);
         last_sent = copy.sequence;
+      }
+      // Resize the shared buffers only after the pending frame went out:
+      // replacing the pool releases it, and that frame would be lost.
+      // Shared buffers, sized for the current frame; replaced on resize.
+      const size_t need = host.frame().LatestSizeBytes();
+      if (client_shared && need > 0 && (!pool || pool->size() != need)) {
+        host.frame().SetSharedPool(nullptr);
+        auto fresh = std::make_unique<raccoon::SharedBufferPool>();
+        std::string pool_error;
+        if (fresh->Allocate(2, need, &pool_error)) {
+          raccoon::v1::RunnerMessage message;
+          message.mutable_shared_buffers()->set_count(2);
+          message.mutable_shared_buffers()->set_size(need);
+          if (server.SendWithFds(message, fresh->fds())) {
+            pool = std::move(fresh);
+            host.frame().SetSharedPool(pool.get());
+          }
+        } else {
+          std::fprintf(stderr, "raccoon_runner: %s; frames stay inline\n",
+                       pool_error.c_str());
+          client_shared = false;
+        }
       }
     }
     loop.RunOnce(host.platform().MillisUntilNextTask());

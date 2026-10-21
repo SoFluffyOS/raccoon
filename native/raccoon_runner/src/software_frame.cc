@@ -14,18 +14,25 @@ void SoftwareFrame::Present(const void* allocation, size_t row_bytes,
     height_ = height;
     ++frame_count_;
     const size_t bytes = row_bytes * height;
-    if (pool_ != nullptr && bytes <= pool_->size()) {
-      const int index = pool_->AcquireFree();
-      if (index >= 0) {
-        // A frame nobody sent yet is superseded; free its buffer.
-        if (pending_shared_.index >= 0) pool_->Release(pending_shared_.index);
-        std::memcpy(pool_->Data(index), allocation, bytes);
-        pending_shared_ = {index, width_, height_, row_bytes_, frame_count_};
-      }
-      // No free buffer: the client is behind, this frame is dropped.
+    const int index = (pool_ != nullptr && bytes <= pool_->size())
+                          ? pool_->AcquireFree()
+                          : -1;
+    if (index >= 0) {
+      // A frame nobody sent yet is superseded; free its buffer.
+      if (pending_shared_.index >= 0) pool_->Release(pending_shared_.index);
+      std::memcpy(pool_->Data(index), allocation, bytes);
+      pending_shared_ = {index, width_, height_, row_bytes_, frame_count_};
     } else {
+      // No pool, a frame too big for it, or every buffer still with the
+      // client: send this frame inline rather than lose it. A shared frame
+      // not yet sent is older than this one; free its buffer.
+      if (pool_ != nullptr && pending_shared_.index >= 0) {
+        pool_->Release(pending_shared_.index);
+        pending_shared_ = Shared{};
+      }
       pixels_.resize(bytes);
       std::memcpy(pixels_.data(), allocation, bytes);
+      inline_sequence_ = frame_count_;
     }
   }
   if (presented_) presented_();
@@ -34,6 +41,11 @@ void SoftwareFrame::Present(const void* allocation, size_t row_bytes,
 void SoftwareFrame::SetSharedPool(SharedBufferPool* pool) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (pool_ != nullptr && pending_shared_.index >= 0) {
+    // Keep a frame that was not sent yet: it goes out inline instead.
+    const size_t bytes = pending_shared_.row_bytes * pending_shared_.height;
+    pixels_.resize(bytes);
+    std::memcpy(pixels_.data(), pool_->Data(pending_shared_.index), bytes);
+    inline_sequence_ = pending_shared_.sequence;
     pool_->Release(pending_shared_.index);
   }
   pending_shared_ = Shared{};
@@ -55,7 +67,12 @@ size_t SoftwareFrame::LatestSizeBytes() const {
 
 bool SoftwareFrame::CopyLatest(Copy* out, size_t after_sequence) const {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (frame_count_ == 0 || frame_count_ <= after_sequence) return false;
+  // Only the frame these pixels belong to, and only while it is the latest:
+  // pixels_ is not updated for frames that went into shared buffers.
+  if (inline_sequence_ == 0 || inline_sequence_ != frame_count_ ||
+      inline_sequence_ <= after_sequence) {
+    return false;
+  }
   out->pixels = pixels_;
   out->width = width_;
   out->height = height_;
