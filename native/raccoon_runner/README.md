@@ -36,6 +36,13 @@ Design notes: `docs/internal_docs/raccoon/`.
 - Types: it answers `flutter/textinput` and keeps the active field's editing
   state, so the keys the framework leaves unhandled insert text, delete,
   move and act; `example/text` shows it. Composition (an IME) is not here yet.
+- Rasterizes on the GPU where EGL offers one without a window (Linux, Mesa:
+  the surfaceless platform or a render node), reading each frame back as
+  BGRA, so clients see the same frames as from the software renderer. At
+  2400×1600 that halves the runner's CPU. `--renderer auto|gl|software`, or
+  `RACCOON_RENDERER` in the environment: `auto` falls back to software; the
+  start-up log says which is in use. Built when `egl` and `glesv2` are
+  found by pkg-config (`libegl1-mesa-dev libgles2-mesa-dev` on Debian).
 - `render`: writes one frame to a PPM file, for tests and a quick look.
 - `tool/raccoon-device`: ping, install, uninstall and run for the Flutter
   tool's custom device, so a stock `flutter run -d raccoon` works.

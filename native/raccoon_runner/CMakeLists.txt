@@ -96,3 +96,18 @@ target_compile_options(raccoon_runner PRIVATE -Wall -Wextra)
 find_package(Threads REQUIRED)
 target_link_libraries(raccoon_runner PRIVATE raccoon_proto ${CMAKE_DL_LIBS} Threads::Threads)
 target_link_libraries(raccoon_runner PRIVATE nlohmann_json::nlohmann_json)
+
+# The GL renderer: EGL without a window, GLES 2 (Mesa on Linux). Optional;
+# without it the runner rasterizes in software.
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+  pkg_check_modules(RACCOON_GL IMPORTED_TARGET egl glesv2)
+endif()
+if(RACCOON_GL_FOUND)
+  target_sources(raccoon_runner PRIVATE src/gl_renderer.cc)
+  target_compile_definitions(raccoon_runner PRIVATE RACCOON_HAS_GL=1)
+  target_link_libraries(raccoon_runner PRIVATE PkgConfig::RACCOON_GL)
+  message(STATUS "GL renderer: on (EGL ${RACCOON_GL_egl_VERSION})")
+else()
+  message(STATUS "GL renderer: off (no egl and glesv2 for pkg-config)")
+endif()

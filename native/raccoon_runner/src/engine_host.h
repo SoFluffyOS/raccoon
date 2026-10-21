@@ -9,6 +9,9 @@
 
 #include "engine_loader.h"
 #include "flutter_embedder.h"
+#if RACCOON_HAS_GL
+#include "gl_renderer.h"
+#endif
 #include "platform_task_runner.h"
 #include "software_frame.h"
 #include "text_input.h"
@@ -29,6 +32,9 @@ struct EngineOptions {
   std::string data_dir;
   // Engine switches appended to the command line, e.g. --vm-service-port=N.
   std::vector<std::string> extra_args;
+  // "auto" rasterizes on the GPU when EGL offers one and falls back to the
+  // software renderer; "gl" insists; "software" never tries.
+  std::string renderer = "auto";
 };
 
 // One engine on the software renderer: start, metrics, input, shutdown.
@@ -75,6 +81,8 @@ class EngineHost {
 
   // The VM service URI once the engine announced it, else empty.
   std::string vm_service_uri() const;
+  // Which renderer rasterizes, for the log: "software", or "gl (...)".
+  const std::string& renderer() const { return renderer_; }
 
   SoftwareFrame& frame() { return frame_; }
   TextInput& text_input() { return text_input_; }
@@ -84,6 +92,16 @@ class EngineHost {
  private:
   static bool OnPresent(void* user_data, const void* allocation,
                         size_t row_bytes, size_t height);
+#if RACCOON_HAS_GL
+  static bool GlMakeCurrent(void* user_data);
+  static bool GlClearCurrent(void* user_data);
+  static bool GlMakeResourceCurrent(void* user_data);
+  static uint32_t GlFbo(void* user_data, const FlutterFrameInfo* info);
+  static bool GlPresent(void* user_data, const FlutterPresentInfo* info);
+  static void* GlProc(void* user_data, const char* name);
+  std::unique_ptr<GlRenderer> gl_;
+#endif
+  std::string renderer_ = "software";
   static void OnLog(const char* tag, const char* message, void* user_data);
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* user_data);

@@ -1,6 +1,6 @@
 // raccoon_runner: hosts a Flutter app on the C embedder API.
 //
-//   raccoon_runner render --engine-dir DIR --assets DIR --icu FILE [--out F]
+//   raccoon_runner render --engine-dir DIR --assets DIR --icu FILE [--renderer auto|gl|software] [--out F]
 //   raccoon_runner serve  --engine-dir DIR --assets DIR --icu FILE --socket P
 //   raccoon_runner --version
 
@@ -45,7 +45,7 @@ void Usage() {
                "       raccoon_runner serve --engine-dir DIR --assets DIR"
                " --icu FILE --socket PATH\n"
                "       raccoon_runner --version\n"
-               "common: [--width N] [--height N] [--dpr X] [--data-dir DIR]"
+               "common: [--width N] [--height N] [--dpr X] [--data-dir DIR] [--renderer auto|gl|software]"
                " [-- engine switches...]\n");
 }
 
@@ -71,6 +71,7 @@ bool ParseOptions(int argc, char** argv, Options* options) {
     else if (arg == "--height") options->engine.height = std::strtoul(v, nullptr, 10);
     else if (arg == "--dpr") options->engine.pixel_ratio = std::strtod(v, nullptr);
     else if (arg == "--data-dir") options->engine.data_dir = v;
+    else if (arg == "--renderer") options->engine.renderer = v;
     else if (arg == "--out") options->out = v;
     else if (arg == "--socket") options->socket = v;
     else if (arg == "--frames") options->frames = std::strtoul(v, nullptr, 10);
@@ -162,7 +163,13 @@ int Render(const Options& options) {
   raccoon::EventLoop loop;
   raccoon::EngineHost host;
   std::string error;
-  if (!host.Start(options.engine, PrintEngineLog, [&loop] { loop.Wake(); },
+  // RACCOON_RENDERER=gl|software|auto stands in for --renderer.
+  raccoon::EngineOptions engine = options.engine;
+  if (const char* env = std::getenv("RACCOON_RENDERER");
+      env != nullptr && engine.renderer == "auto") {
+    engine.renderer = env;
+  }
+  if (!host.Start(engine, PrintEngineLog, [&loop] { loop.Wake(); },
                   &error)) {
     std::fprintf(stderr, "raccoon_runner: %s\n", error.c_str());
     return 1;
@@ -208,7 +215,13 @@ int Serve(const Options& options) {
 
   raccoon::EngineHost host;
   std::string error;
-  if (!host.Start(options.engine, PrintEngineLog, [&loop] { loop.Wake(); },
+  // RACCOON_RENDERER=gl|software|auto stands in for --renderer.
+  raccoon::EngineOptions engine = options.engine;
+  if (const char* env = std::getenv("RACCOON_RENDERER");
+      env != nullptr && engine.renderer == "auto") {
+    engine.renderer = env;
+  }
+  if (!host.Start(engine, PrintEngineLog, [&loop] { loop.Wake(); },
                   &error)) {
     std::fprintf(stderr, "raccoon_runner: %s\n", error.c_str());
     return 1;

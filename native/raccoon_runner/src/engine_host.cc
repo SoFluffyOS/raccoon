@@ -30,9 +30,46 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   frame_.SetPresentedCallback(on_wake_);
 
   FlutterRendererConfig renderer{};
-  renderer.type = kSoftware;
-  renderer.software.struct_size = sizeof(FlutterSoftwareRendererConfig);
-  renderer.software.surface_present_callback = OnPresent;
+  bool on_gpu = false;
+#if RACCOON_HAS_GL
+  if (options.renderer != "software") {
+    gl_ = std::make_unique<GlRenderer>();
+    std::string gl_error;
+    if (gl_->Init(&gl_error)) {
+      on_gpu = true;
+    } else if (options.renderer == "gl") {
+      *error = "GL renderer: " + gl_error;
+      return false;
+    } else {
+      renderer_ = "software (no GL: " + gl_error + ")";
+      gl_.reset();
+    }
+  }
+#else
+  if (options.renderer == "gl") {
+    *error = "this runner was built without the GL renderer";
+    return false;
+  }
+#endif
+  if (on_gpu) {
+#if RACCOON_HAS_GL
+    renderer.type = kOpenGL;
+    auto& gl = renderer.open_gl;
+    gl.struct_size = sizeof(FlutterOpenGLRendererConfig);
+    gl.make_current = GlMakeCurrent;
+    gl.clear_current = GlClearCurrent;
+    gl.make_resource_current = GlMakeResourceCurrent;
+    gl.fbo_with_frame_info_callback = GlFbo;
+    gl.present_with_info = GlPresent;
+    gl.gl_proc_resolver = GlProc;
+    gl.fbo_reset_after_present = false;
+    renderer_ = "gl (" + gl_->description() + ")";
+#endif
+  } else {
+    renderer.type = kSoftware;
+    renderer.software.struct_size = sizeof(FlutterSoftwareRendererConfig);
+    renderer.software.surface_present_callback = OnPresent;
+  }
 
   command_line_ = {"raccoon_runner", "--enable-impeller=false"};
   for (const std::string& arg : options.extra_args) command_line_.push_back(arg);
@@ -79,6 +116,7 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   procs.NotifyDisplayUpdate(engine_, kFlutterEngineDisplaysUpdateTypeStartup,
                             &display, 1);
   Resize(options.width, options.height, options.pixel_ratio);
+  if (on_log_) on_log_("raccoon_runner", "raccoon_runner: renderer " + renderer_);
   return true;
 }
 
@@ -92,6 +130,37 @@ void EngineHost::Resize(size_t width, size_t height, double pixel_ratio) {
   loader_.procs().SendWindowMetricsEvent(engine_, &metrics);
   windows_.SetViewSize(width, height, pixel_ratio);
 }
+
+#if RACCOON_HAS_GL
+bool EngineHost::GlMakeCurrent(void* user_data) {
+  return static_cast<EngineHost*>(user_data)->gl_->MakeCurrent();
+}
+
+bool EngineHost::GlClearCurrent(void* user_data) {
+  return static_cast<EngineHost*>(user_data)->gl_->ClearCurrent();
+}
+
+bool EngineHost::GlMakeResourceCurrent(void* user_data) {
+  return static_cast<EngineHost*>(user_data)->gl_->MakeResourceCurrent();
+}
+
+uint32_t EngineHost::GlFbo(void* user_data, const FlutterFrameInfo* info) {
+  return static_cast<EngineHost*>(user_data)->gl_->Fbo(info->size.width,
+                                                       info->size.height);
+}
+
+bool EngineHost::GlPresent(void* user_data, const FlutterPresentInfo* /*info*/) {
+  auto* host = static_cast<EngineHost*>(user_data);
+  return host->gl_->Present(
+      [host](const void* pixels, size_t row_bytes, size_t height) {
+        OnPresent(host, pixels, row_bytes, height);
+      });
+}
+
+void* EngineHost::GlProc(void* user_data, const char* name) {
+  return static_cast<EngineHost*>(user_data)->gl_->ProcAddress(name);
+}
+#endif
 
 void EngineHost::SendPointer(const FlutterPointerEvent& event) {
   loader_.procs().SendPointerEvent(engine_, &event, 1);
@@ -265,6 +334,9 @@ void EngineHost::Shutdown() {
   platform_->RunDueTasks();
   loader_.procs().Shutdown(engine_);
   engine_ = nullptr;
+#if RACCOON_HAS_GL
+  if (gl_) gl_->Shutdown();
+#endif
 }
 
 std::string EngineHost::vm_service_uri() const {
