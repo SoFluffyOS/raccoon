@@ -305,13 +305,15 @@ const RunnerHello$json = {
   '2': [
     {'1': 'protocol_version', '3': 1, '4': 1, '5': 13, '10': 'protocolVersion'},
     {'1': 'engine_revision', '3': 2, '4': 1, '5': 9, '10': 'engineRevision'},
+    {'1': 'pid', '3': 3, '4': 1, '5': 13, '10': 'pid'},
   ],
 };
 
 /// Descriptor for `RunnerHello`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List runnerHelloDescriptor = $convert.base64Decode(
     'CgtSdW5uZXJIZWxsbxIpChBwcm90b2NvbF92ZXJzaW9uGAEgASgNUg9wcm90b2NvbFZlcnNpb2'
-    '4SJwoPZW5naW5lX3JldmlzaW9uGAIgASgJUg5lbmdpbmVSZXZpc2lvbg==');
+    '4SJwoPZW5naW5lX3JldmlzaW9uGAIgASgJUg5lbmdpbmVSZXZpc2lvbhIQCgNwaWQYAyABKA1S'
+    'A3BpZA==');
 
 @$core.Deprecated('Use frameDescriptor instead')
 const Frame$json = {

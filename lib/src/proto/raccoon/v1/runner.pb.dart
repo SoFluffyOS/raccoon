@@ -840,10 +840,12 @@ class RunnerHello extends $pb.GeneratedMessage {
   factory RunnerHello({
     $core.int? protocolVersion,
     $core.String? engineRevision,
+    $core.int? pid,
   }) {
     final result = RunnerHello._();
     if (protocolVersion != null) result.protocolVersion = protocolVersion;
     if (engineRevision != null) result.engineRevision = engineRevision;
+    if (pid != null) result.pid = pid;
     return result;
   }
 
@@ -863,6 +865,7 @@ class RunnerHello extends $pb.GeneratedMessage {
     ..aI(1, _omitFieldNames ? '' : 'protocolVersion',
         fieldType: $pb.PbFieldType.OU3)
     ..aOS(2, _omitFieldNames ? '' : 'engineRevision')
+    ..aI(3, _omitFieldNames ? '' : 'pid', fieldType: $pb.PbFieldType.OU3)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -904,6 +907,16 @@ class RunnerHello extends $pb.GeneratedMessage {
   $core.bool hasEngineRevision() => $_has(1);
   @$pb.TagNumber(2)
   void clearEngineRevision() => $_clearField(2);
+
+  /// The runner's process id, so the client can watch its memory.
+  @$pb.TagNumber(3)
+  $core.int get pid => $_getIZ(2);
+  @$pb.TagNumber(3)
+  set pid($core.int value) => $_setUnsignedInt32(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasPid() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearPid() => $_clearField(3);
 }
 
 /// A frame carries its pixels inline, or names the shared buffer that holds
