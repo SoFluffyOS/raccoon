@@ -14,22 +14,21 @@ void main() {
   tearDown(() => temp.deleteSync(recursive: true));
 
   test('resolves the socket directory for the host', () {
-    expect(
-      RunnerDiscovery.forHost(
-        operatingSystem: 'linux',
-        environment: {'XDG_RUNTIME_DIR': '/run/user/7'},
-        temporaryDirectory: '/tmp',
-      ).directory,
-      '/run/user/7/raccoon',
+    final linux = RunnerDiscovery.forHost(
+      operatingSystem: 'linux',
+      environment: {'XDG_RUNTIME_DIR': '/run/user/7'},
+      temporaryDirectory: '/tmp',
     );
-    expect(
-      RunnerDiscovery.forHost(
-        operatingSystem: 'macos',
-        environment: const {},
-        temporaryDirectory: '/var/folders/x/T',
-      ).directory,
-      '/var/folders/x/T/raccoon',
+    expect(linux.directory, '/run/user/7/raccoon');
+    expect(linux.pollInterval, isNull, reason: 'inotify sees sockets');
+
+    final macos = RunnerDiscovery.forHost(
+      operatingSystem: 'macos',
+      environment: const {},
+      temporaryDirectory: '/var/folders/x/T',
     );
+    expect(macos.directory, '/var/folders/x/T/raccoon');
+    expect(macos.pollInterval, isNotNull, reason: 'FSEvents misses sockets');
   });
 
   test('lists sockets only and names the app after the file', () async {
@@ -43,26 +42,38 @@ void main() {
     await server.close();
   });
 
-  test('watch reports runners as they appear and go', () async {
-    final discovery = RunnerDiscovery(p.join(temp.path, 'raccoon'));
-    final seen = <List<String>>[];
-    final subscription = discovery
-        .watch()
-        .map((e) => e.map(RunnerDiscovery.appNameOf).toList())
-        .listen(seen.add);
-    await _until(() => seen.isNotEmpty);
-    expect(seen.first, isEmpty);
+  // Watching through file system events is only sound where they report
+  // sockets, which FSEvents on macOS do not; polling works on every host.
+  for (final (mode, discovery) in [
+    (
+      'polling',
+      (String dir) =>
+          RunnerDiscovery(dir, pollInterval: const Duration(milliseconds: 50)),
+    ),
+    if (Platform.isLinux) ('file system events', RunnerDiscovery.new),
+  ]) {
+    test('watch reports runners as they appear and go, by $mode', () async {
+      final watching = discovery(p.join(temp.path, 'raccoon'));
+      final seen = <List<String>>[];
+      final subscription = watching
+          .watch()
+          .map((e) => e.map(RunnerDiscovery.appNameOf).toList())
+          .listen(seen.add);
+      await _until(() => seen.isNotEmpty);
+      expect(seen.first, isEmpty);
 
-    final server = await _bind(p.join(discovery.directory, 'app.sock'));
-    await _until(() => seen.any((names) => names.contains('app')));
+      final server = await _bind(p.join(watching.directory, 'app.sock'));
+      await _until(() => seen.any((names) => names.contains('app')));
 
-    await server.close();
-    // Closing the server removes the socket file on Linux; be sure.
-    final socketFile = File(p.join(discovery.directory, 'app.sock'));
-    if (socketFile.existsSync()) socketFile.deleteSync();
-    await _until(() => seen.last.isEmpty);
-    await subscription.cancel();
-  });
+      await server.close();
+      // Closing the server removes the socket file on Linux; be sure.
+      final socketFile = File(p.join(watching.directory, 'app.sock'));
+      if (socketFile.existsSync()) socketFile.deleteSync();
+      await _until(() => seen.last.isEmpty);
+      expect(seen, hasLength(3), reason: 'one event per change');
+      await subscription.cancel();
+    });
+  }
 }
 
 /// Polls [condition] until it holds, failing after five seconds.
