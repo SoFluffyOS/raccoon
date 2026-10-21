@@ -652,15 +652,27 @@ void main() {
         // coming past the ring's size.
         final frames = <Frame>[];
         final done = Completer<void>();
+        // Later, buffers go back over the GPU socket instead.
+        late RawSocket gpuSocket;
+        var releaseOnSocket = false;
+        final socketFrames = <Frame>[];
+        final doneOnSocket = Completer<void>();
         final subscription = client.frames.listen((frame) {
           frames.add(frame);
           if (frame.inGpuBuffer) {
-            client.releaseGpuBuffer(frame.gpuGeneration, frame.bufferIndex);
+            if (releaseOnSocket) {
+              socketFrames.add(frame);
+              gpuSocket.write(_release(frame.gpuGeneration, frame.bufferIndex));
+              if (socketFrames.length >= 8 && !doneOnSocket.isCompleted) {
+                doneOnSocket.complete();
+              }
+            } else {
+              client.releaseGpuBuffer(frame.gpuGeneration, frame.bufferIndex);
+            }
           }
           if (frames.length >= 8 && !done.isCompleted) done.complete();
         });
         await done.future.timeout(const Duration(seconds: 15));
-        await subscription.cancel();
         expect(frames.where((f) => f.inGpuBuffer), isNotEmpty);
         expect(
           frames.where((f) => f.inGpuBuffer).every((f) => f.pixels.isEmpty),
@@ -677,7 +689,7 @@ void main() {
 
         // The GPU socket serves the same description with one descriptor per
         // buffer riding along.
-        final gpuSocket = await RawSocket.connect(
+        gpuSocket = await RawSocket.connect(
           InternetAddress(set.socket, type: InternetAddressType.unix),
           0,
         );
@@ -707,7 +719,42 @@ void main() {
         expect(data.getUint32(16, Endian.little), set.height);
         expect(data.getUint32(20, Endian.little), set.fourcc);
         expect(messages.first.length, 32 + 4 * 8);
-        expect(handles.length, 4);
+        expect(handles.length, greaterThanOrEqualTo(4));
+
+        // Where EGL has native fences, each frame's fence comes ahead of it:
+        // 'RFEN', generation, index, one descriptor riding along.
+        List<Uint8List> fences() => MessageUnframer()
+            .add(Uint8List.fromList(bytes))
+            .where((m) => String.fromCharCodes(m.sublist(0, 4)) == 'RFEN')
+            .toList();
+        final deadline = DateTime.now().add(const Duration(seconds: 3));
+        while (fences().isEmpty && DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        final fenced = fences();
+        final handleCount = handles.length;
+        if (fenced.isEmpty) {
+          printOnFailure('no fences from this renderer');
+        } else {
+          expect(fenced.every((m) => m.length == 12), isTrue);
+          expect(
+            fenced
+                .map((m) => ByteData.sublistView(m).getUint32(4, Endian.little))
+                .toSet(),
+            {set.generation},
+          );
+          expect(handleCount, 4 + fenced.length);
+        }
+
+        // Buffers can be given back on this socket too: 'RREL', generation,
+        // index, fenced; frames keep coming past the ring's size.
+        releaseOnSocket = true;
+        await doneOnSocket.future.timeout(const Duration(seconds: 15));
+        await subscription.cancel();
+        expect(
+          socketFrames.map((f) => f.bufferIndex).toSet().length,
+          greaterThan(1),
+        );
         await gpuSocket.close();
       } finally {
         client.shutdown();
@@ -719,6 +766,17 @@ void main() {
     skip: ready ? false : 'build the runner and example first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
+}
+
+/// A release of buffer [index] of [generation] as the GPU socket takes it,
+/// framed, without a fence.
+Uint8List _release(int generation, int index) {
+  final payload = ByteData(16)
+    ..setUint32(4, generation, Endian.little)
+    ..setUint32(8, index, Endian.little)
+    ..setUint32(12, 0, Endian.little);
+  payload.buffer.asUint8List().setAll(0, 'RREL'.codeUnits);
+  return MessageFraming.frame(payload.buffer.asUint8List());
 }
 
 /// The SDK behind `FLUTTER_ROOT`, else behind the `flutter` on the PATH.
