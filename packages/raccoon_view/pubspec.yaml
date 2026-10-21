@@ -1,0 +1,19 @@
+name: raccoon_view
+description: Flutter widgets that show a Raccoon-hosted app inside Lumide.
+publish_to: "none"
+
+environment:
+  sdk: ^3.10.0
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  raccoon_runtime:
+    path: ../raccoon_runtime
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.0.0
