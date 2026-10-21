@@ -2,6 +2,7 @@
 // turns the box green. Skipped when the runner or its inputs are not built;
 // see native/raccoon_runner/tool/render_example.sh.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -598,6 +599,118 @@ void main() {
             ).existsSync()
         ? false
         : 'build the runner and the text example first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'a client that imports GPU buffers gets frames as buffer indices and their descriptors on the GPU socket',
+    () async {
+      // The spin example animates, so frames keep coming.
+      final spinAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'spin',
+        'build',
+        'flutter_assets',
+      );
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: spinAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint, gpuBuffers: true);
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        // Only a renderer that exports offers them; otherwise frames come by
+        // readback and the test has nothing to check.
+        final GpuBuffers set;
+        try {
+          set = await client.gpuBufferSets.first.timeout(
+            const Duration(seconds: 5),
+          );
+        } on TimeoutException {
+          final frame = await client.frames.first.timeout(
+            const Duration(seconds: 10),
+          );
+          expect(frame.inGpuBuffer, isFalse);
+          printOnFailure('no GPU buffers offered: ${client.latestGpuBuffers}');
+          return;
+        }
+        expect(set.count, 3);
+        expect(set.generation, greaterThan(0));
+        expect(set.width, 800);
+        expect(set.height, 600);
+        expect(set.strides, hasLength(3));
+        expect(set.socket, p.join(temp.path, 'runner.gpu'));
+
+        // Frames are indices now, no pixels; giving them back keeps them
+        // coming past the ring's size.
+        final frames = <Frame>[];
+        final done = Completer<void>();
+        final subscription = client.frames.listen((frame) {
+          frames.add(frame);
+          if (frame.inGpuBuffer) {
+            client.releaseGpuBuffer(frame.gpuGeneration, frame.bufferIndex);
+          }
+          if (frames.length >= 8 && !done.isCompleted) done.complete();
+        });
+        await done.future.timeout(const Duration(seconds: 15));
+        await subscription.cancel();
+        expect(frames.where((f) => f.inGpuBuffer), isNotEmpty);
+        expect(
+          frames.where((f) => f.inGpuBuffer).every((f) => f.pixels.isEmpty),
+          isTrue,
+        );
+        expect(
+          frames
+              .where((f) => f.inGpuBuffer)
+              .map((f) => f.bufferIndex)
+              .toSet()
+              .length,
+          greaterThan(1),
+        );
+
+        // The GPU socket serves the same description with one descriptor per
+        // buffer riding along.
+        final gpuSocket = await RawSocket.connect(
+          InternetAddress(set.socket, type: InternetAddressType.unix),
+          0,
+        );
+        final handles = <ResourceHandle>[];
+        final bytes = <int>[];
+        final gotFds = Completer<void>();
+        gpuSocket.listen((event) {
+          if (event != RawSocketEvent.read) return;
+          final message = gpuSocket.readMessage();
+          if (message == null) return;
+          bytes.addAll(message.data);
+          for (final control in message.controlMessages) {
+            handles.addAll(control.extractHandles());
+          }
+          if (handles.length >= 3 && !gotFds.isCompleted) gotFds.complete();
+        });
+        await gotFds.future.timeout(const Duration(seconds: 10));
+        final described = MessageUnframer();
+        final messages = described.add(Uint8List.fromList(bytes)).toList();
+        expect(messages, isNotEmpty);
+        final again = RunnerMessage.fromBuffer(messages.first);
+        expect(again.hasGpuBuffers(), isTrue);
+        expect(again.gpuBuffers.generation, set.generation);
+        expect(handles.length, 3);
+        await gpuSocket.close();
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
 }

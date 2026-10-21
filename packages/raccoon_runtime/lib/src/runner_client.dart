@@ -17,7 +17,11 @@ typedef PlatformChannelHandler = Future<Uint8List?> Function(Uint8List data);
 /// A connection to one runner: frames, logs and platform messages in; resize,
 /// input and platform replies out.
 final class RunnerClient implements RunnerConnection, ComposingConnection {
-  RunnerClient._(this._transport, {required this.composes}) {
+  RunnerClient._(
+    this._transport, {
+    required this.composes,
+    required this.gpuBuffers,
+  }) {
     _subscription = _transport.inbound.listen(
       _onInbound,
       onDone: _onDone,
@@ -28,6 +32,7 @@ final class RunnerClient implements RunnerConnection, ComposingConnection {
         hello: ClientHello(
           pid: io.pid,
           composes: composes,
+          gpuBuffers: gpuBuffers,
           protocolVersion: RaccoonProtocol.version,
           clientName: 'raccoon_runtime',
           sharedBuffers: _transport.receivesHandles,
@@ -44,9 +49,37 @@ final class RunnerClient implements RunnerConnection, ComposingConnection {
   static Future<RunnerClient> connect(
     RunnerEndpoint endpoint, {
     bool composes = false,
+    bool gpuBuffers = false,
   }) async => RunnerClient._(
     await RunnerTransport.connect(endpoint),
     composes: composes,
+    gpuBuffers: gpuBuffers,
+  );
+
+  /// Whether this client asked for GPU buffers: frames then arrive as buffer
+  /// indices ([Frame.inGpuBuffer]) with no pixels, and the buffers' file
+  /// descriptors are served on the runner's GPU socket
+  /// ([GpuBuffers.socket]) for the host's native side to import.
+  final bool gpuBuffers;
+
+  GpuBuffers? _latestGpuBuffers;
+
+  /// The current set of GPU buffers, once the runner described it.
+  GpuBuffers? get latestGpuBuffers => _latestGpuBuffers;
+
+  /// Each set of GPU buffers as the runner describes it, the latest first.
+  Stream<GpuBuffers> get gpuBufferSets async* {
+    if (_latestGpuBuffers case final set?) yield set;
+    yield* messages
+        .where((message) => message.hasGpuBuffers())
+        .map((message) => message.gpuBuffers);
+  }
+
+  /// Gives a GPU buffer back to the runner once the host is done with it.
+  void releaseGpuBuffer(int generation, int index) => send(
+    ClientMessage(
+      releaseBuffer: ReleaseBuffer(index: index, generation: generation),
+    ),
   );
 
   @override
@@ -157,6 +190,7 @@ final class RunnerClient implements RunnerConnection, ComposingConnection {
         _hello.completeError(RunnerBusy(message.busy.pid));
       }
       if (message.hasSharedBuffers()) _takeBuffers(message.sharedBuffers);
+      if (message.hasGpuBuffers()) _latestGpuBuffers = message.gpuBuffers;
       if (message.hasFrame()) {
         final frame = _resolveFrame(message.frame);
         if (frame == null) continue;
@@ -212,6 +246,9 @@ final class RunnerClient implements RunnerConnection, ComposingConnection {
   /// Reads a shared-buffer frame's pixels and gives the buffer back; an
   /// inline frame is returned as is.
   Frame? _resolveFrame(Frame frame) {
+    // A GPU buffer frame has no pixels here: the host's native side has the
+    // buffer, and gives it back through releaseGpuBuffer.
+    if (frame.inGpuBuffer) return frame;
     if (!frame.inSharedBuffer) return frame;
     final index = frame.bufferIndex;
     if (index >= _buffers.length) return null;
