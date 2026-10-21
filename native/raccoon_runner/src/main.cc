@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "engine_host.h"
@@ -201,6 +202,31 @@ int Serve(const Options& options) {
   size_t last_sent = 0;
   bool vm_sent = false;
   raccoon::RunnerServer* server_ptr = nullptr;
+  // Platform messages waiting for the client's answer, by response id.
+  std::unordered_map<uint64_t, const FlutterPlatformMessageResponseHandle*> pending;
+  uint64_t next_response_id = 1;
+
+  host.SetPlatformMessageCallback(
+      [&](const std::string& channel, const uint8_t* data, size_t size,
+          const FlutterPlatformMessageResponseHandle* handle) {
+        if (server_ptr == nullptr || !server_ptr->has_client()) {
+          host.Respond(handle, nullptr, 0);
+          return;
+        }
+        raccoon::v1::RunnerMessage message;
+        raccoon::v1::PlatformMessage* out = message.mutable_platform_message();
+        out->set_channel(channel);
+        out->set_data(data, size);
+        if (handle != nullptr) {
+          const uint64_t id = next_response_id++;
+          pending[id] = handle;
+          out->set_response_id(id);
+        }
+        if (!server_ptr->Send(message) && handle != nullptr) {
+          pending.erase(out->response_id());
+          host.Respond(handle, nullptr, 0);
+        }
+      });
 
   raccoon::RunnerServer::Handler handler;
   handler.on_resize = [&host](const raccoon::v1::Resize& resize) {
@@ -214,6 +240,19 @@ int Serve(const Options& options) {
     host.SendKey(ToFlutterKey(key, host.NowMicros()));
   };
   handler.on_shutdown = [&stop] { stop = true; };
+  handler.on_platform_response = [&](const raccoon::v1::PlatformResponse& response) {
+    const auto found = pending.find(response.response_id());
+    if (found == pending.end()) return;
+    const FlutterPlatformMessageResponseHandle* handle = found->second;
+    pending.erase(found);
+    if (response.handled()) {
+      host.Respond(handle,
+                   reinterpret_cast<const uint8_t*>(response.data().data()),
+                   response.data().size());
+    } else {
+      host.Respond(handle, nullptr, 0);
+    }
+  };
   handler.on_client_connected = [&] {
     raccoon::v1::RunnerMessage hello;
     hello.mutable_hello()->set_protocol_version(kProtocolVersion);
@@ -222,7 +261,10 @@ int Serve(const Options& options) {
     vm_sent = false;
     std::fprintf(stderr, "raccoon_runner: client connected\n");
   };
-  handler.on_client_disconnected = [] {
+  handler.on_client_disconnected = [&] {
+    // Nobody will answer these now; let the app see "no plugin".
+    for (const auto& [id, handle] : pending) host.Respond(handle, nullptr, 0);
+    pending.clear();
     std::fprintf(stderr, "raccoon_runner: client disconnected\n");
   };
 

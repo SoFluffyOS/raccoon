@@ -72,6 +72,14 @@ message KeyEvent {
 
 message Shutdown {}
 
+// Answers a PlatformMessage. handled=false means "no plugin": the app sees
+// a null reply, as it would on a desktop without that plugin.
+message PlatformResponse {
+  uint64 response_id = 1;
+  bool handled = 2;
+  bytes data = 3;
+}
+
 message ClientMessage {
   oneof message {
     ClientHello hello = 1;
@@ -79,6 +87,7 @@ message ClientMessage {
     PointerEvent pointer = 3;
     KeyEvent key = 4;
     Shutdown shutdown = 5;
+    PlatformResponse platform_response = 6;
   }
 }
 
@@ -118,6 +127,15 @@ message Exited {
   int32 code = 1;
 }
 
+// A platform channel message the app sent, for the client to answer. The
+// client serves channels the way a desktop embedder's plugins would; a
+// response_id of 0 means the app expects no reply.
+message PlatformMessage {
+  uint64 response_id = 1;
+  string channel = 2;
+  bytes data = 3;
+}
+
 message RunnerMessage {
   oneof message {
     RunnerHello hello = 1;
@@ -125,5 +143,6 @@ message RunnerMessage {
     VmService vm_service = 3;
     LogLine log = 4;
     Exited exited = 5;
+    PlatformMessage platform_message = 6;
   }
 }

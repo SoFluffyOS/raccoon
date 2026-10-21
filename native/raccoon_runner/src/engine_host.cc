@@ -44,6 +44,7 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   args.log_message_callback = OnLog;
   args.log_tag = "raccoon";
   args.custom_task_runners = &runners_;
+  args.platform_message_callback = OnPlatformMessage;
 
   started_ = std::chrono::steady_clock::now();
   const FlutterEngineResult result =
@@ -73,6 +74,24 @@ void EngineHost::SendPointer(const FlutterPointerEvent& event) {
 void EngineHost::SendKey(const FlutterKeyEvent& event) {
   loader_.procs().SendKeyEvent(
       engine_, &event, [](bool /*handled*/, void* /*user_data*/) {}, nullptr);
+}
+
+void EngineHost::Respond(const FlutterPlatformMessageResponseHandle* handle,
+                         const uint8_t* data, size_t size) {
+  if (engine_ == nullptr || handle == nullptr) return;
+  loader_.procs().SendPlatformMessageResponse(engine_, handle, data, size);
+}
+
+void EngineHost::OnPlatformMessage(const FlutterPlatformMessage* message,
+                                   void* user_data) {
+  auto* host = static_cast<EngineHost*>(user_data);
+  const std::string channel = message->channel == nullptr ? "" : message->channel;
+  if (host->on_platform_message_) {
+    host->on_platform_message_(channel, message->message, message->message_size,
+                               message->response_handle);
+    return;
+  }
+  host->Respond(message->response_handle, nullptr, 0);
 }
 
 void EngineHost::Shutdown() {

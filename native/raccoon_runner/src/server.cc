@@ -132,6 +132,11 @@ void RunnerServer::Dispatch(const v1::ClientMessage& message) {
     case v1::ClientMessage::kShutdown:
       if (handler_.on_shutdown) handler_.on_shutdown();
       break;
+    case v1::ClientMessage::kPlatformResponse:
+      if (handler_.on_platform_response) {
+        handler_.on_platform_response(message.platform_response());
+      }
+      break;
     case v1::ClientMessage::MESSAGE_NOT_SET:
       break;
   }
