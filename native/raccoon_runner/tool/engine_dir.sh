@@ -6,6 +6,12 @@
 set -euo pipefail
 
 sdk_root() {
+  # The Flutter tool exports FLUTTER_ROOT to the commands it runs, such as the
+  # custom device helper; IDEs often start flutter without it on PATH.
+  if [ -n "${FLUTTER_ROOT:-}" ] && [ -x "$FLUTTER_ROOT/bin/flutter" ]; then
+    echo "$FLUTTER_ROOT"
+    return 0
+  fi
   local flutter
   flutter="$(command -v flutter)" || return 1
   flutter="$(readlink -f "$flutter")"

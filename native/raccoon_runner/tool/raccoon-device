@@ -36,9 +36,15 @@ case "$(uname -s)" in
 esac
 
 sdk_icu() {
-  local flutter
-  flutter="$(readlink -f "$(command -v flutter)")"
-  echo "$(cd "$(dirname "$flutter")/.." && pwd)/bin/cache/artifacts/engine/$SDK_ENGINE/icudtl.dat"
+  local root
+  if [ -n "${FLUTTER_ROOT:-}" ] && [ -d "$FLUTTER_ROOT/bin/cache" ]; then
+    root="$FLUTTER_ROOT"
+  else
+    local flutter
+    flutter="$(readlink -f "$(command -v flutter)")"
+    root="$(cd "$(dirname "$flutter")/.." && pwd)"
+  fi
+  echo "$root/bin/cache/artifacts/engine/$SDK_ENGINE/icudtl.dat"
 }
 
 case "${1:-}" in
