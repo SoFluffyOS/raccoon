@@ -20,6 +20,7 @@ message ClientHello {
   // The client can take frames from shared buffers whose file descriptors
   // ride along the SharedBuffers message (Unix sockets only).
   bool shared_buffers = 3;
+  uint32 pid = 4;  // the client process, named to a later client
 }
 
 // Gives a shared buffer back to the runner once its pixels were read.
@@ -158,6 +159,11 @@ message PlatformMessage {
   bytes data = 3;
 }
 
+// The runner has a client already; the connection closes after this.
+message Busy {
+  uint32 pid = 1;  // the client that has it
+}
+
 message RunnerMessage {
   oneof message {
     RunnerHello hello = 1;
@@ -167,5 +173,6 @@ message RunnerMessage {
     Exited exited = 5;
     PlatformMessage platform_message = 6;
     SharedBuffers shared_buffers = 7;
+    Busy busy = 8;
   }
 }

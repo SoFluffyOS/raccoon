@@ -121,6 +121,19 @@ void RunnerServer::OnListenReadable() {
   const int fd = AcceptClient(listen_fd_);
   if (fd < 0) return;
   if (client_fd_ >= 0) {
+    // One client at a time: tell the newcomer who has the runner, then hang
+    // up, so it can say so instead of showing a dead pane.
+    v1::RunnerMessage busy;
+    busy.mutable_busy()->set_pid(client_pid_);
+    std::string bytes;
+    busy.SerializeToString(&bytes);
+    const uint32_t length = static_cast<uint32_t>(bytes.size());
+    const uint8_t prefix[4] = {
+        static_cast<uint8_t>(length & 0xff), static_cast<uint8_t>((length >> 8) & 0xff),
+        static_cast<uint8_t>((length >> 16) & 0xff), static_cast<uint8_t>((length >> 24) & 0xff)};
+    if (WriteAllTo(fd, prefix, sizeof(prefix))) {
+      WriteAllTo(fd, reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size());
+    }
     close(fd);
     return;
   }
@@ -168,6 +181,7 @@ void RunnerServer::OnClientReadable(short revents) {
 void RunnerServer::Dispatch(const v1::ClientMessage& message) {
   switch (message.message_case()) {
     case v1::ClientMessage::kHello:
+      client_pid_ = message.hello().pid();
       if (handler_.on_hello) handler_.on_hello(message.hello());
       break;
     case v1::ClientMessage::kReleaseBuffer:
@@ -207,16 +221,19 @@ void RunnerServer::CloseClient() {
 }
 
 bool RunnerServer::WriteAll(const uint8_t* data, size_t size) {
+  return WriteAllTo(client_fd_, data, size);
+}
+
+bool RunnerServer::WriteAllTo(int fd, const uint8_t* data, size_t size) {
   size_t sent = 0;
   while (sent < size) {
-    const ssize_t wrote =
-        send(client_fd_, data + sent, size - sent, kSendFlags);
+    const ssize_t wrote = send(fd, data + sent, size - sent, kSendFlags);
     if (wrote >= 0) {
       sent += static_cast<size_t>(wrote);
       continue;
     }
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      pollfd wait{client_fd_, POLLOUT, 0};
+      pollfd wait{fd, POLLOUT, 0};
       if (poll(&wait, 1, 5000) <= 0) return false;
       continue;
     }

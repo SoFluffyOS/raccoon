@@ -54,6 +54,8 @@ class RunnerServer {
   std::string socket_path_;
   int listen_fd_ = -1;
   int client_fd_ = -1;
+  uint32_t client_pid_ = 0;
+  static bool WriteAllTo(int fd, const uint8_t* data, size_t size);
   std::vector<uint8_t> inbox_;
 };
 
