@@ -235,7 +235,16 @@ void main() {
           final latest = client.latestFrame ?? frame;
           expect(latest.width, w);
           expect(latest.pixels.length, latest.rowBytes * latest.height);
-          expect(_pixel(latest, latest.width ~/ 2, latest.height ~/ 2), _red);
+          // Inside the box but above its label: where a glyph lands differs
+          // between rasterizers by a pixel.
+          expect(
+            _pixel(
+              latest,
+              latest.width ~/ 2,
+              latest.height ~/ 2 - (45 * ratio).round(),
+            ),
+            _red,
+          );
           expect(_pixel(latest, 3, 3), _blue);
         }
       } finally {
