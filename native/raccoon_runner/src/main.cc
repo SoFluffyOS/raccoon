@@ -26,6 +26,10 @@
 
 namespace {
 
+// Buffers in the GPU ring: one being drawn, one on screen, one on its way
+// back, and one of slack for the round trip.
+constexpr size_t kGpuRing = 4;
+
 struct Options {
   std::string command;
   raccoon::EngineOptions engine;
@@ -372,7 +376,7 @@ int Serve(const Options& options) {
     client_gpu = false;
     if (hello.gpu_buffers()) {
       std::string gpu_error;
-      if (host.EnableGpuBuffers(3, &gpu_error)) {
+      if (host.EnableGpuBuffers(kGpuRing, &gpu_error)) {
         client_gpu = true;
       } else {
         std::fprintf(stderr, "raccoon_runner: no GPU buffers: %s; frames by readback\n",
