@@ -39,6 +39,9 @@ Design notes: `docs/internal_docs/raccoon/`.
 - `render`: writes one frame to a PPM file, for tests and a quick look.
 - `tool/raccoon-device`: ping, install, uninstall and run for the Flutter
   tool's custom device, so a stock `flutter run -d raccoon` works.
+  `--instance N` names everything `<app>@N`, which is how the `raccoon-N`
+  devices keep a second run of the same project apart; each run's output
+  lands timestamped in the app's data directory as `runner.log`.
 
 ## Build
 

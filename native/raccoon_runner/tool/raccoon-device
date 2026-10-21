@@ -2,13 +2,18 @@
 # The commands behind the "raccoon" entry in Flutter's custom_devices.json.
 #
 #   raccoon-device ping
-#   raccoon-device install <localPath> <appName>
-#   raccoon-device uninstall <appName>
-#   raccoon-device run <appName> [engine switches]
+#   raccoon-device install [--instance N] <localPath> <appName>
+#   raccoon-device uninstall [--instance N] <appName>
+#   raccoon-device run [--instance N] <appName> [engine switches]
 #
 # install copies the app bundle the tool built (build/flutter_assets) into the
 # runtime's app store; run starts raccoon_runner serve on it and leaves the
-# engine's log lines on stdout, where the tool reads the VM service URI.
+# engine's log lines on stdout, where the tool reads the VM service URI, and
+# keeps a timestamped copy of the run's output in the app's data directory.
+#
+# --instance N (the "raccoon-N" device) keeps the same project apart from its
+# first run: socket, app store and data directory are named <appName>@N, so
+# one project can run at two sizes side by side.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
@@ -58,34 +63,58 @@ sdk_icu() {
   echo "$root/bin/cache/artifacts/engine/$SDK_ENGINE/icudtl.dat"
 }
 
-case "${1:-}" in
+# The key an app's socket, store and data are named by: the app name, with
+# @N for an instance other than the first.
+app_key() {
+  if [ "$INSTANCE" = "1" ]; then echo "$1"; else echo "$1@$INSTANCE"; fi
+}
+
+# Prefixes each line with the time of day, to the millisecond.
+stamp() {
+  perl -pe 'use Time::HiRes qw(time); my $t = time; my @l = localtime($t);
+            $_ = sprintf("%02d:%02d:%06.3f ", $l[2], $l[1], $l[0] + $t - int($t)) . $_'
+}
+
+verb="${1:-}"; shift || true
+INSTANCE=1
+if [ "${1:-}" = "--instance" ]; then
+  INSTANCE="$2"; shift 2
+fi
+
+case "$verb" in
   ping)
     test -x "$RUNNER"
     ;;
   install)
-    local_path="$2"; app="$3"
-    rm -rf "$APPS/$app"
-    mkdir -p "$APPS/$app"
-    cp -r "$local_path" "$APPS/$app/flutter_assets"
+    local_path="$1"; key="$(app_key "$2")"
+    rm -rf "$APPS/$key"
+    mkdir -p "$APPS/$key"
+    cp -r "$local_path" "$APPS/$key/flutter_assets"
     ;;
   uninstall)
-    rm -rf "$APPS/$2"
+    rm -rf "$APPS/$(app_key "$1")"
     ;;
   run)
-    app="$2"; shift 2
-    mkdir -p "$SOCKETS"
+    key="$(app_key "$1")"; shift
+    mkdir -p "$SOCKETS" "$DATA/$key"
+    # The run's output, timestamped, for the run that went wrong; the tool
+    # keeps reading the untouched streams.
+    log="$DATA/$key/runner.log"
+    : > "$log"
     # The tool passes its engine switches as one argument; split on spaces.
     # shellcheck disable=SC2068
     exec "$RUNNER" serve \
       --engine-dir "$("$ROOT/tool/engine_dir.sh")" \
-      --assets "$APPS/$app/flutter_assets" \
+      --assets "$APPS/$key/flutter_assets" \
       --icu "$(sdk_icu)" \
-      --socket "$SOCKETS/$app.sock" \
-      --data-dir "$DATA/$app" \
-      -- $@
+      --socket "$SOCKETS/$key.sock" \
+      --data-dir "$DATA/$key" \
+      -- $@ \
+      > >(tee >(stamp >> "$log")) \
+      2> >(tee >(stamp >> "$log") >&2)
     ;;
   *)
-    echo "usage: raccoon-device ping | install <localPath> <appName> | uninstall <appName> | run <appName> [engine switches]" >&2
+    echo "usage: raccoon-device ping | install [--instance N] <localPath> <appName> | uninstall [--instance N] <appName> | run [--instance N] <appName> [engine switches]" >&2
     exit 2
     ;;
 esac
