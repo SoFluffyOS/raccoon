@@ -248,6 +248,65 @@ void main() {
     skip: ready ? false : 'build the runner and example first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
+
+  // example/window calls desktop_window, window_manager and window_size at
+  // startup and shows a green box only when every answer was right.
+  final windowAssets = p.join(
+    runnerDir,
+    'example',
+    'window',
+    'build',
+    'flutter_assets',
+  );
+  test(
+    'the runner answers the window channels itself',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: windowAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint);
+      final forwarded = <String>[];
+      for (final channel in [
+        'desktop_window',
+        'window_manager',
+        'flutter/windowsize',
+      ]) {
+        client.registerChannel(channel, (data) async {
+          forwarded.add(channel);
+          return null;
+        });
+      }
+      try {
+        final frame = await client.frames.first.timeout(
+          const Duration(seconds: 15),
+        );
+        expect(_pixel(frame, 5, 5), _blue);
+        expect(
+          _pixel(frame, 400, 300),
+          _green,
+          reason: 'a window channel call failed; the runner logs which',
+        );
+        expect(forwarded, isEmpty);
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready && Directory(windowAssets).existsSync()
+        ? false
+        : 'build the runner and example/window first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 }
 
 /// The SDK behind `FLUTTER_ROOT`, else behind the `flutter` on the PATH.
