@@ -3,6 +3,7 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  raccoon_view
   url_launcher_linux
 )
 
