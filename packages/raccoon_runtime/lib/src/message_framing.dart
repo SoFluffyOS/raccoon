@@ -33,8 +33,9 @@ final class MessageUnframer {
       offset = start + length;
     }
     _pending.clear();
-    if (offset < bytes.length)
+    if (offset < bytes.length) {
       _pending.add(Uint8List.sublistView(bytes, offset));
+    }
     return payloads;
   }
 }
