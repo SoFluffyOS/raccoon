@@ -152,6 +152,8 @@ class _RaccoonViewState extends State<RaccoonView> {
             behavior: HitTestBehavior.opaque,
             child: SizedBox.expand(
               child: Stack(
+                // No text direction needed: hosts need not provide one.
+                alignment: Alignment.topLeft,
                 fit: StackFit.expand,
                 children: [
                   RaccoonFrameView(frame: _image, fit: BoxFit.fill),
