@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -51,17 +52,29 @@ final class RunnerDiscovery {
   }
 
   /// The current runners, then the list again whenever one appears or goes.
-  Stream<List<UnixSocketEndpoint>> watch() async* {
+  Stream<List<UnixSocketEndpoint>> watch() {
     final dir = Directory(directory);
     if (!dir.existsSync()) dir.createSync(recursive: true);
-    yield list();
-    await for (final _ in dir.watch(
-      events:
-          FileSystemEvent.create |
-          FileSystemEvent.delete |
-          FileSystemEvent.move,
-    )) {
-      yield list();
-    }
+    StreamSubscription<FileSystemEvent>? events;
+    late final StreamController<List<UnixSocketEndpoint>> controller;
+    controller = StreamController(
+      onListen: () {
+        controller.add(list());
+        events = dir
+            .watch(
+              events:
+                  FileSystemEvent.create |
+                  FileSystemEvent.delete |
+                  FileSystemEvent.move,
+            )
+            .listen(
+              (_) => controller.add(list()),
+              onError: controller.addError,
+              onDone: controller.close,
+            );
+      },
+      onCancel: () => events?.cancel(),
+    );
+    return controller.stream;
   }
 }
