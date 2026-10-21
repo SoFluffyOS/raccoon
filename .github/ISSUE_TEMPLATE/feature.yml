@@ -1,0 +1,29 @@
+name: Feature
+description: Something Raccoon should do.
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: piece
+    attributes:
+      label: Where
+      description: Skip it if you don't know.
+      multiple: true
+      options:
+        - Runner
+        - Runtime
+        - View
+        - Simulator
+        - Lumide
+        - Not sure
+  - type: textarea
+    id: what
+    attributes:
+      label: What
+      description: The thing, and what it's for.
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: How
+      description: If you have an idea. Optional.

@@ -1,0 +1,47 @@
+name: Bug
+description: Something broke.
+labels: [bug]
+body:
+  - type: dropdown
+    id: piece
+    attributes:
+      label: Where
+      description: Skip it if you don't know.
+      multiple: true
+      options:
+        - Runner
+        - Runtime
+        - View
+        - Simulator
+        - Lumide
+        - Not sure
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host
+      multiple: true
+      options:
+        - Linux
+        - macOS
+        - Windows
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got.
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions
+      description: "`flutter --version`, and `raccoon_device doctor` or the simulator's Runtime panel."
+      render: shell
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: "The runner's output, or the Flutter tool's. `RACCOON_TRACE=1` makes the runner print what it receives."
+      render: shell
