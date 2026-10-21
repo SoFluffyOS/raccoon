@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# The commands behind the "raccoon" entry in Flutter's custom_devices.json.
+#
+#   raccoon-device ping
+#   raccoon-device install <localPath> <appName>
+#   raccoon-device uninstall <appName>
+#   raccoon-device run <appName> [engine switches]
+#
+# install copies the app bundle the tool built (build/flutter_assets) into the
+# runtime's app store; run starts raccoon_runner serve on it and leaves the
+# engine's log lines on stdout, where the tool reads the VM service URI.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+RUNNER="${RACCOON_RUNNER:-$ROOT/build/raccoon_runner}"
+APPS="${XDG_DATA_HOME:-$HOME/.local/share}/raccoon/apps"
+SOCKETS="${XDG_RUNTIME_DIR:-/tmp}/raccoon"
+
+sdk_icu() {
+  local flutter
+  flutter="$(readlink -f "$(command -v flutter)")"
+  echo "$(cd "$(dirname "$flutter")/.." && pwd)/bin/cache/artifacts/engine/linux-x64/icudtl.dat"
+}
+
+case "${1:-}" in
+  ping)
+    test -x "$RUNNER"
+    ;;
+  install)
+    local_path="$2"; app="$3"
+    rm -rf "$APPS/$app"
+    mkdir -p "$APPS/$app"
+    cp -r "$local_path" "$APPS/$app/flutter_assets"
+    ;;
+  uninstall)
+    rm -rf "$APPS/$2"
+    ;;
+  run)
+    app="$2"; shift 2
+    mkdir -p "$SOCKETS"
+    # The tool passes its engine switches as one argument; split on spaces.
+    # shellcheck disable=SC2068
+    exec "$RUNNER" serve \
+      --engine-dir "$("$ROOT/tool/engine_dir.sh")" \
+      --assets "$APPS/$app/flutter_assets" \
+      --icu "$(sdk_icu)" \
+      --socket "$SOCKETS/$app.sock" \
+      -- $@
+    ;;
+  *)
+    echo "usage: raccoon-device ping | install <localPath> <appName> | uninstall <appName> | run <appName> [engine switches]" >&2
+    exit 2
+    ;;
+esac

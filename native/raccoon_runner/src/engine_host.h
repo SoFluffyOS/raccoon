@@ -21,6 +21,8 @@ struct EngineOptions {
   size_t width = 800;
   size_t height = 600;
   double pixel_ratio = 1.0;
+  // Engine switches appended to the command line, e.g. --vm-service-port=N.
+  std::vector<std::string> extra_args;
 };
 
 // One engine on the software renderer: start, metrics, input, shutdown.

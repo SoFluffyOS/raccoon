@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "engine_host.h"
 #include "event_loop.h"
@@ -34,7 +35,8 @@ void Usage() {
                " --icu FILE [--out F] [--frames N] [--timeout-ms N] [--rgba]\n"
                "       raccoon_runner serve --engine-dir DIR --assets DIR"
                " --icu FILE --socket PATH\n"
-               "common: [--width N] [--height N] [--dpr X]\n");
+               "common: [--width N] [--height N] [--dpr X]"
+               " [-- engine switches...]\n");
 }
 
 bool ParseOptions(int argc, char** argv, Options* options) {
@@ -42,6 +44,10 @@ bool ParseOptions(int argc, char** argv, Options* options) {
   options->command = argv[1];
   for (int i = 2; i < argc; ++i) {
     const std::string arg = argv[i];
+    if (arg == "--") {
+      for (int j = i + 1; j < argc; ++j) options->engine.extra_args.emplace_back(argv[j]);
+      break;
+    }
     if (arg == "--rgba") {
       options->bgra = false;
       continue;

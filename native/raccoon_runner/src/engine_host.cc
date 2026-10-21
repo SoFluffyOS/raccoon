@@ -28,6 +28,7 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   renderer.software.surface_present_callback = OnPresent;
 
   command_line_ = {"raccoon_runner", "--enable-impeller=false"};
+  for (const std::string& arg : options.extra_args) command_line_.push_back(arg);
   argv_.clear();
   for (const std::string& arg : command_line_) argv_.push_back(arg.c_str());
 
