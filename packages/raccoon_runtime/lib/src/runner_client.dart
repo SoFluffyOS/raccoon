@@ -1,12 +1,19 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:raccoon/raccoon.dart';
 import 'package:raccoon_runtime/src/message_framing.dart';
 import 'package:raccoon_runtime/src/runner_connection.dart';
 import 'package:raccoon_runtime/src/runner_endpoint.dart';
 
-/// A connection to one runner: frames and logs in, resize and input out.
+/// Serves one platform channel for the hosted app, the way a desktop
+/// embedder's plugin would. Returns the reply bytes, or null for "no plugin",
+/// which the app sees as a null reply.
+typedef PlatformChannelHandler = Future<Uint8List?> Function(Uint8List data);
+
+/// A connection to one runner: frames, logs and platform messages in; resize,
+/// input and platform replies out.
 final class RunnerClient implements RunnerConnection {
   RunnerClient._(this._socket) {
     _subscription = _socket.listen(
@@ -44,6 +51,7 @@ final class RunnerClient implements RunnerConnection {
   final _messages = StreamController<RunnerMessage>.broadcast();
   final _hello = Completer<RunnerHello>();
   final _closed = Completer<void>();
+  final _channels = <String, PlatformChannelHandler>{};
   late final StreamSubscription<List<int>> _subscription;
   Frame? _latestFrame;
   String? _vmServiceUri;
@@ -85,6 +93,14 @@ final class RunnerClient implements RunnerConnection {
   /// Asks the runner to stop.
   void shutdown() => send(ClientMessage(shutdown: Shutdown()));
 
+  /// Serves [channel] with [handler]. Channels without a handler get a
+  /// "no plugin" reply.
+  void registerChannel(String channel, PlatformChannelHandler handler) {
+    _channels[channel] = handler;
+  }
+
+  void unregisterChannel(String channel) => _channels.remove(channel);
+
   void send(ClientMessage message) {
     if (_closed.isCompleted) return;
     _socket.add(MessageFraming.frame(message.writeToBuffer()));
@@ -104,8 +120,33 @@ final class RunnerClient implements RunnerConnection {
       }
       if (message.hasFrame()) _latestFrame = message.frame;
       if (message.hasVmService()) _vmServiceUri = message.vmService.uri;
+      if (message.hasPlatformMessage()) {
+        unawaited(_servePlatformMessage(message.platformMessage));
+      }
       _messages.add(message);
     }
+  }
+
+  Future<void> _servePlatformMessage(PlatformMessage message) async {
+    final handler = _channels[message.channel];
+    Uint8List? reply;
+    if (handler != null) {
+      try {
+        reply = await handler(Uint8List.fromList(message.data));
+      } on Object catch (error, stackTrace) {
+        _messages.addError(error, stackTrace);
+      }
+    }
+    if (message.responseId == 0) return;
+    send(
+      ClientMessage(
+        platformResponse: PlatformResponse(
+          responseId: message.responseId,
+          handled: reply != null,
+          data: reply ?? const [],
+        ),
+      ),
+    );
   }
 
   void _onDone() => _finish();
