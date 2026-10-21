@@ -1,5 +1,7 @@
 # raccoon_runner
 
+[![CI](https://github.com/SoFluffyOS/raccoon_runner/actions/workflows/ci.yml/badge.svg)](https://github.com/SoFluffyOS/raccoon_runner/actions/workflows/ci.yml)
+
 The Raccoon runtime's runner: hosts a Flutter app on the C embedder API, for
 Lumide. A git submodule of the Lumide monorepo at `native/raccoon_runner`.
 Design notes: `docs/internal_docs/raccoon/`.
@@ -42,6 +44,36 @@ tool/protoc.sh                       # user-local protoc 21.12, once
 cmake -S . -B build -G Ninja -DRACCOON_ENGINE_DIR="$(tool/engine_dir.sh)"
 ninja -C build                       # first build also compiles protobuf-lite
 ```
+
+CI (`.github/workflows/ci.yml`) does the same on Linux x64 and both Mac
+architectures, bundles the examples, renders a frame, and runs
+`raccoon_runtime`'s tests, whose integration tests drive the built runner.
+
+## Prebuilt binaries
+
+Every tag `v<VERSION>` publishes `raccoon_runner-<version>-<platform>.tar.gz`
+for `linux-x64`, `macos-arm64` and `macos-x64` on the [releases
+page](https://github.com/SoFluffyOS/raccoon_runner/releases), packed by
+`tool/package.sh`: the binary, `tool/raccoon-device`, `tool/engine_dir.sh`,
+`VERSION` and `LICENSE`, flat. Unpacked into a folder it works as a runtime
+on its own, and the Raccoon Simulator fetches the archive for its host
+itself.
+
+```sh
+mkdir raccoon_runner && tar xzf raccoon_runner-<version>-<platform>.tar.gz -C raccoon_runner
+raccoon_runner/raccoon_runner --version
+raccoon_runner/tool/raccoon-device ping    # finds the binary beside it
+```
+
+The binaries are not notarized. macOS quarantines a browser download, so
+clear that before the first run: `xattr -d com.apple.quarantine
+raccoon_runner/raccoon_runner`. A download by a tool carries no quarantine
+attribute.
+
+`VERSION` holds the version, which `--version` prints; a `-pre.N` suffix
+marks a prerelease. To release, bump `VERSION`, commit, and push the tag
+`v$(cat VERSION)`: `.github/workflows/release.yml` refuses a tag that does
+not match.
 
 ## Try it
 
