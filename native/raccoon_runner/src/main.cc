@@ -245,10 +245,21 @@ int Serve(const Options& options) {
 
   raccoon::RunnerServer::Handler handler;
   handler.on_resize = [&host](const raccoon::v1::Resize& resize) {
+    if (std::getenv("RACCOON_TRACE") != nullptr) {
+      std::fprintf(stderr, "raccoon_runner: resize %ux%u @%.2f\n", resize.width(),
+                   resize.height(), resize.pixel_ratio());
+    }
     host.Resize(resize.width(), resize.height(),
                 resize.pixel_ratio() > 0 ? resize.pixel_ratio() : 1.0);
   };
-  handler.on_pointer = [&host](const raccoon::v1::PointerEvent& pointer) {
+  // RACCOON_TRACE=1 prints what the client sends, for debugging a client.
+  const bool trace = std::getenv("RACCOON_TRACE") != nullptr;
+  handler.on_pointer = [&host, trace](const raccoon::v1::PointerEvent& pointer) {
+    if (trace) {
+      std::fprintf(stderr, "raccoon_runner: pointer phase=%d x=%.1f y=%.1f buttons=%lld device=%d\n",
+                   static_cast<int>(pointer.phase()), pointer.x(), pointer.y(),
+                   static_cast<long long>(pointer.buttons()), pointer.pointer_id());
+    }
     host.SendPointer(ToFlutterPointer(pointer, host.NowMicros()));
   };
   handler.on_key = [&host](const raccoon::v1::KeyEvent& key) {
