@@ -6,7 +6,7 @@
 
 namespace raccoon {
 
-// Loads libflutter_engine.so from a runtime directory and resolves the
+// Loads the embedder library from a runtime directory and resolves the
 // embedder proc table, so one runner binary can host any engine revision.
 class EngineLoader {
  public:

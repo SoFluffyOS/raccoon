@@ -14,12 +14,31 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 RUNNER="${RACCOON_RUNNER:-$ROOT/build/raccoon_runner}"
 APPS="${XDG_DATA_HOME:-$HOME/.local/share}/raccoon/apps"
-SOCKETS="${XDG_RUNTIME_DIR:-/tmp}/raccoon"
+
+# The socket directory must be the one raccoon_runtime's RunnerDiscovery
+# watches: the XDG runtime directory on Linux, the user's temporary directory
+# on macOS. The SDK keeps one macOS engine directory for both architectures.
+case "$(uname -s)" in
+  Darwin)
+    TEMP="${TMPDIR:-/tmp}"
+    SOCKETS="${TEMP%/}/raccoon"
+    SDK_ENGINE=darwin-x64
+    ;;
+  Linux)
+    SOCKETS="${XDG_RUNTIME_DIR:-/tmp}/raccoon"
+    case "$(uname -m)" in
+      x86_64) SDK_ENGINE=linux-x64 ;;
+      aarch64|arm64) SDK_ENGINE=linux-arm64 ;;
+      *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
+    esac
+    ;;
+  *) echo "unsupported system $(uname -s)" >&2; exit 1 ;;
+esac
 
 sdk_icu() {
   local flutter
   flutter="$(readlink -f "$(command -v flutter)")"
-  echo "$(cd "$(dirname "$flutter")/.." && pwd)/bin/cache/artifacts/engine/linux-x64/icudtl.dat"
+  echo "$(cd "$(dirname "$flutter")/.." && pwd)/bin/cache/artifacts/engine/$SDK_ENGINE/icudtl.dat"
 }
 
 case "${1:-}" in

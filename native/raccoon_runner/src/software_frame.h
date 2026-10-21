@@ -11,6 +11,14 @@
 
 namespace raccoon {
 
+// The byte order the software renderer rasters in: Skia's native 32-bit
+// colour type, which is BGRA on Linux and Windows and RGBA on Apple hosts.
+#if defined(__APPLE__)
+constexpr bool kSoftwareFrameIsBgra = false;
+#else
+constexpr bool kSoftwareFrameIsBgra = true;
+#endif
+
 // Keeps the latest frame the software renderer presented. Present runs on the
 // engine's raster thread; everything else on the owner's thread.
 class SoftwareFrame {

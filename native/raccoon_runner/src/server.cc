@@ -1,5 +1,6 @@
 #include "server.h"
 
+#include <fcntl.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
@@ -15,6 +16,56 @@ namespace {
 
 constexpr size_t kLengthPrefix = 4;
 constexpr size_t kMaxMessage = 64 * 1024 * 1024;
+
+// Sockets are non-blocking and close-on-exec, and a client that went away
+// must fail a send with EPIPE rather than raise SIGPIPE. Linux asks for all of
+// it in the calls themselves; macOS sets the flags afterwards and silences
+// SIGPIPE per socket.
+#if defined(__linux__)
+
+constexpr int kSendFlags = MSG_NOSIGNAL;
+
+int OpenListenSocket() {
+  return socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+}
+
+int AcceptClient(int listen_fd) {
+  return accept4(listen_fd, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
+}
+
+#else
+
+constexpr int kSendFlags = 0;
+
+bool SetNonBlockingCloseOnExec(int fd) {
+  return fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) == 0 &&
+         fcntl(fd, F_SETFD, FD_CLOEXEC) == 0;
+}
+
+int OpenListenSocket() {
+  const int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (fd < 0) return fd;
+  if (!SetNonBlockingCloseOnExec(fd)) {
+    close(fd);
+    return -1;
+  }
+  return fd;
+}
+
+int AcceptClient(int listen_fd) {
+  const int fd = accept(listen_fd, nullptr, nullptr);
+  if (fd < 0) return fd;
+  const int no_sigpipe = 1;
+  if (!SetNonBlockingCloseOnExec(fd) ||
+      setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe,
+                 sizeof(no_sigpipe)) != 0) {
+    close(fd);
+    return -1;
+  }
+  return fd;
+}
+
+#endif
 
 uint32_t ReadLength(const uint8_t* data) {
   return static_cast<uint32_t>(data[0]) | (static_cast<uint32_t>(data[1]) << 8) |
@@ -46,7 +97,7 @@ bool RunnerServer::Listen(const std::string& socket_path, std::string* error) {
   std::strncpy(address.sun_path, socket_path.c_str(),
                sizeof(address.sun_path) - 1);
 
-  listen_fd_ = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+  listen_fd_ = OpenListenSocket();
   if (listen_fd_ < 0) {
     *error = std::string("socket: ") + std::strerror(errno);
     return false;
@@ -67,7 +118,7 @@ bool RunnerServer::Listen(const std::string& socket_path, std::string* error) {
 }
 
 void RunnerServer::OnListenReadable() {
-  const int fd = accept4(listen_fd_, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
+  const int fd = AcceptClient(listen_fd_);
   if (fd < 0) return;
   if (client_fd_ >= 0) {
     close(fd);
@@ -159,7 +210,7 @@ bool RunnerServer::WriteAll(const uint8_t* data, size_t size) {
   size_t sent = 0;
   while (sent < size) {
     const ssize_t wrote =
-        send(client_fd_, data + sent, size - sent, MSG_NOSIGNAL);
+        send(client_fd_, data + sent, size - sent, kSendFlags);
     if (wrote >= 0) {
       sent += static_cast<size_t>(wrote);
       continue;
@@ -198,7 +249,7 @@ bool RunnerServer::SendWithFds(const v1::RunnerMessage& message,
   std::memcpy(CMSG_DATA(cmsg), fds.data(), sizeof(int) * fds.size());
   ssize_t sent;
   while (true) {
-    sent = sendmsg(client_fd_, &header, MSG_NOSIGNAL);
+    sent = sendmsg(client_fd_, &header, kSendFlags);
     if (sent >= 0) break;
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
       pollfd wait{client_fd_, POLLOUT, 0};

@@ -6,20 +6,26 @@ Design notes: `docs/internal_docs/raccoon/`.
 
 ## What it does
 
-- Loads `libflutter_engine.so` for the active SDK's engine revision at run
-  time (`tool/engine_dir.sh` downloads the prebuilt debug embedder), so one
-  runner binary serves several runtimes.
+- Loads the prebuilt debug embedder for the active SDK's engine revision at
+  run time (`tool/engine_dir.sh` downloads it: `libflutter_engine.so` on
+  Linux, `FlutterEmbedder.framework` on macOS), so one runner binary serves
+  several runtimes.
 - Runs an app bundle (`build/flutter_assets`, no native build needed) with the
   software renderer on a pumped platform task runner.
 - `serve`: speaks runner protocol v1 (`proto/raccoon/v1/runner.proto`) over a
-  Unix socket: length-prefixed protobuf; frames out as BGRA pixels; resize,
-  pointer and key events in; the app's platform channel messages out and the
-  client's answers back; the VM service URI; shutdown.
+  Unix socket: length-prefixed protobuf; frames out as pixels in the host's
+  native order (BGRA on Linux, RGBA on macOS), through shared buffers when the
+  client takes them; resize, pointer and key events in; the app's platform
+  channel messages out and the client's answers back; the VM service URI;
+  shutdown.
 - `render`: writes one frame to a PPM file, for tests and a quick look.
 - `tool/raccoon-device`: ping, install, uninstall and run for the Flutter
   tool's custom device, so a stock `flutter run -d raccoon` works.
 
 ## Build
+
+Linux needs a C++17 compiler, CMake and Ninja; macOS the Xcode command-line
+tools plus `brew install cmake ninja`.
 
 ```sh
 tool/protoc.sh                       # user-local protoc 21.12, once
@@ -43,6 +49,9 @@ build/raccoon_runner serve \
   --socket "$XDG_RUNTIME_DIR/raccoon/hello.sock"
 ```
 
+On macOS the ICU data is under `engine/darwin-x64` and the sockets live in
+`$TMPDIR/raccoon`, which is where `tool/raccoon-device` puts them.
+
 Register the custom device and run any project on it:
 
 ```sh
@@ -59,5 +68,10 @@ Edit `proto/raccoon/v1/runner.proto`, rebuild (CMake regenerates the C++),
 and run `pub_packages/raccoon/tool/gen_proto.sh` for the Dart side. Bump
 `RaccoonProtocol.version` on incompatible changes.
 
-Linux first, on the developer's workstation. The per-host seams (engine
-loading, sockets, paths) are small so macOS and Windows follow.
+## Hosts
+
+Linux and macOS, from the same sources; the per-host seams are the wake
+descriptor (eventfd or a pipe), socket flags, the shared buffers' backing
+(a memfd, or an unlinked temporary file on macOS, whose POSIX shared memory
+cannot be read with `read()`), the engine library's name and the pixel
+order. Windows follows the same seams.

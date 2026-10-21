@@ -27,7 +27,10 @@ class EventLoop {
   void RunOnce(int timeout_ms);
 
  private:
+  // The read and write ends of the wake descriptor: one eventfd on Linux, the
+  // two ends of a pipe elsewhere.
   int wake_fd_ = -1;
+  int wake_write_fd_ = -1;
   std::unordered_map<int, std::pair<short, Handler>> watches_;
 };
 

@@ -1,23 +1,45 @@
 #include "event_loop.h"
 
+#include <fcntl.h>
 #include <poll.h>
-#include <sys/eventfd.h>
 #include <unistd.h>
 
 #include <cstdint>
 #include <vector>
 
+#if defined(__linux__)
+#include <sys/eventfd.h>
+#endif
+
 namespace raccoon {
 
-EventLoop::EventLoop() { wake_fd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC); }
+// Linux wakes the loop through an eventfd. macOS has none, so a pipe does the
+// same job: a byte written to wake, every byte drained on the way out.
+EventLoop::EventLoop() {
+#if defined(__linux__)
+  wake_fd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+  wake_write_fd_ = wake_fd_;
+#else
+  int fds[2] = {-1, -1};
+  if (pipe(fds) != 0) return;
+  for (const int fd : fds) {
+    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+    fcntl(fd, F_SETFD, FD_CLOEXEC);
+  }
+  wake_fd_ = fds[0];
+  wake_write_fd_ = fds[1];
+#endif
+}
 
 EventLoop::~EventLoop() {
+  if (wake_write_fd_ >= 0 && wake_write_fd_ != wake_fd_) close(wake_write_fd_);
   if (wake_fd_ >= 0) close(wake_fd_);
 }
 
 void EventLoop::Wake() {
   const uint64_t one = 1;
-  [[maybe_unused]] const ssize_t written = write(wake_fd_, &one, sizeof(one));
+  [[maybe_unused]] const ssize_t written =
+      write(wake_write_fd_, &one, sizeof(one));
 }
 
 void EventLoop::Watch(int fd, short events, Handler handler) {
@@ -33,8 +55,9 @@ void EventLoop::RunOnce(int timeout_ms) {
   const int ready = poll(fds.data(), fds.size(), timeout_ms);
   if (ready <= 0) return;
   if (fds[0].revents & POLLIN) {
-    uint64_t value = 0;
-    [[maybe_unused]] const ssize_t got = read(wake_fd_, &value, sizeof(value));
+    uint64_t pending = 0;
+    while (read(wake_fd_, &pending, sizeof(pending)) > 0) {
+    }
   }
   std::vector<std::pair<Handler, short>> pending;
   for (size_t i = 1; i < fds.size(); ++i) {

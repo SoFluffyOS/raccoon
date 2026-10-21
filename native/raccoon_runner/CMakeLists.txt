@@ -4,12 +4,29 @@ project(raccoon_runner CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Directory holding flutter_embedder.h for the engine revision in use. The
-# engine library itself is loaded at run time with --engine-dir, so one runner
-# binary serves several runtimes.
-set(RACCOON_ENGINE_DIR "" CACHE PATH "Directory with flutter_embedder.h")
+# The runtime directory for the engine revision in use: flutter_embedder.h
+# next to libflutter_engine.so on Linux, FlutterEmbedder.framework on macOS.
+# The engine library itself is loaded at run time with --engine-dir, so one
+# runner binary serves several runtimes.
+set(RACCOON_ENGINE_DIR "" CACHE PATH "Runtime directory with the embedder header")
 if(NOT RACCOON_ENGINE_DIR)
-  message(FATAL_ERROR "Set -DRACCOON_ENGINE_DIR to a directory holding flutter_embedder.h (see tool/engine_dir.sh)")
+  message(FATAL_ERROR "Set -DRACCOON_ENGINE_DIR to a runtime directory (see tool/engine_dir.sh)")
+endif()
+find_file(RACCOON_EMBEDDER_HEADER NAMES flutter_embedder.h
+  PATHS ${RACCOON_ENGINE_DIR} NO_DEFAULT_PATH)
+if(RACCOON_EMBEDDER_HEADER)
+  set(RACCOON_EMBEDDER_INCLUDE_DIR ${RACCOON_ENGINE_DIR})
+else()
+  # The macOS framework names the header FlutterEmbedder.h; the sources keep
+  # their one include and reach it through a generated alias.
+  find_file(RACCOON_FRAMEWORK_HEADER NAMES FlutterEmbedder.h
+    PATHS ${RACCOON_ENGINE_DIR}/FlutterEmbedder.framework/Headers NO_DEFAULT_PATH)
+  if(NOT RACCOON_FRAMEWORK_HEADER)
+    message(FATAL_ERROR "No flutter_embedder.h or FlutterEmbedder.framework in ${RACCOON_ENGINE_DIR} (see tool/engine_dir.sh)")
+  endif()
+  set(RACCOON_EMBEDDER_INCLUDE_DIR ${CMAKE_BINARY_DIR}/include)
+  file(WRITE ${RACCOON_EMBEDDER_INCLUDE_DIR}/flutter_embedder.h
+    "#include \"${RACCOON_FRAMEWORK_HEADER}\"\n")
 endif()
 
 # protoc for the C++ message code; tool/protoc.sh installs a user-local one.
@@ -54,6 +71,7 @@ add_executable(raccoon_runner
   src/shared_buffers.cc
   src/software_frame.cc
 )
-target_include_directories(raccoon_runner PRIVATE ${RACCOON_ENGINE_DIR} src)
+target_include_directories(raccoon_runner PRIVATE ${RACCOON_EMBEDDER_INCLUDE_DIR} src)
 target_compile_options(raccoon_runner PRIVATE -Wall -Wextra)
-target_link_libraries(raccoon_runner PRIVATE raccoon_proto dl pthread)
+find_package(Threads REQUIRED)
+target_link_libraries(raccoon_runner PRIVATE raccoon_proto ${CMAKE_DL_LIBS} Threads::Threads)

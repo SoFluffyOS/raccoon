@@ -4,13 +4,30 @@
 
 namespace raccoon {
 
+namespace {
+
+// The embedder library inside a runtime directory: a bare shared object on
+// Linux, the framework the Flutter bucket ships on macOS. That framework
+// carries the Dart VM snapshot inside itself (the SDK's vm_snapshot_data for
+// macOS is empty) and the engine looks it up among the process's global
+// symbols, so the framework is loaded globally.
+#if defined(__APPLE__)
+constexpr char kEngineLibrary[] = "FlutterEmbedder.framework/FlutterEmbedder";
+constexpr int kLoadFlags = RTLD_NOW | RTLD_GLOBAL;
+#else
+constexpr char kEngineLibrary[] = "libflutter_engine.so";
+constexpr int kLoadFlags = RTLD_NOW | RTLD_LOCAL;
+#endif
+
+}  // namespace
+
 EngineLoader::~EngineLoader() {
   if (handle_ != nullptr) dlclose(handle_);
 }
 
 bool EngineLoader::Load(const std::string& engine_dir, std::string* error) {
-  const std::string path = engine_dir + "/libflutter_engine.so";
-  handle_ = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+  const std::string path = engine_dir + "/" + kEngineLibrary;
+  handle_ = dlopen(path.c_str(), kLoadFlags);
   if (handle_ == nullptr) {
     *error = std::string("dlopen failed: ") + dlerror();
     return false;

@@ -6,14 +6,20 @@ set -euo pipefail
 VERSION="${PROTOC_VERSION:-21.12}"
 DIR="${RACCOON_PROTOC_DIR:-$HOME/.local/raccoon/protoc}"
 if [ ! -x "$DIR/bin/protoc" ]; then
-  case "$(uname -m)" in
-    x86_64) ARCH=x86_64 ;;
-    aarch64|arm64) ARCH=aarch_64 ;;
-    *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
+  case "$(uname -s)" in
+    Darwin) BUILD=osx-universal_binary ;;
+    Linux)
+      case "$(uname -m)" in
+        x86_64) BUILD=linux-x86_64 ;;
+        aarch64|arm64) BUILD=linux-aarch_64 ;;
+        *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
+      esac
+      ;;
+    *) echo "unsupported system $(uname -s)" >&2; exit 1 ;;
   esac
   mkdir -p "$DIR/dl"
   curl -sfLo "$DIR/dl/protoc.zip" \
-    "https://github.com/protocolbuffers/protobuf/releases/download/v$VERSION/protoc-$VERSION-linux-$ARCH.zip"
+    "https://github.com/protocolbuffers/protobuf/releases/download/v$VERSION/protoc-$VERSION-$BUILD.zip"
   unzip -q -o "$DIR/dl/protoc.zip" -d "$DIR"
   rm -rf "$DIR/dl"
   chmod +x "$DIR/bin/protoc"

@@ -27,10 +27,13 @@ struct Options {
   std::string socket;
   size_t frames = 1;
   int timeout_ms = 10000;
-  bool bgra = true;
+  bool bgra = raccoon::kSoftwareFrameIsBgra;
 };
 
 constexpr uint32_t kProtocolVersion = 1;
+constexpr raccoon::v1::PixelFormat kPixelFormat =
+    raccoon::kSoftwareFrameIsBgra ? raccoon::v1::PIXEL_FORMAT_BGRA8888
+                                  : raccoon::v1::PIXEL_FORMAT_RGBA8888;
 
 void Usage() {
   std::fprintf(stderr,
@@ -331,7 +334,7 @@ int Serve(const Options& options) {
         frame->set_width(static_cast<uint32_t>(shared.width));
         frame->set_height(static_cast<uint32_t>(shared.height));
         frame->set_row_bytes(static_cast<uint32_t>(shared.row_bytes));
-        frame->set_format(raccoon::v1::PIXEL_FORMAT_BGRA8888);
+        frame->set_format(kPixelFormat);
         frame->set_in_shared_buffer(true);
         frame->set_buffer_index(static_cast<uint32_t>(shared.index));
         frame->set_timestamp_micros(host.NowMicros());
@@ -346,7 +349,7 @@ int Serve(const Options& options) {
         frame->set_width(static_cast<uint32_t>(copy.width));
         frame->set_height(static_cast<uint32_t>(copy.height));
         frame->set_row_bytes(static_cast<uint32_t>(copy.row_bytes));
-        frame->set_format(raccoon::v1::PIXEL_FORMAT_BGRA8888);
+        frame->set_format(kPixelFormat);
         frame->set_pixels(copy.pixels.data(), copy.pixels.size());
         frame->set_timestamp_micros(host.NowMicros());
         server.Send(message);

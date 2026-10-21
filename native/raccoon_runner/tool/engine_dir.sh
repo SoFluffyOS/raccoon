@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Prints the cache directory holding flutter_embedder.h and libflutter_engine.so
-# for the active Flutter SDK's engine revision, downloading it when missing.
-# Reads the SDK's engine stamp when it can, which is much faster than asking
-# the tool.
+# Prints the runtime directory for the active Flutter SDK's engine revision,
+# downloading the prebuilt debug embedder when missing: flutter_embedder.h and
+# libflutter_engine.so on Linux, FlutterEmbedder.framework on macOS. Reads the
+# SDK's engine stamp when it can, which is much faster than asking the tool.
 set -euo pipefail
 
 sdk_root() {
@@ -20,12 +20,34 @@ if [ -z "$REV" ]; then
   REV="$(flutter --version --machine 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin)["engineRevision"])')"
 fi
 
-DIR="${RACCOON_ENGINE_CACHE:-$HOME/.cache/raccoon/engines}/$REV/linux-x64"
-if [ ! -f "$DIR/libflutter_engine.so" ]; then
-  mkdir -p "$DIR/dl"
-  curl -sfLo "$DIR/dl/linux-x64-embedder.zip" \
-    "https://storage.googleapis.com/flutter_infra_release/flutter/$REV/linux-x64/linux-x64-embedder.zip"
-  unzip -q -o "$DIR/dl/linux-x64-embedder.zip" -d "$DIR"
+BUCKET="https://storage.googleapis.com/flutter_infra_release/flutter/$REV"
+CACHE="${RACCOON_ENGINE_CACHE:-$HOME/.cache/raccoon/engines}/$REV"
+case "$(uname -s)" in
+  Darwin)
+    # One universal framework serves both Mac architectures.
+    DIR="$CACHE/darwin"
+    LIBRARY="$DIR/FlutterEmbedder.framework/FlutterEmbedder"
+    URL="$BUCKET/darwin-x64/FlutterEmbedder.framework.zip"
+    UNZIP_INTO="$DIR/FlutterEmbedder.framework"
+    ;;
+  Linux)
+    case "$(uname -m)" in
+      x86_64) PLATFORM=linux-x64 ;;
+      aarch64|arm64) PLATFORM=linux-arm64 ;;
+      *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
+    esac
+    DIR="$CACHE/$PLATFORM"
+    LIBRARY="$DIR/libflutter_engine.so"
+    URL="$BUCKET/$PLATFORM/$PLATFORM-embedder.zip"
+    UNZIP_INTO="$DIR"
+    ;;
+  *) echo "unsupported system $(uname -s)" >&2; exit 1 ;;
+esac
+
+if [ ! -e "$LIBRARY" ]; then
+  mkdir -p "$DIR/dl" "$UNZIP_INTO"
+  curl -sfLo "$DIR/dl/embedder.zip" "$URL"
+  unzip -q -o "$DIR/dl/embedder.zip" -d "$UNZIP_INTO"
   rm -rf "$DIR/dl"
 fi
 echo "$DIR"
