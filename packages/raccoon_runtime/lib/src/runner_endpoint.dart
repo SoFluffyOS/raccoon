@@ -14,8 +14,8 @@ sealed class RunnerEndpoint {
     return switch (operatingSystem) {
       'windows' => LoopbackTcpEndpoint(_portFrom(environment)),
       'linux' => UnixSocketEndpoint(
-          _socketIn(_runtimeDirectory(environment, temporaryDirectory)),
-        ),
+        _socketIn(_runtimeDirectory(environment, temporaryDirectory)),
+      ),
       _ => UnixSocketEndpoint(_socketIn(temporaryDirectory)),
     };
   }
