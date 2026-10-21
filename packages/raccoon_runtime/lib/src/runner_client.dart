@@ -49,6 +49,7 @@ final class RunnerClient implements RunnerConnection {
   late final StreamSubscription<Inbound> _subscription;
   Frame? _latestFrame;
   String? _vmServiceUri;
+  int? _pid;
 
   /// Every message the runner sends, after the connection was made.
   Stream<RunnerMessage> get messages => _messages.stream;
@@ -67,6 +68,9 @@ final class RunnerClient implements RunnerConnection {
 
   /// The Dart VM service URI once the runner reported it.
   String? get vmServiceUri => _vmServiceUri;
+
+  /// The runner's process id once it said hello.
+  int? get pid => _pid;
 
   /// Frames that arrived through shared buffers rather than inline.
   int get sharedFrames => _sharedFrames;
@@ -114,6 +118,7 @@ final class RunnerClient implements RunnerConnection {
     for (final payload in _unframer.add(inbound.bytes)) {
       final message = RunnerMessage.fromBuffer(payload);
       if (message.hasHello() && !_hello.isCompleted) {
+        _pid = message.hello.pid;
         _hello.complete(message.hello);
       }
       if (message.hasSharedBuffers()) _takeBuffers(message.sharedBuffers);

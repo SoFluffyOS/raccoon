@@ -95,6 +95,8 @@ void main() {
       try {
         final hello = await client.hello.timeout(const Duration(seconds: 10));
         expect(hello.protocolVersion, RaccoonProtocol.version);
+        expect(hello.pid, runner.pid);
+        expect(client.pid, runner.pid);
 
         final frame = await client.frames.first.timeout(
           const Duration(seconds: 15),
