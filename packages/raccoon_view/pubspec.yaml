@@ -8,8 +8,11 @@ environment:
 resolution: workspace
 
 dependencies:
+  fixnum: ^1.1.0
   flutter:
     sdk: flutter
+  raccoon:
+    path: ../../pub_packages/raccoon
   raccoon_runtime:
     path: ../raccoon_runtime
 

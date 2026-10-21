@@ -1,0 +1,21 @@
+name: raccoon_viewer
+description: Shows the app a Raccoon runner hosts, for trying raccoon_view on a desktop.
+publish_to: "none"
+
+environment:
+  sdk: ^3.10.0
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  raccoon_runtime:
+    path: ../../raccoon_runtime
+  raccoon_view:
+    path: ..
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.0.0
