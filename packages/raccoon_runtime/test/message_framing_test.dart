@@ -37,4 +37,29 @@ void main() {
       [2],
     ]);
   });
+
+  test('unframer handles a large message in many small chunks', () {
+    final unframer = MessageUnframer();
+    final payload = List<int>.generate(300000, (i) => i % 251);
+    final framed = MessageFraming.frame(payload);
+    final out = <Uint8List>[];
+    for (var offset = 0; offset < framed.length; offset += 1000) {
+      final end = offset + 1000 < framed.length ? offset + 1000 : framed.length;
+      out.addAll(unframer.add(framed.sublist(offset, end)));
+    }
+
+    expect(out, hasLength(1));
+    expect(out.single, payload);
+  });
+
+  test('unframer copes with a prefix split across chunks', () {
+    final unframer = MessageUnframer();
+    final framed = MessageFraming.frame([7, 8, 9]);
+
+    expect(unframer.add(framed.sublist(0, 2)), isEmpty);
+    expect(unframer.add(framed.sublist(2, 5)), isEmpty);
+    expect(unframer.add(framed.sublist(5)), [
+      [7, 8, 9],
+    ]);
+  });
 }
