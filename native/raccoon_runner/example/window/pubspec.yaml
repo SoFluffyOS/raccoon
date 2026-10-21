@@ -1,0 +1,10 @@
+name: window
+description: The runner's window-channel example - calls the window plugins' channels at startup, as desktop apps do, and shows whether every answer came back right.
+publish_to: "none"
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter

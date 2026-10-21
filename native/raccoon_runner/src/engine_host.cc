@@ -81,6 +81,7 @@ void EngineHost::Resize(size_t width, size_t height, double pixel_ratio) {
   metrics.pixel_ratio = pixel_ratio;
   metrics.display_id = kDisplayId;
   loader_.procs().SendWindowMetricsEvent(engine_, &metrics);
+  windows_.SetViewSize(width, height, pixel_ratio);
 }
 
 void EngineHost::SendPointer(const FlutterPointerEvent& event) {
@@ -102,6 +103,14 @@ void EngineHost::OnPlatformMessage(const FlutterPlatformMessage* message,
                                    void* user_data) {
   auto* host = static_cast<EngineHost*>(user_data);
   const std::string channel = message->channel == nullptr ? "" : message->channel;
+  // The window channels are the runner's own: it is the app's window host,
+  // and apps call them at startup, before a client may be connected.
+  std::vector<uint8_t> reply;
+  if (host->windows_.Handle(channel, message->message, message->message_size,
+                            &reply)) {
+    host->Respond(message->response_handle, reply.data(), reply.size());
+    return;
+  }
   if (host->on_platform_message_) {
     host->on_platform_message_(channel, message->message, message->message_size,
                                message->response_handle);

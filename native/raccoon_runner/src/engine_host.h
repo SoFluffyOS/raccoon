@@ -11,6 +11,7 @@
 #include "flutter_embedder.h"
 #include "platform_task_runner.h"
 #include "software_frame.h"
+#include "window_channels.h"
 
 namespace raccoon {
 
@@ -32,6 +33,8 @@ class EngineHost {
       std::function<void(const std::string& tag, const std::string& message)>;
   // A platform channel message from the app. |handle| is null when the app
   // expects no reply; otherwise Respond must be called with it exactly once.
+  // The window channels never get here: the host answers them itself (see
+  // window_channels.h).
   using PlatformMessageCallback = std::function<void(
       const std::string& channel, const uint8_t* data, size_t size,
       const FlutterPlatformMessageResponseHandle* handle)>;
@@ -75,6 +78,7 @@ class EngineHost {
   EngineLoader loader_;
   std::unique_ptr<PlatformTaskRunner> platform_;
   SoftwareFrame frame_;
+  WindowChannels windows_;
   FLUTTER_API_SYMBOL(FlutterEngine) engine_ = nullptr;
   LogCallback on_log_;
   PlatformMessageCallback on_platform_message_;
