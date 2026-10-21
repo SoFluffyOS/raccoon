@@ -5,7 +5,13 @@
 // texture, and from then on populates with the buffer of the latest frame.
 //
 // Channel raccoon_view/gpu: create() -> textureId; connect(textureId,
-// socket); show(textureId, generation, index); dispose(textureId).
+// socket) -> whether buffers go back from here; show(textureId, generation,
+// index); dispose(textureId).
+//
+// Each frame comes with a fence where EGL has native fences: Flutter's
+// context waits on it before sampling. A buffer goes back to the runner over
+// the same socket once the next one is bound, with a fence for the drawing
+// that sampled it last.
 #include "include/raccoon_view/raccoon_view_plugin.h"
 
 #include <EGL/egl.h>
@@ -30,6 +36,8 @@
 namespace {
 
 constexpr uint64_t kModifierInvalid = 0x00ffffffffffffffULL;
+// More buffers than a ring will ever have; fences are kept per index.
+constexpr int kMaxBuffers = 16;
 
 // One set of buffers as the runner described it, with the descriptors.
 struct BufferSet {
@@ -73,6 +81,21 @@ struct _RaccoonGpuTexture {
   std::vector<uint8_t> inbox;
   std::vector<int> fds_in_flight;
   EGLDisplay display;
+  // The buffer bound through the texture last, -1 for none: given back once
+  // another is bound.
+  uint32_t bound_generation;
+  int bound_index;
+  // Each buffer's fence from the runner, by index, -1 for none: signalled
+  // when its draw is done.
+  uint32_t fence_generations[kMaxBuffers];
+  int fence_fds[kMaxBuffers];
+  // Native fences on Flutter's display: -1 not looked up yet, else 0 or 1.
+  int fences;
+  PFNEGLCREATESYNCKHRPROC create_sync;
+  PFNEGLDESTROYSYNCKHRPROC destroy_sync;
+  PFNEGLWAITSYNCKHRPROC wait_sync;
+  PFNEGLCLIENTWAITSYNCKHRPROC client_wait_sync;
+  PFNEGLDUPNATIVEFENCEFDANDROIDPROC dup_fence;
 };
 
 typedef struct _RaccoonGpuTexture RaccoonGpuTexture;
@@ -95,6 +118,118 @@ static void destroy_imported(RaccoonGpuTexture* self) {
     }
   }
   self->imported.reset();
+}
+
+// ---- Fences --------------------------------------------------------------
+
+// Whether Flutter's display has native fences, looked up once it is known.
+// Raster thread.
+static bool fences_available(RaccoonGpuTexture* self) {
+  if (self->fences >= 0) return self->fences == 1;
+  if (self->display == EGL_NO_DISPLAY) return false;
+  const char* extensions = eglQueryString(self->display, EGL_EXTENSIONS);
+  const auto has = [extensions](const char* name) {
+    return extensions != nullptr && std::strstr(extensions, name) != nullptr;
+  };
+  self->create_sync = reinterpret_cast<PFNEGLCREATESYNCKHRPROC>(
+      eglGetProcAddress("eglCreateSyncKHR"));
+  self->destroy_sync = reinterpret_cast<PFNEGLDESTROYSYNCKHRPROC>(
+      eglGetProcAddress("eglDestroySyncKHR"));
+  self->client_wait_sync = reinterpret_cast<PFNEGLCLIENTWAITSYNCKHRPROC>(
+      eglGetProcAddress("eglClientWaitSyncKHR"));
+  self->dup_fence = reinterpret_cast<PFNEGLDUPNATIVEFENCEFDANDROIDPROC>(
+      eglGetProcAddress("eglDupNativeFenceFDANDROID"));
+  self->wait_sync = has("EGL_KHR_wait_sync")
+                        ? reinterpret_cast<PFNEGLWAITSYNCKHRPROC>(
+                              eglGetProcAddress("eglWaitSyncKHR"))
+                        : nullptr;
+  self->fences = has("EGL_KHR_fence_sync") && has("EGL_ANDROID_native_fence_sync") &&
+                         self->create_sync != nullptr && self->destroy_sync != nullptr &&
+                         self->client_wait_sync != nullptr && self->dup_fence != nullptr
+                     ? 1
+                     : 0;
+  return self->fences == 1;
+}
+
+// Makes Flutter's context wait for |fd| (owned from here) before what it
+// draws next. Raster thread, context current.
+static void wait_fence(RaccoonGpuTexture* self, int fd) {
+  if (!fences_available(self)) {
+    close(fd);
+    return;
+  }
+  const EGLint attributes[] = {EGL_SYNC_NATIVE_FENCE_FD_ANDROID, fd, EGL_NONE};
+  // The sync owns the descriptor from here.
+  const EGLSyncKHR sync =
+      self->create_sync(self->display, EGL_SYNC_NATIVE_FENCE_ANDROID, attributes);
+  if (sync == EGL_NO_SYNC_KHR) {
+    close(fd);
+    return;
+  }
+  if (self->wait_sync != nullptr) {
+    self->wait_sync(self->display, sync, 0);
+  } else {
+    self->client_wait_sync(self->display, sync, 0, EGL_FOREVER_KHR);
+  }
+  self->destroy_sync(self->display, sync);
+}
+
+// A fence for what Flutter's context has drawn so far, -1 without fences.
+// Raster thread, context current.
+static int export_fence(RaccoonGpuTexture* self) {
+  if (!fences_available(self)) return -1;
+  const EGLSyncKHR sync =
+      self->create_sync(self->display, EGL_SYNC_NATIVE_FENCE_ANDROID, nullptr);
+  if (sync == EGL_NO_SYNC_KHR) return -1;
+  // The fence is only submitted with the commands before it.
+  glFlush();
+  const int fd = self->dup_fence(self->display, sync);
+  self->destroy_sync(self->display, sync);
+  return fd;
+}
+
+// Gives buffer |index| of |generation| back to the runner: 'RREL',
+// generation, index, fenced, with |fence_fd| (owned from here, -1 for none)
+// riding along. Mutex held.
+static void send_release(RaccoonGpuTexture* self, uint32_t generation, int index,
+                         int fence_fd) {
+  if (self->socket_fd < 0) {
+    if (fence_fd >= 0) close(fence_fd);
+    return;
+  }
+  uint8_t message[4 + 16] = {16, 0, 0, 0, 'R', 'R', 'E', 'L'};
+  const uint32_t values[3] = {generation, static_cast<uint32_t>(index),
+                              fence_fd >= 0 ? 1u : 0u};
+  for (int v = 0; v < 3; ++v) {
+    for (int i = 0; i < 4; ++i) {
+      message[8 + v * 4 + i] = static_cast<uint8_t>(values[v] >> (8 * i));
+    }
+  }
+  iovec part{message, sizeof(message)};
+  alignas(cmsghdr) uint8_t control[CMSG_SPACE(sizeof(int))];
+  std::memset(control, 0, sizeof(control));
+  msghdr header{};
+  header.msg_iov = &part;
+  header.msg_iovlen = 1;
+  if (fence_fd >= 0) {
+    header.msg_control = control;
+    header.msg_controllen = sizeof(control);
+    cmsghdr* cmsg = CMSG_FIRSTHDR(&header);
+    cmsg->cmsg_level = SOL_SOCKET;
+    cmsg->cmsg_type = SCM_RIGHTS;
+    cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+    std::memcpy(CMSG_DATA(cmsg), &fence_fd, sizeof(int));
+  }
+  sendmsg(self->socket_fd, &header, MSG_NOSIGNAL);
+  if (fence_fd >= 0) close(fence_fd);
+}
+
+// Closes a fence kept for buffer |index| of |generation|, if any. Mutex held.
+static void drop_fence(RaccoonGpuTexture* self, uint32_t generation, int index) {
+  if (index < 0 || index >= kMaxBuffers) return;
+  if (self->fence_generations[index] != generation || self->fence_fds[index] < 0) return;
+  close(self->fence_fds[index]);
+  self->fence_fds[index] = -1;
 }
 
 // On the raster thread, Flutter's context current. Returns whether a set is
@@ -169,23 +304,45 @@ static gboolean raccoon_gpu_texture_populate(FlTextureGL* texture,
                                              GError** error) {
   RaccoonGpuTexture* self = RACCOON_GPU_TEXTURE(texture);
   if (!import_pending(self, error)) return FALSE;
-  uint32_t generation = 0;
+  const Imported& imported = *self->imported;
+  if (imported.textures.empty() || imported.textures[0] == 0) {
+    g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "no GPU buffer imported");
+    return FALSE;
+  }
+  // Nothing of this set shown yet: the first buffer, rather than nothing,
+  // and not one to give back.
   int index = 0;
+  int fence_fd = -1;
+  bool rebound = false;
+  uint32_t before_generation = 0;
+  int before_index = -1;
   {
     std::lock_guard<std::mutex> lock(*self->mutex);
-    generation = self->shown_generation;
-    index = self->shown_index;
-  }
-  const Imported& imported = *self->imported;
-  if (generation != imported.generation || index < 0 ||
-      static_cast<size_t>(index) >= imported.textures.size() ||
-      imported.textures[index] == 0) {
-    // Nothing of this set shown yet: the first buffer, rather than nothing.
-    index = 0;
-    if (imported.textures.empty() || imported.textures[0] == 0) {
-      g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "no GPU buffer imported");
-      return FALSE;
+    const uint32_t generation = self->shown_generation;
+    const int shown = self->shown_index;
+    if (generation == imported.generation && shown >= 0 &&
+        static_cast<size_t>(shown) < imported.textures.size() &&
+        imported.textures[shown] != 0) {
+      index = shown;
+      if (shown < kMaxBuffers && self->fence_generations[shown] == generation) {
+        fence_fd = self->fence_fds[shown];
+        self->fence_fds[shown] = -1;
+      }
+      rebound = self->bound_index != shown || self->bound_generation != generation;
+      before_generation = self->bound_generation;
+      before_index = self->bound_index;
+      self->bound_generation = generation;
+      self->bound_index = shown;
     }
+  }
+  // The runner's draw may still be running: sample after it.
+  if (fence_fd >= 0) wait_fence(self, fence_fd);
+  // The buffer bound before was last read by the frame drawn before this
+  // one; once that reading is done, it is the runner's again.
+  if (rebound && before_index >= 0) {
+    const int release_fence = export_fence(self);
+    std::lock_guard<std::mutex> lock(*self->mutex);
+    send_release(self, before_generation, before_index, release_fence);
   }
   *target = GL_TEXTURE_2D;
   *name = imported.textures[index];
@@ -206,6 +363,10 @@ static void raccoon_gpu_texture_dispose(GObject* object) {
   }
   for (int fd : self->fds_in_flight) close(fd);
   self->fds_in_flight.clear();
+  for (int& fd : self->fence_fds) {
+    if (fd >= 0) close(fd);
+    fd = -1;
+  }
   if (self->pending) {
     for (int fd : self->pending->fds) close(fd);
     self->pending.reset();
@@ -230,6 +391,18 @@ static void raccoon_gpu_texture_init(RaccoonGpuTexture* self) {
   self->socket_fd = -1;
   self->watch = 0;
   self->display = EGL_NO_DISPLAY;
+  self->bound_generation = 0;
+  self->bound_index = -1;
+  for (int i = 0; i < kMaxBuffers; ++i) {
+    self->fence_generations[i] = 0;
+    self->fence_fds[i] = -1;
+  }
+  self->fences = -1;
+  self->create_sync = nullptr;
+  self->destroy_sync = nullptr;
+  self->wait_sync = nullptr;
+  self->client_wait_sync = nullptr;
+  self->dup_fence = nullptr;
 }
 
 // ---- The GPU socket ------------------------------------------------------
@@ -253,6 +426,23 @@ static void parse_inbox(RaccoonGpuTexture* self) {
     if (self->inbox.size() - offset - 4 < length) break;
     const uint8_t* payload = self->inbox.data() + offset + 4;
     offset += 4 + length;
+    if (length >= 12 && std::memcmp(payload, "RFEN", 4) == 0) {
+      // A frame's fence, one descriptor, kept for its buffer until shown.
+      if (self->fds_in_flight.empty()) continue;
+      const int fd = self->fds_in_flight.front();
+      self->fds_in_flight.erase(self->fds_in_flight.begin());
+      const uint32_t generation = read32(payload + 4);
+      const uint32_t index = read32(payload + 8);
+      std::lock_guard<std::mutex> lock(*self->mutex);
+      if (index >= static_cast<uint32_t>(kMaxBuffers)) {
+        close(fd);
+        continue;
+      }
+      if (self->fence_fds[index] >= 0) close(self->fence_fds[index]);
+      self->fence_fds[index] = fd;
+      self->fence_generations[index] = generation;
+      continue;
+    }
     if (length < 32 || std::memcmp(payload, "RGPU", 4) != 0) continue;
     auto set = std::make_unique<BufferSet>();
     set->generation = read32(payload + 4);
@@ -381,16 +571,31 @@ static void raccoon_view_plugin_handle_method_call(RaccoonViewPlugin* self,
                              ? fl_value_get_string(socket)
                              : "";
       if (connect_socket(found->second, path)) {
-        response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+        // Buffers go back from here, once drawn.
+        g_autoptr(FlValue) releases = fl_value_new_bool(TRUE);
+        response = FL_METHOD_RESPONSE(fl_method_success_response_new(releases));
       } else {
         response = error_response("connect", "could not connect to the GPU socket");
       }
     } else if (strcmp(method, "show") == 0) {
       {
-        std::lock_guard<std::mutex> lock(*found->second->mutex);
-        found->second->shown_generation =
-            static_cast<uint32_t>(int_argument(args, "generation", 0));
-        found->second->shown_index = static_cast<int>(int_argument(args, "index", -1));
+        RaccoonGpuTexture* texture = found->second;
+        std::lock_guard<std::mutex> lock(*texture->mutex);
+        const auto generation = static_cast<uint32_t>(int_argument(args, "generation", 0));
+        const auto index = static_cast<int>(int_argument(args, "index", -1));
+        // A frame named but never bound (the raster thread did not get to
+        // it) was never read: the runner's again at once.
+        const bool superseded = texture->shown_index >= 0 &&
+                                (texture->shown_index != index ||
+                                 texture->shown_generation != generation);
+        const bool unbound = texture->shown_index != texture->bound_index ||
+                             texture->shown_generation != texture->bound_generation;
+        if (superseded && unbound) {
+          drop_fence(texture, texture->shown_generation, texture->shown_index);
+          send_release(texture, texture->shown_generation, texture->shown_index, -1);
+        }
+        texture->shown_generation = generation;
+        texture->shown_index = index;
       }
       fl_texture_registrar_mark_texture_frame_available(self->registrar,
                                                         FL_TEXTURE(found->second));

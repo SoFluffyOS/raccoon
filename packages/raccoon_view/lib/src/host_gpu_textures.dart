@@ -14,8 +14,10 @@ abstract interface class HostGpuTextures {
   /// Registers a texture; returns its id for a [Texture] widget.
   Future<int> create();
 
-  /// Takes the buffers' descriptors from the runner's GPU socket.
-  Future<void> connect(int textureId, String socket);
+  /// Takes the buffers' descriptors from the runner's GPU socket. True when
+  /// the host gives each buffer back to the runner itself once it is done
+  /// drawing it; false when the view has to, after naming the next.
+  Future<bool> connect(int textureId, String socket);
 
   /// Shows buffer [index] of [generation] as the texture's next frame.
   Future<void> show(int textureId, int generation, int index);
@@ -33,11 +35,12 @@ final class MethodChannelGpuTextures implements HostGpuTextures {
   Future<int> create() async => await channel.invokeMethod<int>('create') ?? -1;
 
   @override
-  Future<void> connect(int textureId, String socket) =>
-      channel.invokeMethod<void>('connect', {
+  Future<bool> connect(int textureId, String socket) async =>
+      await channel.invokeMethod<bool>('connect', {
         'textureId': textureId,
         'socket': socket,
-      });
+      }) ??
+      false;
 
   @override
   Future<void> show(int textureId, int generation, int index) =>

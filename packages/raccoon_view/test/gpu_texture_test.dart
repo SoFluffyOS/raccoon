@@ -39,6 +39,10 @@ class _GpuConnection implements RunnerConnection, GpuBufferConnection {
 }
 
 class _FakeTextures implements HostGpuTextures {
+  _FakeTextures({this.releases = false});
+
+  /// Whether this host gives buffers back to the runner itself.
+  final bool releases;
   final calls = <String>[];
 
   @override
@@ -48,8 +52,10 @@ class _FakeTextures implements HostGpuTextures {
   }
 
   @override
-  Future<void> connect(int textureId, String socket) async =>
-      calls.add('connect $textureId $socket');
+  Future<bool> connect(int textureId, String socket) async {
+    calls.add('connect $textureId $socket');
+    return releases;
+  }
 
   @override
   Future<void> show(int textureId, int generation, int index) async =>
@@ -115,4 +121,42 @@ void main() {
       expect(textures.calls.last, 'dispose 7');
     },
   );
+
+  testWidgets('a host that gives buffers back itself is left to it', (
+    tester,
+  ) async {
+    final connection = _GpuConnection();
+    final textures = _FakeTextures(releases: true);
+    await tester.pumpWidget(
+      RaccoonView(connection: connection, gpuTextures: textures),
+    );
+    connection.sets.add(
+      rc.GpuBuffers(
+        generation: 1,
+        count: 3,
+        width: 800,
+        height: 600,
+        socket: '/run/r.gpu',
+      ),
+    );
+    await tester.pump();
+    for (final index in [0, 1, 2]) {
+      connection.frameController.add(
+        rc.Frame(
+          sequence: Int64(index + 1),
+          inGpuBuffer: true,
+          bufferIndex: index,
+          gpuGeneration: 1,
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+    }
+    expect(textures.calls.last, 'show 7 1/2');
+    expect(connection.released, isEmpty);
+
+    await tester.pumpWidget(const SizedBox());
+    expect(connection.released, isEmpty);
+    expect(textures.calls.last, 'dispose 7');
+  });
 }

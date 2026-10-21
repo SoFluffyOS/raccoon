@@ -51,6 +51,8 @@ class _RaccoonViewState extends State<RaccoonView> {
   int? _textureId;
   // Whether frames arrive as GPU buffers, and the buffer the texture shows.
   bool _gpuLive = false;
+  // Whether the host gives buffers back to the runner itself.
+  bool _hostReleases = false;
   (int, int)? _shown;
   StreamSubscription<rc.Frame>? _frames;
   StreamSubscription<rc.TextField>? _fields;
@@ -132,7 +134,7 @@ class _RaccoonViewState extends State<RaccoonView> {
       final id = await gpu.create();
       if (!mounted || id < 0) return;
       _textureId = id;
-      await gpu.connect(id, set.socket);
+      _hostReleases = await gpu.connect(id, set.socket);
     }
   }
 
@@ -143,10 +145,11 @@ class _RaccoonViewState extends State<RaccoonView> {
     if (_shown case (
       final generation,
       final index,
-    ) when connection is GpuBufferConnection) {
+    ) when connection is GpuBufferConnection && !_hostReleases) {
       connection.releaseGpuBuffer(generation, index);
     }
     _shown = null;
+    _hostReleases = false;
     if (_textureId case final id?) unawaited(_gpu?.dispose(id));
     _textureId = null;
     _gpu = null;
@@ -176,7 +179,8 @@ class _RaccoonViewState extends State<RaccoonView> {
   }
 
   /// Names the frame's buffer to the host's texture, then gives the one
-  /// shown before back to the runner.
+  /// shown before back to the runner, unless the host does that itself once
+  /// it is done drawing it.
   Future<void> _showGpuFrame(rc.Frame frame) async {
     final gpu = _gpu;
     final id = _textureId;
@@ -187,7 +191,7 @@ class _RaccoonViewState extends State<RaccoonView> {
     final previous = _shown;
     _shown = (frame.gpuGeneration, frame.bufferIndex);
     await gpu.show(id, frame.gpuGeneration, frame.bufferIndex);
-    if (previous case (final generation, final index)) {
+    if (previous case (final generation, final index) when !_hostReleases) {
       connection.releaseGpuBuffer(generation, index);
     }
     if (!mounted) return;
