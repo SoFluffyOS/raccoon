@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -15,6 +16,7 @@
 #include "event_loop.h"
 #include "flutter_embedder.h"
 #include "server.h"
+#include "shared_buffers.h"
 
 namespace {
 
@@ -201,6 +203,8 @@ int Serve(const Options& options) {
   bool stop = false;
   size_t last_sent = 0;
   bool vm_sent = false;
+  bool client_shared = false;
+  std::unique_ptr<raccoon::SharedBufferPool> pool;
   raccoon::RunnerServer* server_ptr = nullptr;
   // Platform messages waiting for the client's answer, by response id.
   std::unordered_map<uint64_t, const FlutterPlatformMessageResponseHandle*> pending;
@@ -240,6 +244,12 @@ int Serve(const Options& options) {
     host.SendKey(ToFlutterKey(key, host.NowMicros()));
   };
   handler.on_shutdown = [&stop] { stop = true; };
+  handler.on_hello = [&](const raccoon::v1::ClientHello& hello) {
+    client_shared = hello.shared_buffers();
+  };
+  handler.on_release_buffer = [&](const raccoon::v1::ReleaseBuffer& release) {
+    if (pool) pool->Release(static_cast<int>(release.index()));
+  };
   handler.on_platform_response = [&](const raccoon::v1::PlatformResponse& response) {
     const auto found = pending.find(response.response_id());
     if (found == pending.end()) return;
@@ -265,6 +275,9 @@ int Serve(const Options& options) {
     // Nobody will answer these now; let the app see "no plugin".
     for (const auto& [id, handle] : pending) host.Respond(handle, nullptr, 0);
     pending.clear();
+    host.frame().SetSharedPool(nullptr);
+    pool.reset();
+    client_shared = false;
     std::fprintf(stderr, "raccoon_runner: client disconnected\n");
   };
 
@@ -289,6 +302,41 @@ int Serve(const Options& options) {
           server.Send(message);
           vm_sent = true;
         }
+      }
+      // Shared buffers, sized for the current frame; replaced on resize.
+      const size_t need = host.frame().LatestSizeBytes();
+      if (client_shared && need > 0 && (!pool || pool->size() != need)) {
+        host.frame().SetSharedPool(nullptr);
+        auto fresh = std::make_unique<raccoon::SharedBufferPool>();
+        std::string pool_error;
+        if (fresh->Allocate(2, need, &pool_error)) {
+          raccoon::v1::RunnerMessage message;
+          message.mutable_shared_buffers()->set_count(2);
+          message.mutable_shared_buffers()->set_size(need);
+          if (server.SendWithFds(message, fresh->fds())) {
+            pool = std::move(fresh);
+            host.frame().SetSharedPool(pool.get());
+          }
+        } else {
+          std::fprintf(stderr, "raccoon_runner: %s; frames stay inline\n",
+                       pool_error.c_str());
+          client_shared = false;
+        }
+      }
+      raccoon::SoftwareFrame::Shared shared;
+      if (host.frame().TakeShared(&shared)) {
+        raccoon::v1::RunnerMessage message;
+        raccoon::v1::Frame* frame = message.mutable_frame();
+        frame->set_sequence(shared.sequence);
+        frame->set_width(static_cast<uint32_t>(shared.width));
+        frame->set_height(static_cast<uint32_t>(shared.height));
+        frame->set_row_bytes(static_cast<uint32_t>(shared.row_bytes));
+        frame->set_format(raccoon::v1::PIXEL_FORMAT_BGRA8888);
+        frame->set_in_shared_buffer(true);
+        frame->set_buffer_index(static_cast<uint32_t>(shared.index));
+        frame->set_timestamp_micros(host.NowMicros());
+        if (!server.Send(message) && pool) pool->Release(shared.index);
+        last_sent = shared.sequence;
       }
       raccoon::SoftwareFrame::Copy copy;
       if (host.frame().CopyLatest(&copy, last_sent)) {

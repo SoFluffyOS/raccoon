@@ -2,6 +2,7 @@
 
 #include <poll.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -116,6 +117,12 @@ void RunnerServer::OnClientReadable(short revents) {
 void RunnerServer::Dispatch(const v1::ClientMessage& message) {
   switch (message.message_case()) {
     case v1::ClientMessage::kHello:
+      if (handler_.on_hello) handler_.on_hello(message.hello());
+      break;
+    case v1::ClientMessage::kReleaseBuffer:
+      if (handler_.on_release_buffer) {
+        handler_.on_release_buffer(message.release_buffer());
+      }
       break;
     case v1::ClientMessage::kResize:
       if (handler_.on_resize) handler_.on_resize(message.resize());
@@ -163,6 +170,57 @@ bool RunnerServer::WriteAll(const uint8_t* data, size_t size) {
       continue;
     }
     return false;
+  }
+  return true;
+}
+
+bool RunnerServer::SendWithFds(const v1::RunnerMessage& message,
+                               const std::vector<int>& fds) {
+  if (client_fd_ < 0) return false;
+  std::string payload;
+  if (!message.SerializeToString(&payload)) return false;
+  const uint32_t length = static_cast<uint32_t>(payload.size());
+  uint8_t prefix[kLengthPrefix] = {
+      static_cast<uint8_t>(length), static_cast<uint8_t>(length >> 8),
+      static_cast<uint8_t>(length >> 16), static_cast<uint8_t>(length >> 24)};
+  iovec parts[2] = {{prefix, kLengthPrefix},
+                    {payload.data(), payload.size()}};
+  std::vector<uint8_t> control(CMSG_SPACE(sizeof(int) * fds.size()));
+  msghdr header{};
+  header.msg_iov = parts;
+  header.msg_iovlen = 2;
+  header.msg_control = control.data();
+  header.msg_controllen = control.size();
+  cmsghdr* cmsg = CMSG_FIRSTHDR(&header);
+  cmsg->cmsg_level = SOL_SOCKET;
+  cmsg->cmsg_type = SCM_RIGHTS;
+  cmsg->cmsg_len = CMSG_LEN(sizeof(int) * fds.size());
+  std::memcpy(CMSG_DATA(cmsg), fds.data(), sizeof(int) * fds.size());
+  ssize_t sent;
+  while (true) {
+    sent = sendmsg(client_fd_, &header, MSG_NOSIGNAL);
+    if (sent >= 0) break;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      pollfd wait{client_fd_, POLLOUT, 0};
+      if (poll(&wait, 1, 5000) <= 0) {
+        CloseClient();
+        return false;
+      }
+      continue;
+    }
+    CloseClient();
+    return false;
+  }
+  // The descriptors travelled with the first bytes; write whatever is left.
+  const size_t total = kLengthPrefix + payload.size();
+  if (static_cast<size_t>(sent) < total) {
+    std::vector<uint8_t> rest;
+    rest.insert(rest.end(), prefix, prefix + kLengthPrefix);
+    rest.insert(rest.end(), payload.begin(), payload.end());
+    if (!WriteAll(rest.data() + sent, total - sent)) {
+      CloseClient();
+      return false;
+    }
   }
   return true;
 }

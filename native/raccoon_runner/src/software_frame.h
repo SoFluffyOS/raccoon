@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "shared_buffers.h"
+
 namespace raccoon {
 
 // Keeps the latest frame the software renderer presented. Present runs on the
@@ -20,6 +22,26 @@ class SoftwareFrame {
     size_t row_bytes = 0;
     size_t sequence = 0;
   };
+
+  // A frame that was presented into a shared buffer and not yet sent.
+  struct Shared {
+    int index = -1;
+    size_t width = 0;
+    size_t height = 0;
+    size_t row_bytes = 0;
+    size_t sequence = 0;
+  };
+
+  // Frames are presented into |pool|'s buffers from now on; null returns to
+  // inline copies. The pool must outlive the setting.
+  void SetSharedPool(SharedBufferPool* pool);
+
+  // Takes the pending shared frame, if any. Its buffer stays busy until the
+  // client releases it.
+  bool TakeShared(Shared* out);
+
+  // Bytes the latest frame needs: row bytes times height, 0 before a frame.
+  size_t LatestSizeBytes() const;
 
   // Called after every Present, from the raster thread.
   void SetPresentedCallback(std::function<void()> callback) {
@@ -51,6 +73,8 @@ class SoftwareFrame {
   size_t height_ = 0;
   size_t row_bytes_ = 0;
   size_t frame_count_ = 0;
+  SharedBufferPool* pool_ = nullptr;
+  Shared pending_shared_;
 };
 
 }  // namespace raccoon

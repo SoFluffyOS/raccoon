@@ -15,6 +15,8 @@ namespace raccoon {
 class RunnerServer {
  public:
   struct Handler {
+    std::function<void(const v1::ClientHello&)> on_hello;
+    std::function<void(const v1::ReleaseBuffer&)> on_release_buffer;
     std::function<void(const v1::Resize&)> on_resize;
     std::function<void(const v1::PointerEvent&)> on_pointer;
     std::function<void(const v1::KeyEvent&)> on_key;
@@ -36,6 +38,9 @@ class RunnerServer {
   // Sends |message| to the client. Returns false when there is no client or
   // it went away.
   bool Send(const v1::RunnerMessage& message);
+
+  // Sends |message| with |fds| attached as ancillary data (SCM_RIGHTS).
+  bool SendWithFds(const v1::RunnerMessage& message, const std::vector<int>& fds);
 
  private:
   void OnListenReadable();

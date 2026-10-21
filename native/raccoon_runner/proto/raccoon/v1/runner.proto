@@ -17,6 +17,14 @@ option optimize_for = LITE_RUNTIME;
 message ClientHello {
   uint32 protocol_version = 1;
   string client_name = 2;
+  // The client can take frames from shared buffers whose file descriptors
+  // ride along the SharedBuffers message (Unix sockets only).
+  bool shared_buffers = 3;
+}
+
+// Gives a shared buffer back to the runner once its pixels were read.
+message ReleaseBuffer {
+  uint32 index = 1;
 }
 
 message Resize {
@@ -88,6 +96,7 @@ message ClientMessage {
     KeyEvent key = 4;
     Shutdown shutdown = 5;
     PlatformResponse platform_response = 6;
+    ReleaseBuffer release_buffer = 7;
   }
 }
 
@@ -104,6 +113,8 @@ enum PixelFormat {
   PIXEL_FORMAT_RGBA8888 = 2;
 }
 
+// A frame carries its pixels inline, or names the shared buffer that holds
+// them; then pixels is empty and the client releases the buffer when done.
 message Frame {
   uint64 sequence = 1;
   uint32 width = 2;
@@ -112,6 +123,15 @@ message Frame {
   PixelFormat format = 5;
   bytes pixels = 6;
   uint64 timestamp_micros = 7;
+  bool in_shared_buffer = 8;
+  uint32 buffer_index = 9;
+}
+
+// A set of same-sized shared buffers. Their file descriptors travel with this
+// message as ancillary data, in index order. Replaces any earlier set.
+message SharedBuffers {
+  uint32 count = 1;
+  uint64 size = 2;
 }
 
 message VmService {
@@ -144,5 +164,6 @@ message RunnerMessage {
     LogLine log = 4;
     Exited exited = 5;
     PlatformMessage platform_message = 6;
+    SharedBuffers shared_buffers = 7;
   }
 }

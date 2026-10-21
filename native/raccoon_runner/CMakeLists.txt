@@ -51,6 +51,7 @@ add_executable(raccoon_runner
   src/event_loop.cc
   src/platform_task_runner.cc
   src/server.cc
+  src/shared_buffers.cc
   src/software_frame.cc
 )
 target_include_directories(raccoon_runner PRIVATE ${RACCOON_ENGINE_DIR} src)
