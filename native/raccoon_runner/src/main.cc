@@ -275,6 +275,8 @@ int Serve(const Options& options) {
     host.SendKey(ToFlutterKey(key, host.NowMicros()));
   };
   handler.on_shutdown = [&stop] { stop = true; };
+  // The Flutter tool started this runner; when it is gone, so is the run.
+  const pid_t parent = getppid();
   handler.on_hello = [&](const raccoon::v1::ClientHello& hello) {
     client_shared = hello.shared_buffers();
   };
@@ -387,7 +389,13 @@ int Serve(const Options& options) {
         }
       }
     }
-    loop.RunOnce(host.platform().MillisUntilNextTask());
+    if (getppid() != parent) {
+      std::fprintf(stderr, "raccoon_runner: parent %d is gone; stopping\n",
+                   static_cast<int>(parent));
+      stop = true;
+    }
+    const int next_task = host.platform().MillisUntilNextTask();
+    loop.RunOnce(next_task < 0 || next_task > 1000 ? 1000 : next_task);
   }
 
   if (server.has_client()) {
