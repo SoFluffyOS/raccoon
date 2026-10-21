@@ -641,11 +641,11 @@ void main() {
           printOnFailure('no GPU buffers offered: ${client.latestGpuBuffers}');
           return;
         }
-        expect(set.count, 3);
+        expect(set.count, 4);
         expect(set.generation, greaterThan(0));
         expect(set.width, 800);
         expect(set.height, 600);
-        expect(set.strides, hasLength(3));
+        expect(set.strides, hasLength(4));
         expect(set.socket, p.join(temp.path, 'runner.gpu'));
 
         // Frames are indices now, no pixels; giving them back keeps them
@@ -702,12 +702,12 @@ void main() {
         final data = ByteData.sublistView(messages.first);
         expect(String.fromCharCodes(messages.first.sublist(0, 4)), 'RGPU');
         expect(data.getUint32(4, Endian.little), set.generation);
-        expect(data.getUint32(8, Endian.little), 3);
+        expect(data.getUint32(8, Endian.little), 4);
         expect(data.getUint32(12, Endian.little), set.width);
         expect(data.getUint32(16, Endian.little), set.height);
         expect(data.getUint32(20, Endian.little), set.fourcc);
-        expect(messages.first.length, 32 + 3 * 8);
-        expect(handles.length, 3);
+        expect(messages.first.length, 32 + 4 * 8);
+        expect(handles.length, 4);
         await gpuSocket.close();
       } finally {
         client.shutdown();
