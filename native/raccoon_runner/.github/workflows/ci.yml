@@ -1,0 +1,135 @@
+# Builds the runner on each host, bundles the examples, renders a frame, and
+# runs raccoon_runtime's tests, whose integration tests drive the built runner.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  FLUTTER_VERSION: 3.47.7
+  PROTOC_VERSION: "21.12"
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-latest
+            desktop: linux
+            target: linux-x64
+            sdk-engine: linux-x64
+          - name: macos-arm64
+            os: macos-latest
+            desktop: macos
+            target: darwin
+            sdk-engine: darwin-x64
+          - name: macos-x64
+            os: macos-15-intel
+            desktop: macos
+            target: darwin
+            sdk-engine: darwin-x64
+    defaults:
+      run:
+        working-directory: native/raccoon_runner
+    steps:
+      # The runtime's integration tests expect the simulator's layout, with
+      # the runner at native/raccoon_runner beside packages/raccoon_runtime
+      # and pub_packages/raccoon.
+      - uses: actions/checkout@v4
+        with:
+          path: native/raccoon_runner
+      - uses: actions/checkout@v4
+        with:
+          repository: SoFluffyOS/raccoon
+          path: pub_packages/raccoon
+      - uses: actions/checkout@v4
+        with:
+          repository: SoFluffyOS/raccoon_runtime
+          path: packages/raccoon_runtime
+
+      - name: Install CMake and Ninja
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - name: Install CMake and Ninja
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja
+
+      # cache: true keeps the SDK and the pub cache between runs.
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Cache the engine and protoc
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/raccoon
+            ~/.local/raccoon/protoc
+          key: raccoon-${{ matrix.name }}-flutter-${{ env.FLUTTER_VERSION }}-protoc-${{ env.PROTOC_VERSION }}
+
+      - name: Precache the desktop artifacts, for the ICU data
+        run: flutter precache --${{ matrix.desktop }}
+
+      - name: Locate the engine and the ICU data
+        run: |
+          SDK="$(cd "$(dirname "$(readlink -f "$(command -v flutter)")")/.." && pwd)"
+          echo "RACCOON_ENGINE_DIR=$(tool/engine_dir.sh)" >> "$GITHUB_ENV"
+          echo "RACCOON_ICU=$SDK/bin/cache/artifacts/engine/${{ matrix.sdk-engine }}/icudtl.dat" >> "$GITHUB_ENV"
+
+      - name: Install protoc
+        run: tool/protoc.sh
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DRACCOON_ENGINE_DIR="$RACCOON_ENGINE_DIR"
+      - name: Build
+        run: ninja -C build
+      - name: Version
+        run: build/raccoon_runner --version
+
+      - name: Build the example bundles
+        run: |
+          for example in hello spin channels; do
+            (cd "example/$example" && flutter build bundle --target-platform=${{ matrix.target }})
+          done
+
+      - name: Render a frame of example/hello
+        run: |
+          build/raccoon_runner render \
+            --engine-dir "$RACCOON_ENGINE_DIR" \
+            --assets example/hello/build/flutter_assets \
+            --icu "$RACCOON_ICU" \
+            --out build/frame.ppm
+          test -s build/frame.ppm
+
+      # raccoon_runtime resolves as a workspace member, so a throwaway root
+      # lists it; the raccoon package is a path dependency outside it.
+      - name: Resolve the runtime
+        working-directory: ${{ github.workspace }}
+        run: |
+          cat > pubspec.yaml <<'PUBSPEC'
+          name: raccoon_runner_ci
+          publish_to: none
+          environment:
+            sdk: ^3.10.0
+          workspace:
+            - packages/raccoon_runtime
+          PUBSPEC
+          dart pub get
+
+      - name: Run the runtime's tests against the runner
+        working-directory: packages/raccoon_runtime
+        env:
+          RACCOON_RUNNER: ${{ github.workspace }}/native/raccoon_runner/build/raccoon_runner
+        run: dart test --reporter expanded
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raccoon_runner-${{ matrix.name }}
+          path: native/raccoon_runner/build/raccoon_runner
