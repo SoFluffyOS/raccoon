@@ -1,3 +1,9 @@
+## 0.4.0
+
+- `TextEditing`: the client's input method produced a value for the active field.
+- `TextField`: the active field's state, from the runner, whenever it changes.
+- `ClientHello.composes`: the client has an input method; the runner leaves typing characters to it.
+
 ## 0.3.0
 
 - `Busy`: the runner tells a second client who has it, then hangs up.

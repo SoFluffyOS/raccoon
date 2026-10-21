@@ -27,12 +27,14 @@ class ClientHello extends $pb.GeneratedMessage {
     $core.String? clientName,
     $core.bool? sharedBuffers,
     $core.int? pid,
+    $core.bool? composes,
   }) {
     final result = ClientHello._();
     if (protocolVersion != null) result.protocolVersion = protocolVersion;
     if (clientName != null) result.clientName = clientName;
     if (sharedBuffers != null) result.sharedBuffers = sharedBuffers;
     if (pid != null) result.pid = pid;
+    if (composes != null) result.composes = composes;
     return result;
   }
 
@@ -54,6 +56,7 @@ class ClientHello extends $pb.GeneratedMessage {
     ..aOS(2, _omitFieldNames ? '' : 'clientName')
     ..aOB(3, _omitFieldNames ? '' : 'sharedBuffers')
     ..aI(4, _omitFieldNames ? '' : 'pid', fieldType: $pb.PbFieldType.OU3)
+    ..aOB(5, _omitFieldNames ? '' : 'composes')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -115,6 +118,18 @@ class ClientHello extends $pb.GeneratedMessage {
   $core.bool hasPid() => $_has(3);
   @$pb.TagNumber(4)
   void clearPid() => $_clearField(4);
+
+  /// The client has an input method and sends TextEditing for the active
+  /// field; the runner then leaves typing characters to it. Keys still reach
+  /// the app.
+  @$pb.TagNumber(5)
+  $core.bool get composes => $_getBF(4);
+  @$pb.TagNumber(5)
+  set composes($core.bool value) => $_setBool(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasComposes() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearComposes() => $_clearField(5);
 }
 
 /// Gives a shared buffer back to the runner once its pixels were read.
@@ -665,6 +680,7 @@ enum ClientMessage_Message {
   shutdown,
   platformResponse,
   releaseBuffer,
+  textEditing,
   notSet
 }
 
@@ -677,6 +693,7 @@ class ClientMessage extends $pb.GeneratedMessage {
     Shutdown? shutdown,
     PlatformResponse? platformResponse,
     ReleaseBuffer? releaseBuffer,
+    TextEditing? textEditing,
   }) {
     final result = ClientMessage._();
     if (hello != null) result.hello = hello;
@@ -686,6 +703,7 @@ class ClientMessage extends $pb.GeneratedMessage {
     if (shutdown != null) result.shutdown = shutdown;
     if (platformResponse != null) result.platformResponse = platformResponse;
     if (releaseBuffer != null) result.releaseBuffer = releaseBuffer;
+    if (textEditing != null) result.textEditing = textEditing;
     return result;
   }
 
@@ -707,13 +725,14 @@ class ClientMessage extends $pb.GeneratedMessage {
     5: ClientMessage_Message.shutdown,
     6: ClientMessage_Message.platformResponse,
     7: ClientMessage_Message.releaseBuffer,
+    8: ClientMessage_Message.textEditing,
     0: ClientMessage_Message.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'ClientMessage',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
       createEmptyInstance: ClientMessage.$_createMessage)
-    ..oo(0, [1, 2, 3, 4, 5, 6, 7])
+    ..oo(0, [1, 2, 3, 4, 5, 6, 7, 8])
     ..aOM<ClientHello>(1, _omitFieldNames ? '' : 'hello',
         subBuilder: ClientHello.$_createMessage)
     ..aOM<Resize>(2, _omitFieldNames ? '' : 'resize',
@@ -728,6 +747,8 @@ class ClientMessage extends $pb.GeneratedMessage {
         subBuilder: PlatformResponse.$_createMessage)
     ..aOM<ReleaseBuffer>(7, _omitFieldNames ? '' : 'releaseBuffer',
         subBuilder: ReleaseBuffer.$_createMessage)
+    ..aOM<TextEditing>(8, _omitFieldNames ? '' : 'textEditing',
+        subBuilder: TextEditing.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -759,6 +780,7 @@ class ClientMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(5)
   @$pb.TagNumber(6)
   @$pb.TagNumber(7)
+  @$pb.TagNumber(8)
   ClientMessage_Message whichMessage() =>
       _ClientMessage_MessageByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(1)
@@ -768,6 +790,7 @@ class ClientMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(5)
   @$pb.TagNumber(6)
   @$pb.TagNumber(7)
+  @$pb.TagNumber(8)
   void clearMessage() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -846,6 +869,125 @@ class ClientMessage extends $pb.GeneratedMessage {
   void clearReleaseBuffer() => $_clearField(7);
   @$pb.TagNumber(7)
   ReleaseBuffer ensureReleaseBuffer() => $_ensure(6);
+
+  @$pb.TagNumber(8)
+  TextEditing get textEditing => $_getN(7);
+  @$pb.TagNumber(8)
+  set textEditing(TextEditing value) => $_setField(8, value);
+  @$pb.TagNumber(8)
+  $core.bool hasTextEditing() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearTextEditing() => $_clearField(8);
+  @$pb.TagNumber(8)
+  TextEditing ensureTextEditing() => $_ensure(7);
+}
+
+/// The client's input method produced a value for the active text field:
+/// the whole value, as Flutter's TextEditingValue, offsets in UTF-16 code
+/// units; -1,-1 for no composing range.
+class TextEditing extends $pb.GeneratedMessage {
+  factory TextEditing({
+    $core.String? text,
+    $core.int? selectionBase,
+    $core.int? selectionExtent,
+    $core.int? composingBase,
+    $core.int? composingExtent,
+  }) {
+    final result = TextEditing._();
+    if (text != null) result.text = text;
+    if (selectionBase != null) result.selectionBase = selectionBase;
+    if (selectionExtent != null) result.selectionExtent = selectionExtent;
+    if (composingBase != null) result.composingBase = composingBase;
+    if (composingExtent != null) result.composingExtent = composingExtent;
+    return result;
+  }
+
+  TextEditing._();
+
+  factory TextEditing.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      TextEditing()..mergeFromBuffer(data, registry);
+  factory TextEditing.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      TextEditing()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'TextEditing',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
+      createEmptyInstance: TextEditing.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'text')
+    ..aI(2, _omitFieldNames ? '' : 'selectionBase')
+    ..aI(3, _omitFieldNames ? '' : 'selectionExtent')
+    ..aI(4, _omitFieldNames ? '' : 'composingBase')
+    ..aI(5, _omitFieldNames ? '' : 'composingExtent')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  TextEditing clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  TextEditing copyWith(void Function(TextEditing) updates) =>
+      super.copyWith((message) => updates(message as TextEditing))
+          as TextEditing;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use TextEditing() / TextEditing.new instead')
+  static TextEditing create() => TextEditing._();
+  static $pb.GeneratedMessage $_createMessage() => TextEditing._();
+  @$core.override
+  TextEditing createEmptyInstance() => TextEditing._();
+  @$core.pragma('dart2js:noInline')
+  static TextEditing getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<TextEditing>(
+          TextEditing.$_createMessage);
+  static TextEditing? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get text => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set text($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasText() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearText() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.int get selectionBase => $_getIZ(1);
+  @$pb.TagNumber(2)
+  set selectionBase($core.int value) => $_setSignedInt32(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasSelectionBase() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearSelectionBase() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.int get selectionExtent => $_getIZ(2);
+  @$pb.TagNumber(3)
+  set selectionExtent($core.int value) => $_setSignedInt32(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasSelectionExtent() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearSelectionExtent() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.int get composingBase => $_getIZ(3);
+  @$pb.TagNumber(4)
+  set composingBase($core.int value) => $_setSignedInt32(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasComposingBase() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearComposingBase() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $core.int get composingExtent => $_getIZ(4);
+  @$pb.TagNumber(5)
+  set composingExtent($core.int value) => $_setSignedInt32(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasComposingExtent() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearComposingExtent() => $_clearField(5);
 }
 
 class RunnerHello extends $pb.GeneratedMessage {
@@ -1427,6 +1569,159 @@ class PlatformMessage extends $pb.GeneratedMessage {
   void clearData() => $_clearField(3);
 }
 
+/// The app's active text field, whenever it changes; active=false once no
+/// field has focus. A client with an input method mirrors it there.
+class TextField extends $pb.GeneratedMessage {
+  factory TextField({
+    $core.bool? active,
+    $core.String? text,
+    $core.int? selectionBase,
+    $core.int? selectionExtent,
+    $core.int? composingBase,
+    $core.int? composingExtent,
+    $core.bool? multiline,
+    $core.String? inputAction,
+    $core.bool? obscure,
+  }) {
+    final result = TextField._();
+    if (active != null) result.active = active;
+    if (text != null) result.text = text;
+    if (selectionBase != null) result.selectionBase = selectionBase;
+    if (selectionExtent != null) result.selectionExtent = selectionExtent;
+    if (composingBase != null) result.composingBase = composingBase;
+    if (composingExtent != null) result.composingExtent = composingExtent;
+    if (multiline != null) result.multiline = multiline;
+    if (inputAction != null) result.inputAction = inputAction;
+    if (obscure != null) result.obscure = obscure;
+    return result;
+  }
+
+  TextField._();
+
+  factory TextField.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      TextField()..mergeFromBuffer(data, registry);
+  factory TextField.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      TextField()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'TextField',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
+      createEmptyInstance: TextField.$_createMessage)
+    ..aOB(1, _omitFieldNames ? '' : 'active')
+    ..aOS(2, _omitFieldNames ? '' : 'text')
+    ..aI(3, _omitFieldNames ? '' : 'selectionBase')
+    ..aI(4, _omitFieldNames ? '' : 'selectionExtent')
+    ..aI(5, _omitFieldNames ? '' : 'composingBase')
+    ..aI(6, _omitFieldNames ? '' : 'composingExtent')
+    ..aOB(7, _omitFieldNames ? '' : 'multiline')
+    ..aOS(8, _omitFieldNames ? '' : 'inputAction')
+    ..aOB(9, _omitFieldNames ? '' : 'obscure')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  TextField clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  TextField copyWith(void Function(TextField) updates) =>
+      super.copyWith((message) => updates(message as TextField)) as TextField;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use TextField() / TextField.new instead')
+  static TextField create() => TextField._();
+  static $pb.GeneratedMessage $_createMessage() => TextField._();
+  @$core.override
+  TextField createEmptyInstance() => TextField._();
+  @$core.pragma('dart2js:noInline')
+  static TextField getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<TextField>(TextField.$_createMessage);
+  static TextField? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.bool get active => $_getBF(0);
+  @$pb.TagNumber(1)
+  set active($core.bool value) => $_setBool(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasActive() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearActive() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.String get text => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set text($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasText() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearText() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.int get selectionBase => $_getIZ(2);
+  @$pb.TagNumber(3)
+  set selectionBase($core.int value) => $_setSignedInt32(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasSelectionBase() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearSelectionBase() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.int get selectionExtent => $_getIZ(3);
+  @$pb.TagNumber(4)
+  set selectionExtent($core.int value) => $_setSignedInt32(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasSelectionExtent() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearSelectionExtent() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $core.int get composingBase => $_getIZ(4);
+  @$pb.TagNumber(5)
+  set composingBase($core.int value) => $_setSignedInt32(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasComposingBase() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearComposingBase() => $_clearField(5);
+
+  @$pb.TagNumber(6)
+  $core.int get composingExtent => $_getIZ(5);
+  @$pb.TagNumber(6)
+  set composingExtent($core.int value) => $_setSignedInt32(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasComposingExtent() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearComposingExtent() => $_clearField(6);
+
+  @$pb.TagNumber(7)
+  $core.bool get multiline => $_getBF(6);
+  @$pb.TagNumber(7)
+  set multiline($core.bool value) => $_setBool(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasMultiline() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearMultiline() => $_clearField(7);
+
+  @$pb.TagNumber(8)
+  $core.String get inputAction => $_getSZ(7);
+  @$pb.TagNumber(8)
+  set inputAction($core.String value) => $_setString(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasInputAction() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearInputAction() => $_clearField(8);
+
+  @$pb.TagNumber(9)
+  $core.bool get obscure => $_getBF(8);
+  @$pb.TagNumber(9)
+  set obscure($core.bool value) => $_setBool(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasObscure() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearObscure() => $_clearField(9);
+}
+
 /// The runner has a client already; the connection closes after this.
 class Busy extends $pb.GeneratedMessage {
   factory Busy({
@@ -1492,6 +1787,7 @@ enum RunnerMessage_Message {
   platformMessage,
   sharedBuffers,
   busy,
+  textField,
   notSet
 }
 
@@ -1505,6 +1801,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
     PlatformMessage? platformMessage,
     SharedBuffers? sharedBuffers,
     Busy? busy,
+    TextField? textField,
   }) {
     final result = RunnerMessage._();
     if (hello != null) result.hello = hello;
@@ -1515,6 +1812,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
     if (platformMessage != null) result.platformMessage = platformMessage;
     if (sharedBuffers != null) result.sharedBuffers = sharedBuffers;
     if (busy != null) result.busy = busy;
+    if (textField != null) result.textField = textField;
     return result;
   }
 
@@ -1537,13 +1835,14 @@ class RunnerMessage extends $pb.GeneratedMessage {
     6: RunnerMessage_Message.platformMessage,
     7: RunnerMessage_Message.sharedBuffers,
     8: RunnerMessage_Message.busy,
+    9: RunnerMessage_Message.textField,
     0: RunnerMessage_Message.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'RunnerMessage',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
       createEmptyInstance: RunnerMessage.$_createMessage)
-    ..oo(0, [1, 2, 3, 4, 5, 6, 7, 8])
+    ..oo(0, [1, 2, 3, 4, 5, 6, 7, 8, 9])
     ..aOM<RunnerHello>(1, _omitFieldNames ? '' : 'hello',
         subBuilder: RunnerHello.$_createMessage)
     ..aOM<Frame>(2, _omitFieldNames ? '' : 'frame',
@@ -1560,6 +1859,8 @@ class RunnerMessage extends $pb.GeneratedMessage {
         subBuilder: SharedBuffers.$_createMessage)
     ..aOM<Busy>(8, _omitFieldNames ? '' : 'busy',
         subBuilder: Busy.$_createMessage)
+    ..aOM<TextField>(9, _omitFieldNames ? '' : 'textField',
+        subBuilder: TextField.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1592,6 +1893,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(6)
   @$pb.TagNumber(7)
   @$pb.TagNumber(8)
+  @$pb.TagNumber(9)
   RunnerMessage_Message whichMessage() =>
       _RunnerMessage_MessageByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(1)
@@ -1602,6 +1904,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(6)
   @$pb.TagNumber(7)
   @$pb.TagNumber(8)
+  @$pb.TagNumber(9)
   void clearMessage() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -1691,6 +1994,17 @@ class RunnerMessage extends $pb.GeneratedMessage {
   void clearBusy() => $_clearField(8);
   @$pb.TagNumber(8)
   Busy ensureBusy() => $_ensure(7);
+
+  @$pb.TagNumber(9)
+  TextField get textField => $_getN(8);
+  @$pb.TagNumber(9)
+  set textField(TextField value) => $_setField(9, value);
+  @$pb.TagNumber(9)
+  $core.bool hasTextField() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearTextField() => $_clearField(9);
+  @$pb.TagNumber(9)
+  TextField ensureTextField() => $_ensure(8);
 }
 
 const $core.bool _omitFieldNames =

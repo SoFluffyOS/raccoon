@@ -89,6 +89,7 @@ const ClientHello$json = {
     {'1': 'protocol_version', '3': 1, '4': 1, '5': 13, '10': 'protocolVersion'},
     {'1': 'client_name', '3': 2, '4': 1, '5': 9, '10': 'clientName'},
     {'1': 'shared_buffers', '3': 3, '4': 1, '5': 8, '10': 'sharedBuffers'},
+    {'1': 'composes', '3': 5, '4': 1, '5': 8, '10': 'composes'},
     {'1': 'pid', '3': 4, '4': 1, '5': 13, '10': 'pid'},
   ],
 };
@@ -97,7 +98,8 @@ const ClientHello$json = {
 final $typed_data.Uint8List clientHelloDescriptor = $convert.base64Decode(
     'CgtDbGllbnRIZWxsbxIpChBwcm90b2NvbF92ZXJzaW9uGAEgASgNUg9wcm90b2NvbFZlcnNpb2'
     '4SHwoLY2xpZW50X25hbWUYAiABKAlSCmNsaWVudE5hbWUSJQoOc2hhcmVkX2J1ZmZlcnMYAyAB'
-    'KAhSDXNoYXJlZEJ1ZmZlcnMSEAoDcGlkGAQgASgNUgNwaWQ=');
+    'KAhSDXNoYXJlZEJ1ZmZlcnMSGgoIY29tcG9zZXMYBSABKAhSCGNvbXBvc2VzEhAKA3BpZBgEIA'
+    'EoDVIDcGlk');
 
 @$core.Deprecated('Use releaseBufferDescriptor instead')
 const ReleaseBuffer$json = {
@@ -283,6 +285,15 @@ const ClientMessage$json = {
       '9': 0,
       '10': 'releaseBuffer'
     },
+    {
+      '1': 'text_editing',
+      '3': 8,
+      '4': 1,
+      '5': 11,
+      '6': '.raccoon.v1.TextEditing',
+      '9': 0,
+      '10': 'textEditing'
+    },
   ],
   '8': [
     {'1': 'message'},
@@ -298,7 +309,27 @@ final $typed_data.Uint8List clientMessageDescriptor = $convert.base64Decode(
     'KAsyFC5yYWNjb29uLnYxLlNodXRkb3duSABSCHNodXRkb3duEksKEXBsYXRmb3JtX3Jlc3Bvbn'
     'NlGAYgASgLMhwucmFjY29vbi52MS5QbGF0Zm9ybVJlc3BvbnNlSABSEHBsYXRmb3JtUmVzcG9u'
     'c2USQgoOcmVsZWFzZV9idWZmZXIYByABKAsyGS5yYWNjb29uLnYxLlJlbGVhc2VCdWZmZXJIAF'
-    'INcmVsZWFzZUJ1ZmZlckIJCgdtZXNzYWdl');
+    'INcmVsZWFzZUJ1ZmZlchI8Cgx0ZXh0X2VkaXRpbmcYCCABKAsyFy5yYWNjb29uLnYxLlRleHRF'
+    'ZGl0aW5nSABSC3RleHRFZGl0aW5nQgkKB21lc3NhZ2U=');
+
+@$core.Deprecated('Use textEditingDescriptor instead')
+const TextEditing$json = {
+  '1': 'TextEditing',
+  '2': [
+    {'1': 'text', '3': 1, '4': 1, '5': 9, '10': 'text'},
+    {'1': 'selection_base', '3': 2, '4': 1, '5': 5, '10': 'selectionBase'},
+    {'1': 'selection_extent', '3': 3, '4': 1, '5': 5, '10': 'selectionExtent'},
+    {'1': 'composing_base', '3': 4, '4': 1, '5': 5, '10': 'composingBase'},
+    {'1': 'composing_extent', '3': 5, '4': 1, '5': 5, '10': 'composingExtent'},
+  ],
+};
+
+/// Descriptor for `TextEditing`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List textEditingDescriptor = $convert.base64Decode(
+    'CgtUZXh0RWRpdGluZxISCgR0ZXh0GAEgASgJUgR0ZXh0EiUKDnNlbGVjdGlvbl9iYXNlGAIgAS'
+    'gFUg1zZWxlY3Rpb25CYXNlEikKEHNlbGVjdGlvbl9leHRlbnQYAyABKAVSD3NlbGVjdGlvbkV4'
+    'dGVudBIlCg5jb21wb3NpbmdfYmFzZRgEIAEoBVINY29tcG9zaW5nQmFzZRIpChBjb21wb3Npbm'
+    'dfZXh0ZW50GAUgASgFUg9jb21wb3NpbmdFeHRlbnQ=');
 
 @$core.Deprecated('Use runnerHelloDescriptor instead')
 const RunnerHello$json = {
@@ -414,6 +445,31 @@ final $typed_data.Uint8List platformMessageDescriptor = $convert.base64Decode(
     'Cg9QbGF0Zm9ybU1lc3NhZ2USHwoLcmVzcG9uc2VfaWQYASABKARSCnJlc3BvbnNlSWQSGAoHY2'
     'hhbm5lbBgCIAEoCVIHY2hhbm5lbBISCgRkYXRhGAMgASgMUgRkYXRh');
 
+@$core.Deprecated('Use textFieldDescriptor instead')
+const TextField$json = {
+  '1': 'TextField',
+  '2': [
+    {'1': 'active', '3': 1, '4': 1, '5': 8, '10': 'active'},
+    {'1': 'text', '3': 2, '4': 1, '5': 9, '10': 'text'},
+    {'1': 'selection_base', '3': 3, '4': 1, '5': 5, '10': 'selectionBase'},
+    {'1': 'selection_extent', '3': 4, '4': 1, '5': 5, '10': 'selectionExtent'},
+    {'1': 'composing_base', '3': 5, '4': 1, '5': 5, '10': 'composingBase'},
+    {'1': 'composing_extent', '3': 6, '4': 1, '5': 5, '10': 'composingExtent'},
+    {'1': 'multiline', '3': 7, '4': 1, '5': 8, '10': 'multiline'},
+    {'1': 'input_action', '3': 8, '4': 1, '5': 9, '10': 'inputAction'},
+    {'1': 'obscure', '3': 9, '4': 1, '5': 8, '10': 'obscure'},
+  ],
+};
+
+/// Descriptor for `TextField`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List textFieldDescriptor = $convert.base64Decode(
+    'CglUZXh0RmllbGQSFgoGYWN0aXZlGAEgASgIUgZhY3RpdmUSEgoEdGV4dBgCIAEoCVIEdGV4dB'
+    'IlCg5zZWxlY3Rpb25fYmFzZRgDIAEoBVINc2VsZWN0aW9uQmFzZRIpChBzZWxlY3Rpb25fZXh0'
+    'ZW50GAQgASgFUg9zZWxlY3Rpb25FeHRlbnQSJQoOY29tcG9zaW5nX2Jhc2UYBSABKAVSDWNvbX'
+    'Bvc2luZ0Jhc2USKQoQY29tcG9zaW5nX2V4dGVudBgGIAEoBVIPY29tcG9zaW5nRXh0ZW50EhwK'
+    'CW11bHRpbGluZRgHIAEoCFIJbXVsdGlsaW5lEiEKDGlucHV0X2FjdGlvbhgIIAEoCVILaW5wdX'
+    'RBY3Rpb24SGAoHb2JzY3VyZRgJIAEoCFIHb2JzY3VyZQ==');
+
 @$core.Deprecated('Use busyDescriptor instead')
 const Busy$json = {
   '1': 'Busy',
@@ -502,6 +558,15 @@ const RunnerMessage$json = {
       '9': 0,
       '10': 'busy'
     },
+    {
+      '1': 'text_field',
+      '3': 9,
+      '4': 1,
+      '5': 11,
+      '6': '.raccoon.v1.TextField',
+      '9': 0,
+      '10': 'textField'
+    },
   ],
   '8': [
     {'1': 'message'},
@@ -517,4 +582,6 @@ final $typed_data.Uint8List runnerMessageDescriptor = $convert.base64Decode(
     'LnJhY2Nvb24udjEuRXhpdGVkSABSBmV4aXRlZBJIChBwbGF0Zm9ybV9tZXNzYWdlGAYgASgLMh'
     'sucmFjY29vbi52MS5QbGF0Zm9ybU1lc3NhZ2VIAFIPcGxhdGZvcm1NZXNzYWdlEkIKDnNoYXJl'
     'ZF9idWZmZXJzGAcgASgLMhkucmFjY29vbi52MS5TaGFyZWRCdWZmZXJzSABSDXNoYXJlZEJ1Zm'
-    'ZlcnMSJgoEYnVzeRgIIAEoCzIQLnJhY2Nvb24udjEuQnVzeUgAUgRidXN5QgkKB21lc3NhZ2U=');
+    'ZlcnMSJgoEYnVzeRgIIAEoCzIQLnJhY2Nvb24udjEuQnVzeUgAUgRidXN5EjYKCnRleHRfZmll'
+    'bGQYCSABKAsyFS5yYWNjb29uLnYxLlRleHRGaWVsZEgAUgl0ZXh0RmllbGRCCQoHbWVzc2FnZQ'
+    '==');
