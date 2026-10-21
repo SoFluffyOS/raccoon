@@ -1,0 +1,12 @@
+name: raccoon
+description: The Raccoon runtime's public Dart API, for apps and plugin authors. Presence check, protocol version and service clients.
+version: 0.1.0
+homepage: https://lumide.dev
+repository: https://github.com/simonpham/raccoon
+
+environment:
+  sdk: ^3.6.0
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.0
