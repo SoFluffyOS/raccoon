@@ -8,7 +8,9 @@ environment:
 resolution: workspace
 
 dependencies:
+  fixnum: ^1.1.0
   path: ^1.9.1
+  protobuf: ^6.1.0
   raccoon:
     path: ../../pub_packages/raccoon
 
