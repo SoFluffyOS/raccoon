@@ -39,6 +39,7 @@ class RaccoonView extends StatefulWidget {
 }
 
 class _RaccoonViewState extends State<RaccoonView> {
+  final _focus = FocusNode(debugLabel: 'RaccoonView');
   StreamSubscription<rc.Frame>? _frames;
   StreamSubscription<rc.TextField>? _fields;
   HostedTextInput? _text;
@@ -69,6 +70,7 @@ class _RaccoonViewState extends State<RaccoonView> {
   void dispose() {
     unawaited(_frames?.cancel());
     _unsubscribeText();
+    _focus.dispose();
     _image?.dispose();
     super.dispose();
   }
@@ -147,6 +149,8 @@ class _RaccoonViewState extends State<RaccoonView> {
   }
 
   void _onPointer(PointerEvent event) {
+    // A click into the app is a click into the app: the keys follow it.
+    if (event is PointerDownEvent && !_focus.hasFocus) _focus.requestFocus();
     final mapped = toRunnerPointer(event, _pixelRatio);
     if (mapped != null) widget.connection.sendPointer(mapped);
   }
@@ -182,6 +186,7 @@ class _RaccoonViewState extends State<RaccoonView> {
         final size = constraints.biggest;
         if (size.isFinite && !size.isEmpty) _sendSize(size, pixelRatio);
         return Focus(
+          focusNode: _focus,
           autofocus: widget.autofocus,
           onKeyEvent: _onKey,
           child: Listener(

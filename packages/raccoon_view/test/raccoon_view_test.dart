@@ -154,4 +154,29 @@ void main() {
     expect(find.text('Runner disconnected'), findsOneWidget);
     expect(disconnected, 1);
   });
+
+  testWidgets('a click into the app focuses the view, so keys follow', (
+    tester,
+  ) async {
+    final connection = _FakeConnection();
+    await tester.pumpWidget(
+      Column(
+        children: [
+          const SizedBox(
+            height: 20,
+            child: Focus(autofocus: true, child: SizedBox()),
+          ),
+          Expanded(child: RaccoonView(connection: connection)),
+        ],
+      ),
+    );
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    expect(connection.keys, isEmpty);
+
+    await tester.tapAt(tester.getCenter(find.byType(RaccoonView)));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    expect(connection.keys, isNotEmpty);
+  });
 }
