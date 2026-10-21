@@ -657,8 +657,20 @@ void main() {
         var releaseOnSocket = false;
         final socketFrames = <Frame>[];
         final doneOnSocket = Completer<void>();
+        // Last, buffers are held: the ring starves, then the GPU socket's
+        // client goes away and they are the runner's again.
+        var hold = false;
+        final starved = Completer<void>();
+        final freed = Completer<void>();
+        var afterStarving = 0;
         final subscription = client.frames.listen((frame) {
           frames.add(frame);
+          if (hold) {
+            if (!frame.inGpuBuffer && !starved.isCompleted) starved.complete();
+            if (frame.inGpuBuffer && starved.isCompleted) afterStarving++;
+            if (afterStarving >= 2 && !freed.isCompleted) freed.complete();
+            return;
+          }
           if (frame.inGpuBuffer) {
             if (releaseOnSocket) {
               socketFrames.add(frame);
@@ -750,12 +762,18 @@ void main() {
         // index, fenced; frames keep coming past the ring's size.
         releaseOnSocket = true;
         await doneOnSocket.future.timeout(const Duration(seconds: 15));
-        await subscription.cancel();
         expect(
           socketFrames.map((f) => f.bufferIndex).toSet().length,
           greaterThan(1),
         );
+
+        // Held buffers starve the ring into readback; once the client on
+        // the GPU socket is gone, the runner takes them all back.
+        hold = true;
+        await starved.future.timeout(const Duration(seconds: 15));
         await gpuSocket.close();
+        await freed.future.timeout(const Duration(seconds: 15));
+        await subscription.cancel();
       } finally {
         client.shutdown();
         await client.close();
