@@ -125,10 +125,21 @@ std::string GpuSocketPath(const std::string& socket) {
   return socket + ".gpu";
 }
 
+uint32_t Read32(const uint8_t* at) {
+  return static_cast<uint32_t>(at[0]) | (static_cast<uint32_t>(at[1]) << 8) |
+         (static_cast<uint32_t>(at[2]) << 16) | (static_cast<uint32_t>(at[3]) << 24);
+}
+
 // What the GPU socket carries, so a native client needs no protobuf: little
 // endian, 'RGPU', generation, count, width, height, fourcc, modifier (64
 // bits), then count pairs of stride and offset; one descriptor per buffer
 // rides along, in index order.
+//
+// Then, ahead of each frame that has one, 'RFEN', generation, index, with
+// the frame's fence riding along: signalled when the draw is done. And the
+// client sends 'RREL', generation, index, fenced (1 when a fence rides
+// along, signalled when its last use of the buffer is done) to give a
+// buffer back.
 std::vector<uint8_t> GpuSocketPayload(const raccoon::GpuBufferSet& set) {
   std::vector<uint8_t> out;
   auto put32 = [&out](uint32_t value) {
@@ -147,6 +158,14 @@ std::vector<uint8_t> GpuSocketPayload(const raccoon::GpuBufferSet& set) {
   for (size_t i = 0; i < set.fds.size(); ++i) {
     put32(set.strides[i]);
     put32(set.offsets[i]);
+  }
+  return out;
+}
+
+std::vector<uint8_t> FencePayload(const raccoon::SoftwareFrame::Gpu& gpu) {
+  std::vector<uint8_t> out = {'R', 'F', 'E', 'N'};
+  for (uint32_t value : {gpu.generation, static_cast<uint32_t>(gpu.index)}) {
+    for (int i = 0; i < 4; ++i) out.push_back(static_cast<uint8_t>(value >> (8 * i)));
   }
   return out;
 }
@@ -451,6 +470,21 @@ int Serve(const Options& options) {
   raccoon::RunnerServer::Handler gpu_handler;
   gpu_handler.on_client_connected = [&] { gpu_fds_sent = 0; };
   gpu_handler.on_client_disconnected = [&] { gpu_fds_sent = 0; };
+  gpu_handler.on_raw = [&](const uint8_t* payload, size_t size, std::vector<int>& fds) {
+    if (size >= 16 && std::memcmp(payload, "RREL", 4) == 0) {
+      int fence = -1;
+      if (Read32(payload + 12) != 0 && !fds.empty()) {
+        fence = fds.front();
+        fds.erase(fds.begin());
+      }
+      host.ReleaseGpuBuffer(Read32(payload + 4), static_cast<int>(Read32(payload + 8)),
+                            fence);
+      return;
+    }
+    // Not a message this runner knows: whatever it brought is let go.
+    for (int fd : fds) close(fd);
+    fds.clear();
+  };
   raccoon::RunnerServer gpu_server(loop, gpu_handler);
   if (!gpu_server.Listen(gpu_socket, &error)) {
     std::fprintf(stderr, "raccoon_runner: %s\n", error.c_str());
@@ -488,6 +522,13 @@ int Serve(const Options& options) {
         }
         raccoon::SoftwareFrame::Gpu gpu;
         if (host.frame().TakeGpu(&gpu)) {
+          // The fence goes first, to a client holding this set's buffers.
+          if (gpu.fence_fd >= 0) {
+            if (gpu_server.has_client() && gpu_fds_sent == gpu.generation) {
+              gpu_server.SendBytesWithFds(FencePayload(gpu), {gpu.fence_fd});
+            }
+            close(gpu.fence_fd);
+          }
           raccoon::v1::RunnerMessage message;
           auto* frame = message.mutable_frame();
           frame->set_sequence(gpu.sequence);

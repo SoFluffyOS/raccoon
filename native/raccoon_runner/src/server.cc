@@ -146,8 +146,31 @@ void RunnerServer::OnListenReadable() {
 
 bool RunnerServer::ReadAvailable() {
   uint8_t buffer[64 * 1024];
+  alignas(cmsghdr) uint8_t control[CMSG_SPACE(sizeof(int) * 16)];
   while (true) {
-    const ssize_t got = read(client_fd_, buffer, sizeof(buffer));
+    ssize_t got;
+    if (handler_.on_raw) {
+      // A raw client may attach descriptors; they ride with the first bytes
+      // of their message and are kept in order for the handler.
+      iovec part{buffer, sizeof(buffer)};
+      msghdr header{};
+      header.msg_iov = &part;
+      header.msg_iovlen = 1;
+      header.msg_control = control;
+      header.msg_controllen = sizeof(control);
+      got = recvmsg(client_fd_, &header, MSG_CMSG_CLOEXEC);
+      if (got > 0) {
+        for (cmsghdr* cmsg = CMSG_FIRSTHDR(&header); cmsg != nullptr;
+             cmsg = CMSG_NXTHDR(&header, cmsg)) {
+          if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS) continue;
+          const size_t count = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+          const int* fds = reinterpret_cast<const int*>(CMSG_DATA(cmsg));
+          fds_in_.insert(fds_in_.end(), fds, fds + count);
+        }
+      }
+    } else {
+      got = read(client_fd_, buffer, sizeof(buffer));
+    }
     if (got > 0) {
       inbox_.insert(inbox_.end(), buffer, buffer + got);
       continue;
@@ -174,10 +197,14 @@ void RunnerServer::DispatchInbox() {
       return;
     }
     if (inbox_.size() - offset - kLengthPrefix < length) break;
-    v1::ClientMessage message;
-    if (message.ParseFromArray(inbox_.data() + offset + kLengthPrefix,
-                               static_cast<int>(length))) {
-      Dispatch(message);
+    if (handler_.on_raw) {
+      handler_.on_raw(inbox_.data() + offset + kLengthPrefix, length, fds_in_);
+    } else {
+      v1::ClientMessage message;
+      if (message.ParseFromArray(inbox_.data() + offset + kLengthPrefix,
+                                 static_cast<int>(length))) {
+        Dispatch(message);
+      }
     }
     offset += kLengthPrefix + length;
     if (client_fd_ < 0) return;
@@ -236,6 +263,8 @@ void RunnerServer::CloseClient() {
   close(client_fd_);
   client_fd_ = -1;
   inbox_.clear();
+  for (int fd : fds_in_) close(fd);
+  fds_in_.clear();
   if (handler_.on_client_disconnected) handler_.on_client_disconnected();
 }
 

@@ -1,6 +1,7 @@
 #include "engine_host.h"
 
 #include <nlohmann/json.hpp>
+#include <unistd.h>
 
 namespace raccoon {
 
@@ -66,10 +67,10 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
     // buffer each time.
     gl.fbo_reset_after_present = true;
     renderer_ = "gl (" + gl_->description() + ")";
-    gl_->SetGpuFrameCallback(
-        [this](uint32_t generation, int index, size_t width, size_t height) {
-          frame_.PresentGpu(generation, index, width, height);
-        });
+    gl_->SetGpuFrameCallback([this](uint32_t generation, int index, size_t width,
+                                    size_t height, int fence_fd) {
+      frame_.PresentGpu(generation, index, width, height, fence_fd);
+    });
     frame_.SetGpuReleaseCallback(
         [this](uint32_t generation, int index) {
           gl_->Release(generation, index);
@@ -197,13 +198,17 @@ bool EngineHost::GpuBufferSetNow(GpuBufferSet* out) const {
   return false;
 }
 
-void EngineHost::ReleaseGpuBuffer(uint32_t generation, int index) {
+void EngineHost::ReleaseGpuBuffer(uint32_t generation, int index, int fence_fd) {
 #if RACCOON_HAS_GL
-  if (gl_) gl_->Release(generation, index);
+  if (gl_) {
+    gl_->Release(generation, index, fence_fd);
+    return;
+  }
 #else
   (void)generation;
   (void)index;
 #endif
+  if (fence_fd >= 0) close(fence_fd);
 }
 
 void EngineHost::SendPointer(const FlutterPointerEvent& event) {

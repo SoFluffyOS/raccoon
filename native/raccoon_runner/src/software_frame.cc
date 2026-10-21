@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <unistd.h>
 
 namespace raccoon {
 
@@ -109,17 +110,18 @@ bool SoftwareFrame::WritePpm(const std::string& path, bool bgra) const {
 
 
 void SoftwareFrame::PresentGpu(uint32_t generation, int index, size_t width,
-                               size_t height) {
+                               size_t height, int fence_fd) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     width_ = width;
     height_ = height;
     row_bytes_ = width * 4;
     ++frame_count_;
-    if (pending_gpu_.index >= 0 && release_gpu_) {
-      release_gpu_(pending_gpu_.generation, pending_gpu_.index);
+    if (pending_gpu_.index >= 0) {
+      if (release_gpu_) release_gpu_(pending_gpu_.generation, pending_gpu_.index);
+      if (pending_gpu_.fence_fd >= 0) close(pending_gpu_.fence_fd);
     }
-    pending_gpu_ = {generation, index, width, height, frame_count_};
+    pending_gpu_ = {generation, index, width, height, frame_count_, fence_fd};
   }
   if (presented_) presented_();
 }

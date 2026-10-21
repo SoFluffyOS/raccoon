@@ -126,9 +126,25 @@ bool GlRenderer::Init(std::string* error) {
                 Has(egl_extensions, "EGL_KHR_gl_texture_2D_image") &&
                 create_image_ != nullptr && destroy_image_ != nullptr &&
                 export_query_ != nullptr && export_image_ != nullptr;
+  create_sync_ = reinterpret_cast<PFNEGLCREATESYNCKHRPROC>(
+      eglGetProcAddress("eglCreateSyncKHR"));
+  destroy_sync_ = reinterpret_cast<PFNEGLDESTROYSYNCKHRPROC>(
+      eglGetProcAddress("eglDestroySyncKHR"));
+  client_wait_sync_ = reinterpret_cast<PFNEGLCLIENTWAITSYNCKHRPROC>(
+      eglGetProcAddress("eglClientWaitSyncKHR"));
+  wait_sync_ = reinterpret_cast<PFNEGLWAITSYNCKHRPROC>(
+      eglGetProcAddress("eglWaitSyncKHR"));
+  dup_fence_ = reinterpret_cast<PFNEGLDUPNATIVEFENCEFDANDROIDPROC>(
+      eglGetProcAddress("eglDupNativeFenceFDANDROID"));
+  has_fences_ = Has(egl_extensions, "EGL_KHR_fence_sync") &&
+                Has(egl_extensions, "EGL_ANDROID_native_fence_sync") &&
+                create_sync_ != nullptr && destroy_sync_ != nullptr &&
+                client_wait_sync_ != nullptr && dup_fence_ != nullptr;
+  has_wait_sync_ = Has(egl_extensions, "EGL_KHR_wait_sync") && wait_sync_ != nullptr;
   description_ = std::string(renderer == nullptr ? "?" : renderer) + ", " +
                  (version == nullptr ? "?" : version) + ", EGL " + how +
-                 (can_export_ ? ", exports dmabufs" : "");
+                 (can_export_ ? ", exports dmabufs" : "") +
+                 (has_fences_ ? ", native fences" : "");
   ClearCurrent();
   return true;
 }
@@ -229,18 +245,59 @@ bool GlRenderer::pool_set(GpuBufferSet* out) const {
   return true;
 }
 
-void GlRenderer::Release(uint32_t generation, int index) {
+void GlRenderer::Release(uint32_t generation, int index, int fence_fd) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (generation != generation_ || index < 0 ||
       static_cast<size_t>(index) >= pool_.size()) {
+    if (fence_fd >= 0) close(fence_fd);
     return;
   }
-  pool_[index].busy = false;
-  if (kTrace) std::fprintf(stderr, "raccoon_runner: gl release pool %d\n", index);
+  Buffer& buffer = pool_[index];
+  if (buffer.fence >= 0) close(buffer.fence);
+  buffer.fence = fence_fd;
+  buffer.busy = false;
+  if (kTrace) {
+    std::fprintf(stderr, "raccoon_runner: gl release pool %d%s\n", index,
+                 fence_fd >= 0 ? " (fenced)" : "");
+  }
+}
+
+int GlRenderer::ExportFence() {
+  if (!has_fences_) return -1;
+  const EGLSyncKHR sync =
+      create_sync_(display_, EGL_SYNC_NATIVE_FENCE_ANDROID, nullptr);
+  if (sync == EGL_NO_SYNC_KHR) return -1;
+  // The fence is only submitted with the commands before it.
+  glFlush();
+  const int fd = dup_fence_(display_, sync);
+  destroy_sync_(display_, sync);
+  return fd;
+}
+
+void GlRenderer::WaitFence(int fence_fd) {
+  if (!has_fences_) {
+    close(fence_fd);
+    return;
+  }
+  const EGLint attributes[] = {EGL_SYNC_NATIVE_FENCE_FD_ANDROID, fence_fd, EGL_NONE};
+  // The sync owns the descriptor from here.
+  const EGLSyncKHR sync =
+      create_sync_(display_, EGL_SYNC_NATIVE_FENCE_ANDROID, attributes);
+  if (sync == EGL_NO_SYNC_KHR) {
+    close(fence_fd);
+    return;
+  }
+  if (has_wait_sync_) {
+    wait_sync_(display_, sync, 0);
+  } else {
+    client_wait_sync_(display_, sync, 0, EGL_FOREVER_KHR);
+  }
+  destroy_sync_(display_, sync);
 }
 
 void GlRenderer::DestroyPool() {
   for (Buffer& buffer : pool_) {
+    if (buffer.fence >= 0) close(buffer.fence);
     if (buffer.fd >= 0) close(buffer.fd);
     if (buffer.image != EGL_NO_IMAGE_KHR) destroy_image_(display_, buffer.image);
     if (buffer.texture != 0) glDeleteTextures(1, &buffer.texture);
@@ -326,6 +383,11 @@ uint32_t GlRenderer::Fbo(size_t width, size_t height) {
       if (pool_[i].busy) continue;
       pool_[i].busy = true;
       current_ = static_cast<int>(i);
+      if (pool_[i].fence >= 0) {
+        // The client may still be reading it: draw after that.
+        WaitFence(pool_[i].fence);
+        pool_[i].fence = -1;
+      }
       glBindFramebuffer(GL_FRAMEBUFFER, pool_fbo_);
       glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                              GL_TEXTURE_2D, pool_[i].texture, 0);
@@ -352,10 +414,19 @@ bool GlRenderer::Present(const FrameCallback& callback) {
     current_ = -1;
   }
   if (index >= 0) {
-    // The client reads the buffer from its own context; wait for the draw.
-    glFinish();
-    if (kTrace) std::fprintf(stderr, "raccoon_runner: gl present pool %d\n", index);
-    if (gpu_frame_) gpu_frame_(generation, index, width, height);
+    // The client reads the buffer from its own context: it gets a fence for
+    // the draw, or, without fences, the draw is waited for here.
+    int fence = ExportFence();
+    if (fence < 0) glFinish();
+    if (kTrace) {
+      std::fprintf(stderr, "raccoon_runner: gl present pool %d%s\n", index,
+                   fence >= 0 ? " (fenced)" : "");
+    }
+    if (gpu_frame_) {
+      gpu_frame_(generation, index, width, height, fence);
+    } else if (fence >= 0) {
+      close(fence);
+    }
     return true;
   }
   if (fbo_ == 0) return false;

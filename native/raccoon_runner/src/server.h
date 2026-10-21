@@ -25,6 +25,12 @@ class RunnerServer {
     std::function<void(const v1::PlatformResponse&)> on_platform_response;
     std::function<void()> on_client_connected;
     std::function<void()> on_client_disconnected;
+    // Set for a client that does not speak protobuf: every framed message
+    // comes here as bytes, with the descriptors received so far, which the
+    // handler takes from the front of |fds| (what it leaves is kept for the
+    // next message).
+    std::function<void(const uint8_t* payload, size_t size, std::vector<int>& fds)>
+        on_raw;
   };
 
   RunnerServer(EventLoop& loop, Handler handler);
@@ -68,6 +74,8 @@ class RunnerServer {
   bool closing_ = false;
   static bool WriteAllTo(int fd, const uint8_t* data, size_t size);
   std::vector<uint8_t> inbox_;
+  // Descriptors a raw client sent, not yet taken by the handler.
+  std::vector<int> fds_in_;
 };
 
 }  // namespace raccoon

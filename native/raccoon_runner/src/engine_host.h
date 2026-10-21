@@ -105,7 +105,9 @@ class EngineHost {
   bool EnableGpuBuffers(size_t count, std::string* error);
   void DisableGpuBuffers();
   bool GpuBufferSetNow(GpuBufferSet* out) const;
-  void ReleaseGpuBuffer(uint32_t generation, int index);
+  // |fence_fd|, when not -1, is signalled once the client's last use of the
+  // buffer is done; owned from here.
+  void ReleaseGpuBuffer(uint32_t generation, int index, int fence_fd = -1);
 
   SoftwareFrame& frame() { return frame_; }
   TextInput& text_input() { return text_input_; }

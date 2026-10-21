@@ -10,6 +10,10 @@
 // enabled, the engine draws straight into a ring of textures exported as
 // DRM dmabufs, and a frame is just the index of the buffer it is in; a client
 // that imports them gets the frame without a copy.
+//
+// Where EGL has native fences, a frame leaves with a fence in place of a
+// glFinish, and a buffer comes back with one the client made after its last
+// use of it, waited on before the engine draws there again.
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
@@ -41,9 +45,12 @@ class GlRenderer {
  public:
   using FrameCallback = std::function<void(const void* pixels, size_t row_bytes,
                                            size_t height)>;
-  // A frame drawn into pool buffer |index| of |generation|.
+  // A frame drawn into pool buffer |index| of |generation|; |fence_fd| is
+  // signalled when the draw is done, -1 when the draw was waited for
+  // instead. The callback owns the descriptor.
   using GpuFrameCallback = std::function<void(uint32_t generation, int index,
-                                              size_t width, size_t height)>;
+                                              size_t width, size_t height,
+                                              int fence_fd)>;
 
   bool Init(std::string* error);
   void Shutdown();
@@ -64,6 +71,8 @@ class GlRenderer {
   const std::string& description() const { return description_; }
   // Whether this display exports textures as dmabufs.
   bool can_export() const { return can_export_; }
+  // Whether frames leave with a native fence rather than a glFinish.
+  bool has_fences() const { return has_fences_; }
 
   // Draw into a ring of |count| exported buffers from the next frame on,
   // while there is a free one. False, with why, when the display cannot
@@ -76,7 +85,9 @@ class GlRenderer {
   // The current set, false when the pool is off or not yet built.
   bool pool_set(GpuBufferSet* out) const;
   // The client is done with the buffer; a stale generation is ignored.
-  void Release(uint32_t generation, int index);
+  // |fence_fd|, when not -1, is signalled once the client's last use of the
+  // buffer is done; the renderer owns it from here.
+  void Release(uint32_t generation, int index, int fence_fd = -1);
 
  private:
   struct Buffer {
@@ -86,9 +97,16 @@ class GlRenderer {
     uint32_t stride = 0;
     uint32_t offset = 0;
     bool busy = false;
+    // The client's fence for its last use, waited on before the next draw.
+    int fence = -1;
   };
 
   bool EnsureSize(size_t width, size_t height);
+  // A native fence for the drawing issued so far, -1 when there is none.
+  // Context current.
+  int ExportFence();
+  // Makes the context wait for |fence_fd| (owned from here). Context current.
+  void WaitFence(int fence_fd);
   // Context current, mutex held.
   bool BuildPool(size_t width, size_t height);
   void DestroyPool();
@@ -111,6 +129,13 @@ class GlRenderer {
   PFNEGLDESTROYIMAGEKHRPROC destroy_image_ = nullptr;
   PFNEGLEXPORTDMABUFIMAGEQUERYMESAPROC export_query_ = nullptr;
   PFNEGLEXPORTDMABUFIMAGEMESAPROC export_image_ = nullptr;
+  bool has_fences_ = false;
+  bool has_wait_sync_ = false;
+  PFNEGLCREATESYNCKHRPROC create_sync_ = nullptr;
+  PFNEGLDESTROYSYNCKHRPROC destroy_sync_ = nullptr;
+  PFNEGLCLIENTWAITSYNCKHRPROC client_wait_sync_ = nullptr;
+  PFNEGLWAITSYNCKHRPROC wait_sync_ = nullptr;
+  PFNEGLDUPNATIVEFENCEFDANDROIDPROC dup_fence_ = nullptr;
 
   mutable std::mutex mutex_;
   bool pool_wanted_ = false;

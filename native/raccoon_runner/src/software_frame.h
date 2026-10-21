@@ -47,10 +47,14 @@ class SoftwareFrame {
     size_t width = 0;
     size_t height = 0;
     size_t sequence = 0;
+    // Signalled when the draw is done; -1 when it was waited for. Whoever
+    // takes the frame owns it.
+    int fence_fd = -1;
   };
   // A GPU buffer frame was drawn; from the raster thread. A pending one not
   // yet sent is superseded and its buffer released through the callback.
-  void PresentGpu(uint32_t generation, int index, size_t width, size_t height);
+  void PresentGpu(uint32_t generation, int index, size_t width, size_t height,
+                  int fence_fd);
   bool TakeGpu(Gpu* out);
   void SetGpuReleaseCallback(std::function<void(uint32_t, int)> callback) {
     release_gpu_ = std::move(callback);
