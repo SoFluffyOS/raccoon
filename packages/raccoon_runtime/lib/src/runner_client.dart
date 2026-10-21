@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:io' as io show pid;
 import 'dart:typed_data';
 
 import 'package:raccoon/raccoon.dart';
@@ -25,7 +26,7 @@ final class RunnerClient implements RunnerConnection {
     send(
       ClientMessage(
         hello: ClientHello(
-          pid: pid,
+          pid: io.pid,
           protocolVersion: RaccoonProtocol.version,
           clientName: 'raccoon_runtime',
           sharedBuffers: _transport.receivesHandles,

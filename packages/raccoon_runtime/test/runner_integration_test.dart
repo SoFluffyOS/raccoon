@@ -413,6 +413,10 @@ void main() {
       final first = await RunnerClient.connect(endpoint);
       try {
         await first.hello.timeout(const Duration(seconds: 10));
+        // The runner says hello before it reads the client's; give it time
+        // to learn the first client's pid.
+        await first.frames.first.timeout(const Duration(seconds: 15));
+        await Future<void>.delayed(const Duration(milliseconds: 200));
         Object? failure;
         RunnerClient? second;
         try {

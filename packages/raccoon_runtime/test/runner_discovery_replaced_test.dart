@@ -8,7 +8,7 @@ void main() {
   test('a runner replaced under the same path is a change', () async {
     final temp = Directory.systemTemp.createTempSync('raccoon_discovery');
     final discovery = RunnerDiscovery(
-      directory: temp.path,
+      temp.path,
       pollInterval: const Duration(milliseconds: 50),
     );
     final events = <List<UnixSocketEndpoint>>[];
