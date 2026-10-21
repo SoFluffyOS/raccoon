@@ -47,7 +47,9 @@ void main() {
     await _until(() => seen.any((names) => names.contains('app')));
 
     await server.close();
-    File(p.join(discovery.directory, 'app.sock')).deleteSync();
+    // Closing the server removes the socket file on Linux; be sure.
+    final socketFile = File(p.join(discovery.directory, 'app.sock'));
+    if (socketFile.existsSync()) socketFile.deleteSync();
     await _until(() => seen.last.isEmpty);
     await subscription.cancel();
   });
