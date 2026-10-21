@@ -16,7 +16,8 @@ typedef PlatformChannelHandler = Future<Uint8List?> Function(Uint8List data);
 
 /// A connection to one runner: frames, logs and platform messages in; resize,
 /// input and platform replies out.
-final class RunnerClient implements RunnerConnection, ComposingConnection {
+final class RunnerClient
+    implements RunnerConnection, ComposingConnection, GpuBufferConnection {
   RunnerClient._(
     this._transport, {
     required this.composes,
@@ -60,14 +61,17 @@ final class RunnerClient implements RunnerConnection, ComposingConnection {
   /// indices ([Frame.inGpuBuffer]) with no pixels, and the buffers' file
   /// descriptors are served on the runner's GPU socket
   /// ([GpuBuffers.socket]) for the host's native side to import.
+  @override
   final bool gpuBuffers;
 
   GpuBuffers? _latestGpuBuffers;
 
   /// The current set of GPU buffers, once the runner described it.
+  @override
   GpuBuffers? get latestGpuBuffers => _latestGpuBuffers;
 
   /// Each set of GPU buffers as the runner describes it, the latest first.
+  @override
   Stream<GpuBuffers> get gpuBufferSets async* {
     if (_latestGpuBuffers case final set?) yield set;
     yield* messages
@@ -76,6 +80,7 @@ final class RunnerClient implements RunnerConnection, ComposingConnection {
   }
 
   /// Gives a GPU buffer back to the runner once the host is done with it.
+  @override
   void releaseGpuBuffer(int generation, int index) => send(
     ClientMessage(
       releaseBuffer: ReleaseBuffer(index: index, generation: generation),

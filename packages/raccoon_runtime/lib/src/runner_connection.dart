@@ -29,3 +29,18 @@ abstract interface class ComposingConnection implements RunnerConnection {
 
   void sendTextEditing(TextEditing editing);
 }
+
+/// A connection that can carry GPU buffers: frames arrive as buffer indices
+/// and the host's native side shows them from the runner's GPU socket. Only
+/// a client that said so in its hello ([gpuBuffers]) gets them.
+abstract interface class GpuBufferConnection implements RunnerConnection {
+  bool get gpuBuffers;
+
+  /// Each set of GPU buffers as the runner describes it, the latest first.
+  Stream<GpuBuffers> get gpuBufferSets;
+
+  GpuBuffers? get latestGpuBuffers;
+
+  /// Gives a GPU buffer back to the runner once the host is done with it.
+  void releaseGpuBuffer(int generation, int index);
+}
