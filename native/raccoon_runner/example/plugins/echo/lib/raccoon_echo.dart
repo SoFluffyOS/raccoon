@@ -7,4 +7,8 @@ abstract final class RaccoonEcho {
 
   static Future<String?> echo(String text) =>
       _channel.invokeMethod<String>('echo', text);
+
+  /// A texture of one colour, orange, registered by the plugin; its id for
+  /// a [Texture] widget. Fails where the host takes no texture.
+  static Future<int?> texture() => _channel.invokeMethod<int>('texture');
 }
