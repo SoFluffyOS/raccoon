@@ -416,8 +416,10 @@ from urllib.parse import unquote, urlparse
 config, out, virtual, cache, runner_version, arch, engine_dir, prebuilt_url = sys.argv[1:9]
 virtual = set(virtual.split())
 dart_tool = os.path.dirname(os.path.abspath(config))
-# The framework the pods link against, as the SDK's local podspec vends it.
-flutter_framework = os.path.join(engine_dir, 'FlutterMacOS.framework', 'FlutterMacOS')
+# What flutter precache --macos ships: the xcframework, no podspec (one in
+# an SDK's cache is a leftover of older flows, as is a bare framework).
+xcframework = os.path.join(engine_dir, 'FlutterMacOS.xcframework')
+flutter_framework = os.path.join(xcframework, 'macos-arm64_x86_64', 'FlutterMacOS.framework', 'FlutterMacOS')
 env = dict(os.environ, LANG='en_US.UTF-8', LC_ALL='en_US.UTF-8')
 
 
@@ -456,7 +458,7 @@ def can_build():
     if subprocess.run(['xcodebuild', '-version'], stdout=subprocess.DEVNULL,
                       stderr=subprocess.DEVNULL).returncode != 0:
         return 'no Xcode (xcodebuild)'
-    if not os.path.isfile(os.path.join(engine_dir, 'FlutterMacOS.podspec')):
+    if not os.path.isfile(flutter_framework):
         return 'no FlutterMacOS in the SDK (flutter precache --macos)'
     return None
 
@@ -582,6 +584,23 @@ if misses:
     log_path = os.path.join(pods, 'pod-install.log')
     if toolchain is None:
         os.makedirs(pods, exist_ok=True)
+        # FlutterMacOS as a pod of our own, vending the SDK's xcframework.
+        flutter_pod = os.path.join(pods, 'FlutterMacOS')
+        os.makedirs(flutter_pod, exist_ok=True)
+        if not os.path.lexists(os.path.join(flutter_pod, 'FlutterMacOS.xcframework')):
+            os.symlink(xcframework, os.path.join(flutter_pod, 'FlutterMacOS.xcframework'))
+        with open(os.path.join(flutter_pod, 'FlutterMacOS.podspec'), 'w') as f:
+            f.write("Pod::Spec.new do |s|\n"
+                    "  s.name = 'FlutterMacOS'\n"
+                    "  s.version = '1.0.0'\n"
+                    "  s.summary = 'FlutterMacOS from the Flutter SDK, for plugins to link.'\n"
+                    "  s.homepage = 'https://flutter.dev'\n"
+                    "  s.license = { :type => 'BSD' }\n"
+                    "  s.author = 'Flutter'\n"
+                    "  s.source = { :path => '.' }\n"
+                    "  s.osx.deployment_target = '10.15'\n"
+                    "  s.vendored_frameworks = 'FlutterMacOS.xcframework'\n"
+                    "end\n")
         # Every package by its bare name, as Flutter's own macOS build lays
         # them out: podspecs find their siblings that way (FlutterFire's read
         # the SDK version from ../../firebase_core).
@@ -611,7 +630,7 @@ if misses:
             # the pods that name no Swift version.
             f.write("use_frameworks!\ntarget 'Host' do\n"
                     "  current_target_definition.swift_version = '5.0'\n")
-            f.write("  pod 'FlutterMacOS', :path => %s\n" % json.dumps(engine_dir))
+            f.write("  pod 'FlutterMacOS', :path => 'FlutterMacOS'\n")
             for plugin in misses:
                 linked = os.path.join('.symlinks', 'plugins', plugin['name'], os.path.basename(plugin['sources']))
                 f.write("  pod %s, :path => %s\n" % (json.dumps(plugin['name']), json.dumps(linked)))
@@ -642,7 +661,8 @@ if misses:
             continue
         cached = os.path.join(cache, plugin['key'])
         release = os.path.join(symroot, 'Release')
-        made = [(d, f) for d in sorted(os.listdir(release)) if d != 'FlutterMacOS'
+        made = [(d, f) for d in sorted(os.listdir(release))
+                if d not in ('FlutterMacOS', 'XCFrameworkIntermediates')
                 for f in frameworks(os.path.join(release, d))] if os.path.isdir(release) else []
         if not any(f == name + '.framework' for _, f in made):
             empty.append(name)
