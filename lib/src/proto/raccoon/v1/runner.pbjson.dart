@@ -26,6 +26,9 @@ const PointerPhase$json = {
     {'1': 'POINTER_PHASE_DOWN', '2': 4},
     {'1': 'POINTER_PHASE_MOVE', '2': 5},
     {'1': 'POINTER_PHASE_UP', '2': 6},
+    {'1': 'POINTER_PHASE_PAN_ZOOM_START', '2': 7},
+    {'1': 'POINTER_PHASE_PAN_ZOOM_UPDATE', '2': 8},
+    {'1': 'POINTER_PHASE_PAN_ZOOM_END', '2': 9},
   ],
 };
 
@@ -34,7 +37,9 @@ final $typed_data.Uint8List pointerPhaseDescriptor = $convert.base64Decode(
     'CgxQb2ludGVyUGhhc2USHQoZUE9JTlRFUl9QSEFTRV9VTlNQRUNJRklFRBAAEhUKEVBPSU5URV'
     'JfUEhBU0VfQUREEAESGAoUUE9JTlRFUl9QSEFTRV9SRU1PVkUQAhIXChNQT0lOVEVSX1BIQVNF'
     'X0hPVkVSEAMSFgoSUE9JTlRFUl9QSEFTRV9ET1dOEAQSFgoSUE9JTlRFUl9QSEFTRV9NT1ZFEA'
-    'USFAoQUE9JTlRFUl9QSEFTRV9VUBAG');
+    'USFAoQUE9JTlRFUl9QSEFTRV9VUBAGEiAKHFBPSU5URVJfUEhBU0VfUEFOX1pPT01fU1RBUlQQ'
+    'BxIhCh1QT0lOVEVSX1BIQVNFX1BBTl9aT09NX1VQREFURRAIEh4KGlBPSU5URVJfUEhBU0VfUE'
+    'FOX1pPT01fRU5EEAk=');
 
 @$core.Deprecated('Use pointerDeviceDescriptor instead')
 const PointerDevice$json = {
@@ -43,13 +48,15 @@ const PointerDevice$json = {
     {'1': 'POINTER_DEVICE_UNSPECIFIED', '2': 0},
     {'1': 'POINTER_DEVICE_MOUSE', '2': 1},
     {'1': 'POINTER_DEVICE_TOUCH', '2': 2},
+    {'1': 'POINTER_DEVICE_TRACKPAD', '2': 3},
   ],
 };
 
 /// Descriptor for `PointerDevice`. Decode as a `google.protobuf.EnumDescriptorProto`.
 final $typed_data.Uint8List pointerDeviceDescriptor = $convert.base64Decode(
     'Cg1Qb2ludGVyRGV2aWNlEh4KGlBPSU5URVJfREVWSUNFX1VOU1BFQ0lGSUVEEAASGAoUUE9JTl'
-    'RFUl9ERVZJQ0VfTU9VU0UQARIYChRQT0lOVEVSX0RFVklDRV9UT1VDSBAC');
+    'RFUl9ERVZJQ0VfTU9VU0UQARIYChRQT0lOVEVSX0RFVklDRV9UT1VDSBACEhsKF1BPSU5URVJf'
+    'REVWSUNFX1RSQUNLUEFEEAM=');
 
 @$core.Deprecated('Use keyKindDescriptor instead')
 const KeyKind$json = {
@@ -178,6 +185,10 @@ const PointerEvent$json = {
     {'1': 'timestamp_micros', '3': 7, '4': 1, '5': 4, '10': 'timestampMicros'},
     {'1': 'scroll_delta_x', '3': 8, '4': 1, '5': 1, '10': 'scrollDeltaX'},
     {'1': 'scroll_delta_y', '3': 9, '4': 1, '5': 1, '10': 'scrollDeltaY'},
+    {'1': 'pan_x', '3': 10, '4': 1, '5': 1, '10': 'panX'},
+    {'1': 'pan_y', '3': 11, '4': 1, '5': 1, '10': 'panY'},
+    {'1': 'scale', '3': 12, '4': 1, '5': 1, '10': 'scale'},
+    {'1': 'rotation', '3': 13, '4': 1, '5': 1, '10': 'rotation'},
   ],
 };
 
@@ -188,7 +199,9 @@ final $typed_data.Uint8List pointerEventDescriptor = $convert.base64Decode(
     'dHRvbnMSMQoGZGV2aWNlGAUgASgOMhkucmFjY29vbi52MS5Qb2ludGVyRGV2aWNlUgZkZXZpY2'
     'USHQoKcG9pbnRlcl9pZBgGIAEoBVIJcG9pbnRlcklkEikKEHRpbWVzdGFtcF9taWNyb3MYByAB'
     'KARSD3RpbWVzdGFtcE1pY3JvcxIkCg5zY3JvbGxfZGVsdGFfeBgIIAEoAVIMc2Nyb2xsRGVsdG'
-    'FYEiQKDnNjcm9sbF9kZWx0YV95GAkgASgBUgxzY3JvbGxEZWx0YVk=');
+    'FYEiQKDnNjcm9sbF9kZWx0YV95GAkgASgBUgxzY3JvbGxEZWx0YVkSEwoFcGFuX3gYCiABKAFS'
+    'BHBhblgSEwoFcGFuX3kYCyABKAFSBHBhblkSFAoFc2NhbGUYDCABKAFSBXNjYWxlEhoKCHJvdG'
+    'F0aW9uGA0gASgBUghyb3RhdGlvbg==');
 
 @$core.Deprecated('Use keyEventDescriptor instead')
 const KeyEvent$json = {

@@ -308,6 +308,10 @@ class PointerEvent extends $pb.GeneratedMessage {
     $fixnum.Int64? timestampMicros,
     $core.double? scrollDeltaX,
     $core.double? scrollDeltaY,
+    $core.double? panX,
+    $core.double? panY,
+    $core.double? scale,
+    $core.double? rotation,
   }) {
     final result = PointerEvent._();
     if (phase != null) result.phase = phase;
@@ -319,6 +323,10 @@ class PointerEvent extends $pb.GeneratedMessage {
     if (timestampMicros != null) result.timestampMicros = timestampMicros;
     if (scrollDeltaX != null) result.scrollDeltaX = scrollDeltaX;
     if (scrollDeltaY != null) result.scrollDeltaY = scrollDeltaY;
+    if (panX != null) result.panX = panX;
+    if (panY != null) result.panY = panY;
+    if (scale != null) result.scale = scale;
+    if (rotation != null) result.rotation = rotation;
     return result;
   }
 
@@ -348,6 +356,10 @@ class PointerEvent extends $pb.GeneratedMessage {
         defaultOrMaker: $fixnum.Int64.ZERO)
     ..aD(8, _omitFieldNames ? '' : 'scrollDeltaX')
     ..aD(9, _omitFieldNames ? '' : 'scrollDeltaY')
+    ..aD(10, _omitFieldNames ? '' : 'panX')
+    ..aD(11, _omitFieldNames ? '' : 'panY')
+    ..aD(12, _omitFieldNames ? '' : 'scale')
+    ..aD(13, _omitFieldNames ? '' : 'rotation')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -453,6 +465,44 @@ class PointerEvent extends $pb.GeneratedMessage {
   $core.bool hasScrollDeltaY() => $_has(8);
   @$pb.TagNumber(9)
   void clearScrollDeltaY() => $_clearField(9);
+
+  /// Pan-zoom phases only: the pan since the gesture began, in frame pixels,
+  /// the scale (1 is none) and the rotation in radians.
+  @$pb.TagNumber(10)
+  $core.double get panX => $_getN(9);
+  @$pb.TagNumber(10)
+  set panX($core.double value) => $_setDouble(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasPanX() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearPanX() => $_clearField(10);
+
+  @$pb.TagNumber(11)
+  $core.double get panY => $_getN(10);
+  @$pb.TagNumber(11)
+  set panY($core.double value) => $_setDouble(10, value);
+  @$pb.TagNumber(11)
+  $core.bool hasPanY() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearPanY() => $_clearField(11);
+
+  @$pb.TagNumber(12)
+  $core.double get scale => $_getN(11);
+  @$pb.TagNumber(12)
+  set scale($core.double value) => $_setDouble(11, value);
+  @$pb.TagNumber(12)
+  $core.bool hasScale() => $_has(11);
+  @$pb.TagNumber(12)
+  void clearScale() => $_clearField(12);
+
+  @$pb.TagNumber(13)
+  $core.double get rotation => $_getN(12);
+  @$pb.TagNumber(13)
+  set rotation($core.double value) => $_setDouble(12, value);
+  @$pb.TagNumber(13)
+  $core.bool hasRotation() => $_has(12);
+  @$pb.TagNumber(13)
+  void clearRotation() => $_clearField(13);
 }
 
 class KeyEvent extends $pb.GeneratedMessage {

@@ -1,3 +1,7 @@
+## 0.7.0
+
+- `PointerPhase` gains `PAN_ZOOM_START`, `PAN_ZOOM_UPDATE` and `PAN_ZOOM_END`, `PointerEvent` gains `pan_x`, `pan_y`, `scale` and `rotation`, and `PointerDevice` gains `TRACKPAD`: a trackpad gesture reaches the app as the pan-zoom events the framework delivers it as, so two-finger scrolling works.
+
 ## 0.6.0
 
 - `Plugins`: what became of the project's native plugins on the runner's host, one `PluginReport` per plugin: loaded, failed, built nothing, no implementation for this host, or answered by the runner itself. Sent after `RunnerHello`.

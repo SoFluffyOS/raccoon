@@ -30,6 +30,17 @@ class PointerPhase extends $pb.ProtobufEnum {
   static const PointerPhase POINTER_PHASE_UP =
       PointerPhase._(6, _omitEnumNames ? '' : 'POINTER_PHASE_UP');
 
+  /// A trackpad gesture: two-finger scrolling, pinching, rotating. The
+  /// framework delivers these as pan-zoom events, not as scroll signals, so
+  /// the runner forwards them as such and the app's scrollables treat them
+  /// as the drags they are, momentum included.
+  static const PointerPhase POINTER_PHASE_PAN_ZOOM_START =
+      PointerPhase._(7, _omitEnumNames ? '' : 'POINTER_PHASE_PAN_ZOOM_START');
+  static const PointerPhase POINTER_PHASE_PAN_ZOOM_UPDATE =
+      PointerPhase._(8, _omitEnumNames ? '' : 'POINTER_PHASE_PAN_ZOOM_UPDATE');
+  static const PointerPhase POINTER_PHASE_PAN_ZOOM_END =
+      PointerPhase._(9, _omitEnumNames ? '' : 'POINTER_PHASE_PAN_ZOOM_END');
+
   static const $core.List<PointerPhase> values = <PointerPhase>[
     POINTER_PHASE_UNSPECIFIED,
     POINTER_PHASE_ADD,
@@ -38,10 +49,13 @@ class PointerPhase extends $pb.ProtobufEnum {
     POINTER_PHASE_DOWN,
     POINTER_PHASE_MOVE,
     POINTER_PHASE_UP,
+    POINTER_PHASE_PAN_ZOOM_START,
+    POINTER_PHASE_PAN_ZOOM_UPDATE,
+    POINTER_PHASE_PAN_ZOOM_END,
   ];
 
   static final $core.List<PointerPhase?> _byValue =
-      $pb.ProtobufEnum.$_initByValueList(values, 6);
+      $pb.ProtobufEnum.$_initByValueList(values, 9);
   static PointerPhase? valueOf($core.int value) =>
       value < 0 || value >= _byValue.length ? null : _byValue[value];
 
@@ -55,15 +69,18 @@ class PointerDevice extends $pb.ProtobufEnum {
       PointerDevice._(1, _omitEnumNames ? '' : 'POINTER_DEVICE_MOUSE');
   static const PointerDevice POINTER_DEVICE_TOUCH =
       PointerDevice._(2, _omitEnumNames ? '' : 'POINTER_DEVICE_TOUCH');
+  static const PointerDevice POINTER_DEVICE_TRACKPAD =
+      PointerDevice._(3, _omitEnumNames ? '' : 'POINTER_DEVICE_TRACKPAD');
 
   static const $core.List<PointerDevice> values = <PointerDevice>[
     POINTER_DEVICE_UNSPECIFIED,
     POINTER_DEVICE_MOUSE,
     POINTER_DEVICE_TOUCH,
+    POINTER_DEVICE_TRACKPAD,
   ];
 
   static final $core.List<PointerDevice?> _byValue =
-      $pb.ProtobufEnum.$_initByValueList(values, 2);
+      $pb.ProtobufEnum.$_initByValueList(values, 3);
   static PointerDevice? valueOf($core.int value) =>
       value < 0 || value >= _byValue.length ? null : _byValue[value];
 
