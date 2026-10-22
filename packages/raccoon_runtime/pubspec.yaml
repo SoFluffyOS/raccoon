@@ -1,0 +1,20 @@
+name: raccoon_runtime
+description: Host side of the Raccoon runtime for Lumide. Runtime store, runner process management, frame and input client. Pure Dart.
+publish_to: "none"
+
+environment:
+  sdk: ^3.6.0
+
+resolution: workspace
+
+dependencies:
+  archive: ^4.0.7
+  fixnum: ^1.1.0
+  path: ^1.9.1
+  protobuf: ^6.1.0
+  raccoon:
+    path: ../../pub_packages/raccoon
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.0
