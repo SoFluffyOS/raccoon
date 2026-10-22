@@ -102,12 +102,16 @@ plugin_headers() {
 
 # Builds a project's native plugins into |out| and writes |out|/manifest.json
 # for the runner's --plugins. The plugins are the resolved packages
-# (.dart_tool/package_config.json) whose pubspec names a Linux pluginClass,
-# as the Flutter tool finds them; built in one CMake project with what the
-# desktop template gives a plugin. When it cannot, says why and leaves no
-# manifest; the app then sees no plugin.
+# (.dart_tool/package_config.json) whose pubspec names a Linux pluginClass
+# (registered) or ffiPlugin (its libraries only), as the Flutter tool finds
+# them. Each builds in its own CMake project with what the desktop template
+# gives a plugin, so one that fails sinks nothing else; what builds is kept
+# in a cache by plugin version and engine, so the next install copies.
+# Every library lands flat in |out|/lib, which run puts on the runner's
+# library path for the FFI ones. When it cannot build at all, says why and
+# leaves no manifest; the app then sees no plugin.
 build_plugins() {
-  local project="$1" out="$2" lib headers need count
+  local project="$1" out="$2" lib headers need engine
   rm -rf "$out"
   [ "$(uname -s)" = Linux ] || return 0
   [ -f "$project/.dart_tool/package_config.json" ] || return 0
@@ -127,88 +131,148 @@ build_plugins() {
     echo "raccoon-device: no gtk+-3.0 development files; native plugins skipped" >&2
     return 0
   fi
-  mkdir -p "$out"
-  count="$(python3 - "$project/.dart_tool/package_config.json" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS" <<'PY'
-import json, os, re, sys
+  engine="$(basename "$(dirname "$("$ROOT/tool/engine_dir.sh")")")"
+  python3 - "$project/.dart_tool/package_config.json" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS" \
+    "${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/$engine" <<'PY'
+import glob, hashlib, json, os, re, shutil, subprocess, sys
 from urllib.parse import unquote, urlparse
-config, out, lib, headers, virtual = sys.argv[1:6]
+
+config, out, lib, headers, virtual, cache = sys.argv[1:7]
 virtual = set(virtual.split())
 dart_tool = os.path.dirname(os.path.abspath(config))
-plugins = []
+
+PREAMBLE = """cmake_minimum_required(VERSION 3.14)
+project(raccoon_plugin LANGUAGES CXX)
+set(CMAKE_BUILD_TYPE Release)
+function(APPLY_STANDARD_SETTINGS TARGET)
+  target_compile_features(${TARGET} PUBLIC cxx_std_14)
+  target_compile_options(${TARGET} PRIVATE -Wall -Werror)
+  target_compile_options(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:-O3>")
+  target_compile_definitions(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:NDEBUG>")
+endfunction()
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0)
+pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0)
+pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)
+add_library(flutter INTERFACE)
+target_include_directories(flutter INTERFACE "%s")
+target_link_libraries(flutter INTERFACE "%s" PkgConfig::GTK PkgConfig::GLIB PkgConfig::GIO)
+""" % (headers, lib)
+
+
+def linux_block(pubspec):
+    found = re.search(r'^([ \t]*)linux:[ \t]*\n', pubspec, re.M)
+    if not found:
+        return ''
+    indent = len(found.group(1))
+    block = []
+    for line in pubspec[found.end():].splitlines():
+        if not line.strip():
+            continue
+        if len(line) - len(line.lstrip()) <= indent:
+            break
+        block.append(line)
+    return '\n'.join(block)
+
+
+def version_key(name, root):
+    # A pub package is its directory name, name-version; a path package is
+    # the shape of its linux/ directory, so an edit rebuilds it.
+    if os.sep + '.pub-cache' + os.sep in root + os.sep:
+        return os.path.basename(root.rstrip(os.sep))
+    digest = hashlib.sha256()
+    for dirpath, _, files in sorted(os.walk(os.path.join(root, 'linux'))):
+        for f in sorted(files):
+            full = os.path.join(dirpath, f)
+            st = os.stat(full)
+            digest.update(('%s %d %d\n' % (os.path.relpath(full, root), st.st_size, int(st.st_mtime))).encode())
+    return '%s-path-%s' % (name, digest.hexdigest()[:16])
+
+
+# A rebuilt library is a rebuilt key: the ABI does not change, but the
+# rebuild is cheap and the question never comes up.
+lib_stamp = '%d' % int(os.stat(lib).st_mtime)
+
+wanted = []
 for package in json.load(open(config)).get('packages', []):
     uri = package.get('rootUri', '')
-    if uri.startswith('file://'):
-        root = unquote(urlparse(uri).path)
-    else:
-        root = os.path.normpath(os.path.join(dart_tool, uri))
-    if os.path.isfile(os.path.join(root, 'pubspec.yaml')):
-        plugins.append({'name': package['name'], 'path': root})
-lines = [
-    'cmake_minimum_required(VERSION 3.14)',
-    'project(raccoon_plugins LANGUAGES CXX)',
-    'set(CMAKE_BUILD_TYPE Release)',
-    'function(APPLY_STANDARD_SETTINGS TARGET)',
-    '  target_compile_features(${TARGET} PUBLIC cxx_std_14)',
-    '  target_compile_options(${TARGET} PRIVATE -Wall -Werror)',
-    '  target_compile_options(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:-O3>")',
-    '  target_compile_definitions(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:NDEBUG>")',
-    'endfunction()',
-    'find_package(PkgConfig REQUIRED)',
-    'pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0)',
-    'pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0)',
-    'pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)',
-    'add_library(flutter INTERFACE)',
-    'target_include_directories(flutter INTERFACE "%s")' % headers,
-    'target_link_libraries(flutter INTERFACE "%s" PkgConfig::GTK PkgConfig::GLIB PkgConfig::GIO)' % lib,
-]
-wanted = []
-for plugin in plugins:
-    name, path = plugin['name'], plugin['path']
-    if name in virtual:
+    root = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, uri))
+    pubspec_path = os.path.join(root, 'pubspec.yaml')
+    if not os.path.isfile(pubspec_path) or package['name'] in virtual:
         continue
-    pubspec = open(os.path.join(path, 'pubspec.yaml')).read()
+    pubspec = open(pubspec_path).read()
     if not re.search(r'^\s+plugin:\s*$', pubspec, re.M):
         continue
-    found = re.search(r'^([ \t]*)linux:[ \t]*\n', pubspec, re.M)
-    block = []
-    if found:
-        indent = len(found.group(1))
-        for line in pubspec[found.end():].splitlines():
-            if not line.strip():
-                continue
-            if len(line) - len(line.lstrip()) <= indent:
-                break
-            block.append(line)
-    cls = re.search(r'pluginClass:\s*(\w+)', '\n'.join(block))
-    if cls is None:
-        continue  # an FFI plugin, or Dart only on Linux: nothing to register
-    symbol = re.sub(r'(?<!^)(?=[A-Z])', '_', cls.group(1)).lower() + '_register_with_registrar'
-    lines.append('add_subdirectory("%s" "plugins/%s")' % (os.path.join(path, 'linux'), name))
-    wanted.append({'name': name, 'symbol': symbol})
-open(os.path.join(out, 'CMakeLists.txt'), 'w').write('\n'.join(lines) + '\n')
-json.dump(wanted, open(os.path.join(out, 'wanted.json'), 'w'))
-print(len(wanted))
-PY
-)"
-  if [ "$count" = 0 ]; then
-    rm -rf "$out"
-    return 0
-  fi
-  if ! cmake -S "$out" -B "$out/build" -G Ninja > "$out/build.log" 2>&1 ||
-     ! cmake --build "$out/build" >> "$out/build.log" 2>&1; then
-    echo "raccoon-device: native plugins did not build; see $out/build.log" >&2
-    return 0
-  fi
-  python3 - "$out" <<'PY'
-import glob, json, os, sys
-out = sys.argv[1]
+    block = linux_block(pubspec)
+    cls = re.search(r'pluginClass:\s*(\w+)', block)
+    ffi = re.search(r'ffiPlugin:\s*true', block) is not None
+    if cls is None and not ffi:
+        continue
+    if not os.path.isfile(os.path.join(root, 'linux', 'CMakeLists.txt')):
+        continue
+    symbol = None
+    if cls is not None:
+        symbol = re.sub(r'(?<!^)(?=[A-Z])', '_', cls.group(1)).lower() + '_register_with_registrar'
+    wanted.append({'name': package['name'], 'root': root, 'symbol': symbol,
+                   'key': version_key(package['name'], root) + '-' + lib_stamp})
+
+if not wanted:
+    sys.exit(0)
+
+os.makedirs(os.path.join(out, 'lib'), exist_ok=True)
+built, failed, empty, from_cache = [], [], [], []
 entries = []
-for plugin in json.load(open(os.path.join(out, 'wanted.json'))):
-    libs = glob.glob(os.path.join(out, 'build', 'plugins', plugin['name'], '*.so'))
+for plugin in wanted:
+    name = plugin['name']
+    cached = os.path.join(cache, plugin['key'])
+    libs = sorted(glob.glob(os.path.join(cached, '*.so')))
     if libs:
-        entries.append({'name': plugin['name'], 'library': libs[0], 'symbol': plugin['symbol']})
-json.dump({'plugins': entries}, open(os.path.join(out, 'manifest.json'), 'w'), indent=1)
-print('raccoon-device: %d native plugins built: %s' % (len(entries), ', '.join(e['name'] for e in entries)), file=sys.stderr)
+        from_cache.append(name)
+    else:
+        project = os.path.join(out, 'build', name)
+        os.makedirs(project, exist_ok=True)
+        with open(os.path.join(project, 'CMakeLists.txt'), 'w') as f:
+            f.write(PREAMBLE)
+            f.write('add_subdirectory("%s" "plugin")\n' % os.path.join(plugin['root'], 'linux'))
+        with open(os.path.join(project, 'build.log'), 'w') as log:
+            ok = subprocess.run(['cmake', '-S', project, '-B', os.path.join(project, 'out'), '-G', 'Ninja'],
+                                stdout=log, stderr=subprocess.STDOUT).returncode == 0
+            ok = ok and subprocess.run(['cmake', '--build', os.path.join(project, 'out')],
+                                       stdout=log, stderr=subprocess.STDOUT).returncode == 0
+        libs = sorted(glob.glob(os.path.join(project, 'out', 'plugin', '**', '*.so'), recursive=True)) if ok else []
+        if not ok:
+            failed.append('%s (see %s)' % (name, os.path.join(project, 'build.log')))
+            continue
+        if not libs:
+            # Built fine and made nothing: an FFI plugin whose library wants
+            # a toolchain this machine has not (jni without a JDK).
+            empty.append(name)
+            continue
+        os.makedirs(cached, exist_ok=True)
+        for so in libs:
+            shutil.copy2(so, cached)
+        libs = sorted(glob.glob(os.path.join(cached, '*.so')))
+        built.append(name)
+    for so in libs:
+        shutil.copy2(so, os.path.join(out, 'lib'))
+    if plugin['symbol'] is not None:
+        # The plugin's own library is the one named after it.
+        main = [so for so in libs if os.path.basename(so) == 'lib%s_plugin.so' % name] or libs
+        entries.append({'name': name, 'library': os.path.join(out, 'lib', os.path.basename(main[0])),
+                        'symbol': plugin['symbol']})
+
+json.dump({'plugins': entries, 'library_path': os.path.join(out, 'lib')},
+          open(os.path.join(out, 'manifest.json'), 'w'), indent=1)
+parts = []
+if built:
+    parts.append('%d built: %s' % (len(built), ', '.join(built)))
+if from_cache:
+    parts.append('%d from the cache: %s' % (len(from_cache), ', '.join(from_cache)))
+if empty:
+    parts.append('%d built nothing: %s' % (len(empty), ', '.join(empty)))
+if failed:
+    parts.append('%d failed: %s' % (len(failed), '; '.join(failed)))
+print('raccoon-device: native plugins, ' + '; '.join(parts), file=sys.stderr)
 PY
 }
 
@@ -237,6 +301,10 @@ case "$verb" in
     : > "$log"
     manifest="$APPS/$key/plugins/manifest.json"
     [ -f "$manifest" ] || manifest=""
+    # FFI plugins' libraries, opened by the Dart side by name.
+    if [ -d "$APPS/$key/plugins/lib" ]; then
+      export LD_LIBRARY_PATH="$APPS/$key/plugins/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
     # The tool passes its engine switches as one argument; split on spaces.
     # shellcheck disable=SC2068
     exec "$RUNNER" serve \
