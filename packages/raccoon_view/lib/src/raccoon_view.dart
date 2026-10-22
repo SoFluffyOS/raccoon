@@ -330,6 +330,9 @@ class _RaccoonViewState extends State<RaccoonView> {
             onPointerHover: _onPointer,
             onPointerCancel: _onPointer,
             onPointerSignal: _onPointer,
+            onPointerPanZoomStart: _onPointer,
+            onPointerPanZoomUpdate: _onPointer,
+            onPointerPanZoomEnd: _onPointer,
             behavior: HitTestBehavior.opaque,
             child: SizedBox.expand(
               child: Stack(

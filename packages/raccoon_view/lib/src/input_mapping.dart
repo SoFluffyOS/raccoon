@@ -4,8 +4,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:raccoon/raccoon.dart' as rc;
 
-/// Maps the framework's pointer events onto the runner protocol. Positions are
-/// local to the view and scaled by [pixelRatio] into the frame's pixels.
+/// Maps the framework's pointer events onto the runner protocol. Positions
+/// and pans are local to the view and scaled by [pixelRatio] into the
+/// frame's pixels. A trackpad gesture (two-finger scrolling, a pinch) comes
+/// as pan-zoom events and goes on as such: the app's scrollables treat it
+/// as the drag it is.
 rc.PointerEvent? toRunnerPointer(PointerEvent event, double pixelRatio) {
   final phase = switch (event) {
     PointerDownEvent() => rc.PointerPhase.POINTER_PHASE_DOWN,
@@ -14,16 +17,27 @@ rc.PointerEvent? toRunnerPointer(PointerEvent event, double pixelRatio) {
     PointerHoverEvent() => rc.PointerPhase.POINTER_PHASE_HOVER,
     PointerCancelEvent() => rc.PointerPhase.POINTER_PHASE_UP,
     PointerScrollEvent() => rc.PointerPhase.POINTER_PHASE_HOVER,
+    PointerPanZoomStartEvent() => rc.PointerPhase.POINTER_PHASE_PAN_ZOOM_START,
+    PointerPanZoomUpdateEvent() =>
+      rc.PointerPhase.POINTER_PHASE_PAN_ZOOM_UPDATE,
+    PointerPanZoomEndEvent() => rc.PointerPhase.POINTER_PHASE_PAN_ZOOM_END,
     _ => null,
   };
   if (phase == null) return null;
   final device = switch (event.kind) {
     PointerDeviceKind.touch => rc.PointerDevice.POINTER_DEVICE_TOUCH,
+    PointerDeviceKind.trackpad => rc.PointerDevice.POINTER_DEVICE_TRACKPAD,
     _ => rc.PointerDevice.POINTER_DEVICE_MOUSE,
   };
   final scroll = switch (event) {
     PointerScrollEvent(:final scrollDelta) => scrollDelta * pixelRatio,
     _ => Offset.zero,
+  };
+  // The pan is the whole of it since the gesture began, as the engine wants.
+  final (pan, scale, rotation) = switch (event) {
+    PointerPanZoomUpdateEvent(:final localPan, :final scale, :final rotation) =>
+      (localPan * pixelRatio, scale, rotation),
+    _ => (Offset.zero, 1.0, 0.0),
   };
   return rc.PointerEvent(
     phase: phase,
@@ -35,6 +49,10 @@ rc.PointerEvent? toRunnerPointer(PointerEvent event, double pixelRatio) {
     timestampMicros: Int64(event.timeStamp.inMicroseconds),
     scrollDeltaX: scroll.dx,
     scrollDeltaY: scroll.dy,
+    panX: pan.dx,
+    panY: pan.dy,
+    scale: scale,
+    rotation: rotation,
   );
 }
 

@@ -43,15 +43,16 @@ rc.TextField _field({
   int extent = 0,
   int composingBase = -1,
   int composingExtent = -1,
-}) => rc.TextField(
-  active: active,
-  text: text,
-  selectionBase: base,
-  selectionExtent: extent,
-  composingBase: composingBase,
-  composingExtent: composingExtent,
-  inputAction: 'TextInputAction.done',
-);
+}) =>
+    rc.TextField(
+      active: active,
+      text: text,
+      selectionBase: base,
+      selectionExtent: extent,
+      composingBase: composingBase,
+      composingExtent: composingExtent,
+      inputAction: 'TextInputAction.done',
+    );
 
 void main() {
   testWidgets(
