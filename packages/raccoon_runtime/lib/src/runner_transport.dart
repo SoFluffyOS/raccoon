@@ -40,7 +40,9 @@ final class RunnerTransport {
   final _pending = BytesBuilder(copy: false);
   late final StreamSubscription<RawSocketEvent> _subscription;
   var _closed = false;
+  var _runnerClosed = false;
   Completer<void>? _drained;
+  Completer<void>? _hungUp;
 
   Stream<Inbound> get inbound => _inbound.stream;
 
@@ -52,7 +54,10 @@ final class RunnerTransport {
 
   /// Sends what is still queued first (a Shutdown written right before
   /// this, above all), waiting up to [drain] for the socket to take it: a
-  /// runner that is gone never will.
+  /// runner that is gone never will. Then says it is done sending and reads
+  /// until the runner hangs up, again for up to [drain]: closing with the
+  /// runner's bytes unread makes Windows reset the connection, and a reset
+  /// throws away what the runner had not read yet, that Shutdown included.
   Future<void> close({Duration drain = const Duration(seconds: 2)}) async {
     if (_closed) return;
     _closed = true;
@@ -60,6 +65,15 @@ final class RunnerTransport {
       final drained = _drained = Completer<void>();
       _socket.writeEventsEnabled = true;
       await drained.future.timeout(drain, onTimeout: () {});
+    }
+    if (!_runnerClosed) {
+      final hungUp = _hungUp = Completer<void>();
+      try {
+        _socket.shutdown(SocketDirection.send);
+        await hungUp.future.timeout(drain, onTimeout: () {});
+      } on SocketException {
+        // Gone already.
+      }
     }
     await _subscription.cancel();
     await _socket.close();
@@ -89,11 +103,28 @@ final class RunnerTransport {
         _flush();
       case RawSocketEvent.readClosed:
       case RawSocketEvent.closed:
+        _runnerClosed = true;
+        if (_hungUp case final hungUp? when !hungUp.isCompleted) {
+          hungUp.complete();
+        }
         unawaited(close());
     }
   }
 
   void _read() {
+    // Closing: what still comes is read only so the runner can hang up.
+    if (_closed) {
+      if (!receivesHandles) {
+        _socket.read();
+        return;
+      }
+      for (final control in _socket.readMessage()?.controlMessages ?? []) {
+        for (final handle in control.extractHandles()) {
+          handle.toFile().closeSync();
+        }
+      }
+      return;
+    }
     if (!receivesHandles) {
       final bytes = _socket.read();
       if (bytes != null) _inbound.add(Inbound(bytes, const []));
