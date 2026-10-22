@@ -39,5 +39,16 @@ cp "$ROOT/tool/raccoon-device" "$ROOT/tool/engine_dir.sh" "$STAGE/tool/"
 cp "$ROOT/VERSION" "$ROOT/LICENSE" "$STAGE/"
 chmod 755 "$STAGE/raccoon_runner" "$STAGE/tool/"*
 # No AppleDouble (._*) entries from macOS's tar.
-COPYFILE_DISABLE=1 tar -C "$STAGE" -czf "$OUT/$NAME.tar.gz" raccoon_runner tool VERSION LICENSE
+CONTENTS="raccoon_runner tool VERSION LICENSE"
+# The plugin-facing library and its headers, where the runner was built
+# with them: a project's native plugins build against these.
+if [ -f "$ROOT/build/libflutter_linux_gtk.so" ]; then
+  cp "$ROOT/build/libflutter_linux_gtk.so" "$STAGE/"
+  mkdir -p "$STAGE/include"
+  cp -r "$ROOT/third_party/flutter_linux/flutter/shell/platform/linux/public/flutter_linux" "$STAGE/include/"
+  cp "$ROOT/third_party/flutter_linux/LICENSE" "$STAGE/LICENSE.flutter"
+  CONTENTS="$CONTENTS libflutter_linux_gtk.so include LICENSE.flutter"
+fi
+# shellcheck disable=SC2086
+COPYFILE_DISABLE=1 tar -C "$STAGE" -czf "$OUT/$NAME.tar.gz" $CONTENTS
 echo "$OUT/$NAME.tar.gz"
