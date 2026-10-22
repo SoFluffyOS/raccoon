@@ -12,8 +12,10 @@ the view draws a `Texture`: no pixels copied. On Linux
 (`linux/raccoon_view_plugin.cc`) the buffers are dmabufs, imported into
 Flutter's own GL context, and the plugin waits on each frame's fence. On
 macOS (`macos/raccoon_view/Sources/raccoon_view/RaccoonViewPlugin.mm`) they
-are IOSurfaces, looked up by ID and wrapped as pixel buffers; the runner
-names a frame only once its GPU has drawn it. Either plugin gives each
+are IOSurfaces, taken by Mach port from the runner's own service (the
+plugin asks on connecting; a runner too old to answer has them looked up
+by ID) and wrapped as pixel buffers; the runner names a frame only once its
+GPU has drawn it. Either plugin gives each
 buffer back to the runner once the next one is bound, with a fence for its
 last read where there are fences. Anywhere else, or on a connection without
 GPU buffers, frames are decoded from pixels as before. A host app needs
