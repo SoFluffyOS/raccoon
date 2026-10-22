@@ -648,6 +648,76 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  // example/plugins/echo is a native plugin the runner's build compiles
+  // against its own flutter_linux library; example/plugins_app calls it.
+  final pluginLibrary = binary == null
+      ? ''
+      : p.join(
+          p.dirname(binary),
+          'example_plugins',
+          'echo',
+          'libraccoon_echo_plugin.so',
+        );
+  final pluginsAppAssets = p.join(
+    p.dirname(p.dirname(p.dirname(assets))),
+    'plugins_app',
+    'build',
+    'flutter_assets',
+  );
+  test(
+    'a native plugin loaded into the runner answers the app',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final manifest = File(p.join(temp.path, 'plugins.json'))
+        ..writeAsStringSync(
+          jsonEncode({
+            'plugins': [
+              {
+                'name': 'raccoon_echo',
+                'library': pluginLibrary,
+                'symbol': 'raccoon_echo_plugin_register_with_registrar',
+              },
+            ],
+          }),
+        );
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: pluginsAppAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          plugins: manifest.path,
+        ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      try {
+        final deadline = DateTime.now().add(const Duration(seconds: 15));
+        while (!output.any((line) => line.startsWith('ECHO:')) &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        // The plugin answers from a GLib idle callback: the runner pumps GLib.
+        expect(output, contains('ECHO:echo: hello'));
+      } finally {
+        final client = await RunnerClient.connect(endpoint);
+        client.shutdown();
+        await client.close();
+        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready &&
+            File(pluginLibrary).existsSync() &&
+            Directory(pluginsAppAssets).existsSync()
+        ? false
+        : 'build the runner with plugins and example/plugins_app first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   test(
     'a client that imports GPU buffers gets frames as buffer indices and their descriptors on the GPU socket',
     () async {

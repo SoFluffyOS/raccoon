@@ -20,6 +20,7 @@ final class RunnerLaunch {
     this.height = 600,
     this.pixelRatio = 1.0,
     this.dataDir,
+    this.plugins,
   });
 
   final String runnerBinary;
@@ -36,6 +37,10 @@ final class RunnerLaunch {
   /// hosted by this runner binary shares the runner's own.
   final String? dataDir;
 
+  /// A manifest of native plugins the runner loads, as the device helper
+  /// writes one: `{"plugins": [{"name", "library", "symbol"}]}`.
+  final String? plugins;
+
   List<String> get arguments => [
     'serve',
     '--engine-dir',
@@ -47,6 +52,7 @@ final class RunnerLaunch {
     '--socket',
     endpoint.path,
     if (dataDir case final dir?) ...['--data-dir', dir],
+    if (plugins case final manifest?) ...['--plugins', manifest],
     '--width',
     '$width',
     '--height',
