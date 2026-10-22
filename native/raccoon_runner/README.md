@@ -114,7 +114,11 @@ Design notes: `docs/internal_docs/raccoon/`.
   measurable time to the first frame (184 to 188 ms, median of five); the
   run loop costs nothing at idle. The Objective-C runtime notes, once per
   run, the classes FlutterMacOS and the engine library both carry. FFI
-  plugins are not loaded on macOS yet.
+  plugins (`ffiPlugin: true`) are built the same way and have no class:
+  the runner opens their frameworks to the whole process, and `run` puts
+  them on `DYLD_FRAMEWORK_PATH`, so Dart finds their symbols whether it
+  looks in the process (`DynamicLibrary.process()`, as `flutter_pty2`
+  does) or opens `<name>.framework/<name>`.
 - Builds native assets (packages with build hooks, such as `objective_c`
   under `path_provider_foundation`) for macOS. The tool builds the bundle
   for the Linux device it believes Raccoon to be, whose manifest names no

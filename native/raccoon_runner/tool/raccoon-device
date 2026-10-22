@@ -391,7 +391,8 @@ PY
 }
 
 # The macOS half: the resolved packages whose pubspec names a macOS
-# pluginClass, their pods built against the SDK's FlutterMacOS.framework.
+# pluginClass (registered) or ffiPlugin (opened only, for Dart to find),
+# their pods built against the SDK's FlutterMacOS.framework.
 # One CocoaPods project for what the cache misses (never integrated into a
 # target, so it needs no Xcode project of the app's or its own), then
 # each plugin's pod target on its own, so one that fails sinks nothing else;
@@ -528,10 +529,9 @@ for name, root, pubspec in packages:
     sources = os.path.join(root, 'darwin' if re.search(r'sharedDarwinSource:\s*true', block) else 'macos')
     if not os.path.isfile(os.path.join(sources, name + '.podspec')):
         continue
-    if cls is None:
-        status.append({'name': name, 'state': 'failed', 'detail': 'an FFI plugin; not loaded on macOS yet'})
-        continue
-    wanted.append({'name': name, 'root': root, 'sources': sources, 'class': cls.group(1),
+    # An FFI plugin has no class: its framework is opened for Dart to find.
+    wanted.append({'name': name, 'root': root, 'sources': sources,
+                   'class': cls.group(1) if cls else None,
                    'key': '%s-%s-%s' % (version_key(name, root, sources), runner_version, arch)})
 
 if not wanted and not status:
@@ -635,9 +635,11 @@ for plugin in wanted:
         target = os.path.join(out, 'frameworks', f)
         if not os.path.exists(target):
             shutil.copytree(os.path.join(cached, f), target, symlinks=True)
-    entries.append({'name': name,
-                    'library': os.path.join(out, 'frameworks', name + '.framework', name),
-                    'class': plugin['class'], 'module': name})
+    library = os.path.join(out, 'frameworks', name + '.framework', name)
+    if plugin['class'] is None:
+        entries.append({'name': name, 'library': library, 'ffi': True})
+    else:
+        entries.append({'name': name, 'library': library, 'class': plugin['class'], 'module': name})
 
 json.dump({'flutter_framework': flutter_framework, 'plugins': entries, 'status': status},
           open(os.path.join(out, 'manifest.json'), 'w'), indent=1)
@@ -769,9 +771,13 @@ case "$verb" in
       [ "$r" = "$rest" ] && r=1
       size_args="--width $w --height $h --dpr $r"
     fi
-    # FFI plugins' libraries, opened by the Dart side by name.
+    # FFI plugins' libraries, opened by the Dart side by name: on Linux by
+    # library name, on macOS as <name>.framework/<name>.
     if [ -d "$APPS/$key/plugins/lib" ]; then
       export LD_LIBRARY_PATH="$APPS/$key/plugins/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
+    if [ -d "$APPS/$key/plugins/frameworks" ]; then
+      export DYLD_FRAMEWORK_PATH="$APPS/$key/plugins/frameworks${DYLD_FRAMEWORK_PATH:+:$DYLD_FRAMEWORK_PATH}"
     fi
     binary="$RUNNER"
     if [ "$(uname -s)" = Darwin ] && { [ -n "$manifest" ] || [ -d "$APPS/$key/native_assets" ]; }; then

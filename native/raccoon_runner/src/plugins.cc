@@ -34,6 +34,7 @@ bool PluginHost::LoadManifest(const std::string& path, std::string* error) {
     entry.symbol = item.value("symbol", "");
     entry.plugin_class = item.value("class", "");
     entry.module = item.value("module", "");
+    entry.ffi = item.value("ffi", false);
     std::string why = unprepared;
     if (prepared && Load(entry, &why)) {
       std::fprintf(stderr, "raccoon_runner: plugin %s loaded\n", entry.name.c_str());

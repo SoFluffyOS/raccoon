@@ -742,6 +742,57 @@ void main() {
   );
 
   test(
+    'an FFI plugin\'s framework is opened for Dart and reported loaded',
+    () async {
+      // macOS: no class to register, only a framework whose symbols Dart
+      // finds in the process or by name. The echo framework stands in.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final manifest = File(p.join(temp.path, 'plugins.json'))
+        ..writeAsStringSync(
+          jsonEncode({
+            'flutter_framework': flutterFramework,
+            'plugins': [
+              {'name': 'echo_ffi', 'library': pluginLibrary, 'ffi': true},
+            ],
+          }),
+        );
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: pluginsAppAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          plugins: manifest.path,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        final plugins = await client.plugins.first.timeout(
+          const Duration(seconds: 10),
+        );
+        expect(plugins.plugins.single.state, PluginState.PLUGIN_STATE_LOADED);
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        !Platform.isMacOS
+            ? 'FFI entries are macOS manifests'
+            : ready &&
+                File(pluginLibrary).existsSync() &&
+                Directory(pluginsAppAssets).existsSync()
+            ? false
+            : 'build the runner with plugins and example/plugins_app first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'the runner tells a client what became of the plugins',
     () async {
       // The manifest carries the helper's word on what never got as far as a

@@ -440,6 +440,17 @@ bool PluginHost::Prepare(const std::string& flutter_framework, std::string* erro
 }
 
 bool PluginHost::Load(const PluginEntry& entry, std::string* error) {
+  if (entry.ffi) {
+    // Open to the whole process: Dart finds the symbols there
+    // (DynamicLibrary.process) or opens the same file by name.
+    if (entry.library.empty() ||
+        dlopen(entry.library.c_str(), RTLD_NOW | RTLD_GLOBAL) == nullptr) {
+      *error = entry.library.empty() ? "no library" : dlerror();
+      return false;
+    }
+    names_.push_back(entry.name);
+    return true;
+  }
   if (entry.library.empty() || entry.plugin_class.empty()) {
     *error = "no library or class";
     return false;

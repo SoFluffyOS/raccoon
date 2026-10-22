@@ -34,6 +34,9 @@ struct PluginEntry {
   // in, if any; the class is looked up as module.Class, then as Class.
   std::string plugin_class;
   std::string module;
+  // macOS: an FFI plugin's framework, opened for Dart to find its symbols
+  // (by name, or in the process) and registered with no one.
+  bool ffi = false;
 };
 
 // What became of a plugin: the manifest's word on the ones that never got
@@ -74,8 +77,9 @@ class PluginHost {
 
   // Loads every plugin of a manifest: {"plugins": [{"name", "library",
   // "symbol"}]} on Linux, {"flutter_framework", "plugins": [{"name",
-  // "library", "class", "module"}]} on macOS. Each outcome is logged; false
-  // with |error| when the manifest itself cannot be read.
+  // "library", "class", "module"} or {"name", "library", "ffi": true}]} on
+  // macOS. Each outcome is logged; false with |error| when the manifest
+  // itself cannot be read.
   bool LoadManifest(const std::string& path, std::string* error);
   bool Load(const PluginEntry& entry, std::string* error);
   size_t loaded() const { return names_.size(); }
