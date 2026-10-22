@@ -99,12 +99,22 @@ Future<void> main(List<String> arguments) async {
 const _ticksPerSecond = 100;
 
 /// CPU time of a process in hundredths of a second: user plus system ticks
-/// from procfs on Linux, the `[h:]m:ss.cc` column of ps on macOS.
+/// from procfs on Linux, the process's total processor time from PowerShell
+/// on Windows, the `[h:]m:ss.cc` column of ps on macOS.
 int _cpuTicks(int processId) {
   if (Platform.isLinux) {
     final stat = File('/proc/$processId/stat').readAsStringSync();
     final fields = stat.substring(stat.lastIndexOf(')') + 2).split(' ');
     return int.parse(fields[11]) + int.parse(fields[12]);
+  }
+  if (Platform.isWindows) {
+    final seconds =
+        Process.runSync('powershell', [
+          '-NoProfile',
+          '-Command',
+          '(Get-Process -Id $processId).TotalProcessorTime.TotalSeconds',
+        ]).stdout.toString().trim();
+    return (double.parse(seconds) * _ticksPerSecond).round();
   }
   final time =
       Process.runSync('ps', [

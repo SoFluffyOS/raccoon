@@ -119,7 +119,7 @@ find_package(Threads REQUIRED)
 target_link_libraries(raccoon_runner PRIVATE raccoon_proto ${CMAKE_DL_LIBS} Threads::Threads)
 target_link_libraries(raccoon_runner PRIVATE nlohmann_json::nlohmann_json)
 if(WIN32)
-  target_link_libraries(raccoon_runner PRIVATE ws2_32)
+  target_link_libraries(raccoon_runner PRIVATE ws2_32 winmm)
 endif()
 
 # The GPU renderer, one per host; without it the runner rasterizes in

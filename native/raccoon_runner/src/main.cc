@@ -8,6 +8,7 @@
 #if defined(_WIN32)
 #include <io.h>
 #include <windows.h>
+#include <timeapi.h>
 #include <tlhelp32.h>
 // A windows.h macro that would rename the embedder's GetCurrentTime.
 #undef GetCurrentTime
@@ -933,6 +934,12 @@ int main(int argc, char** argv) {
   if (std::getenv("RACCOON_PTRACE_ANY") != nullptr) {
     prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0);
   }
+#endif
+#if defined(_WIN32)
+  // Windows wakes waits on a 15.6 ms tick by default, so a loop paced at
+  // 60 Hz would sleep two ticks a frame and draw at 32 fps. A millisecond,
+  // for this process alone, while it runs.
+  timeBeginPeriod(1);
 #endif
   if (argc == 2 && std::strcmp(argv[1], "--version") == 0) {
     std::printf("%s\n", RACCOON_RUNNER_VERSION);
