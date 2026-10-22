@@ -1,0 +1,418 @@
+#!/usr/bin/env bash
+# The commands behind the "raccoon" entry in Flutter's custom_devices.json.
+#
+#   raccoon-device ping
+#   raccoon-device install [--instance KEY] <localPath> <appName>
+#   raccoon-device uninstall [--instance KEY] <appName>
+#   raccoon-device run [--instance KEY] [--size WxH@R] <appName> [engine switches]
+#
+# install copies the app bundle the tool built (build/flutter_assets) into the
+# runtime's app store; run starts raccoon_runner serve on it and leaves the
+# engine's log lines on stdout, where the tool reads the VM service URI, and
+# keeps a timestamped copy of the run's output in the app's data directory.
+#
+# --instance KEY (the "raccoon-KEY" device: 2, phone, tablet, desktop, a name) keeps the same project apart from its
+# first run: socket, app store and data directory are named <appName>@N, so
+# one project can run at two sizes side by side.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+# The binary sits under build/ in a checkout and at the root of a release
+# archive (tool/package.sh); RACCOON_RUNNER overrides both.
+if [ -n "${RACCOON_RUNNER:-}" ]; then
+  RUNNER="$RACCOON_RUNNER"
+elif [ -x "$ROOT/build/raccoon_runner" ]; then
+  RUNNER="$ROOT/build/raccoon_runner"
+else
+  RUNNER="$ROOT/raccoon_runner"
+fi
+APPS="${XDG_DATA_HOME:-$HOME/.local/share}/raccoon/apps"
+# What an app keeps across runs (its shared preferences); install replaces the
+# app's bundle but leaves this.
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}/raccoon/data"
+
+# The socket directory must be the one raccoon_runtime's RunnerDiscovery
+# watches: the XDG runtime directory on Linux, the user's temporary directory
+# on macOS. The SDK keeps one macOS engine directory for both architectures.
+case "$(uname -s)" in
+  Darwin)
+    TEMP="${TMPDIR:-/tmp}"
+    SOCKETS="${TEMP%/}/raccoon"
+    SDK_ENGINE=darwin-x64
+    ;;
+  Linux)
+    SOCKETS="${XDG_RUNTIME_DIR:-/tmp}/raccoon"
+    case "$(uname -m)" in
+      x86_64) SDK_ENGINE=linux-x64 ;;
+      aarch64|arm64) SDK_ENGINE=linux-arm64 ;;
+      *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
+    esac
+    ;;
+  *) echo "unsupported system $(uname -s)" >&2; exit 1 ;;
+esac
+
+sdk_icu() {
+  local root
+  if [ -n "${FLUTTER_ROOT:-}" ] && [ -d "$FLUTTER_ROOT/bin/cache" ]; then
+    root="$FLUTTER_ROOT"
+  else
+    local flutter
+    flutter="$(readlink -f "$(command -v flutter)")"
+    root="$(cd "$(dirname "$flutter")/.." && pwd)"
+  fi
+  echo "$root/bin/cache/artifacts/engine/$SDK_ENGINE/icudtl.dat"
+}
+
+# The key an app's socket, store and data are named by: the app name, with
+# @N for an instance other than the first.
+app_key() {
+  if [ "$INSTANCE" = "1" ]; then echo "$1"; else echo "$1@$INSTANCE"; fi
+}
+
+# Prefixes each line with the time of day, to the millisecond.
+stamp() {
+  perl -pe 'BEGIN { $| = 1 } use Time::HiRes qw(time); my $t = time; my @l = localtime($t);
+            $_ = sprintf("%02d:%02d:%06.3f ", $l[2], $l[1], $l[0] + $t - int($t)) . $_'
+}
+
+verb="${1:-}"; shift || true
+INSTANCE=1
+SIZE=""
+if [ "${1:-}" = "--instance" ]; then
+  INSTANCE="$2"; shift 2
+fi
+# --size WxH@R: the logical size and pixel ratio a named device starts at
+# (the runtime passes it for raccoon-phone, raccoon-tablet, raccoon-desktop).
+if [ "${1:-}" = "--size" ]; then
+  SIZE="$2"; shift 2
+fi
+
+
+# The window plugins stay the runner's own: their window is the client's pane.
+VIRTUAL_PLUGINS="desktop_window window_manager window_size screen_retriever"
+
+# The plugin-facing library and its headers: beside the runner in an archive,
+# in build/ and third_party/ in a checkout.
+plugin_library() {
+  local dir
+  dir="$(dirname "$RUNNER")"
+  [ -f "$dir/libflutter_linux_gtk.so" ] && echo "$dir/libflutter_linux_gtk.so"
+}
+plugin_headers() {
+  if [ -d "$ROOT/include/flutter_linux" ]; then
+    echo "$ROOT/include"
+  elif [ -d "$ROOT/third_party/flutter_linux/flutter/shell/platform/linux/public/flutter_linux" ]; then
+    echo "$ROOT/third_party/flutter_linux/flutter/shell/platform/linux/public"
+  fi
+}
+
+# Builds a project's native plugins into |out| and writes |out|/manifest.json
+# for the runner's --plugins. The plugins are the resolved packages
+# (.dart_tool/package_config.json) whose pubspec names a Linux pluginClass
+# (registered) or ffiPlugin (its libraries only), as the Flutter tool finds
+# them. What built before is in a cache by plugin version, runner version
+# and engine; what the release prebuilt comes from its archive, fetched
+# once; the rest builds here, each plugin in its own CMake project with what
+# the desktop template gives a plugin, so one that fails sinks nothing else.
+# Every library lands flat in |out|/lib, which run puts on the runner's
+# library path for the FFI ones. A machine without a toolchain still gets
+# the cached and prebuilt ones. When there is nothing it can do, says why
+# and leaves no manifest; the app then sees no plugin.
+build_plugins() {
+  local project="$1" out="$2" lib headers engine version cache
+  rm -rf "$out"
+  [ "$(uname -s)" = Linux ] || return 0
+  [ -f "$project/.dart_tool/package_config.json" ] || return 0
+  command -v python3 >/dev/null || { echo "raccoon-device: no python3; native plugins skipped" >&2; return 0; }
+  lib="$(plugin_library || true)"
+  headers="$(plugin_headers || true)"
+  if [ -z "$lib" ] || [ -z "$headers" ]; then
+    echo "raccoon-device: this runner has no plugin library; native plugins skipped" >&2
+    return 0
+  fi
+  engine="$(basename "$(dirname "$("$ROOT/tool/engine_dir.sh")")")"
+  version="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+  cache="${RACCOON_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/$engine}"
+  python3 - "$project/.dart_tool/package_config.json" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS" \
+    "$cache" "$version" "$(uname -m)" \
+    "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon_runner/releases/download/v$version/plugins-$engine-linux-$(uname -m).tar.gz}" <<'PY'
+import glob, hashlib, json, os, re, shutil, subprocess, sys, tarfile, urllib.request
+from urllib.parse import unquote, urlparse
+
+config, out, lib, headers, virtual, cache, runner_version, arch, prebuilt_url = sys.argv[1:10]
+virtual = set(virtual.split())
+dart_tool = os.path.dirname(os.path.abspath(config))
+
+PREAMBLE = """cmake_minimum_required(VERSION 3.14)
+project(raccoon_plugin LANGUAGES CXX)
+set(CMAKE_BUILD_TYPE Release)
+function(APPLY_STANDARD_SETTINGS TARGET)
+  target_compile_features(${TARGET} PUBLIC cxx_std_14)
+  target_compile_options(${TARGET} PRIVATE -Wall -Werror)
+  target_compile_options(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:-O3>")
+  target_compile_definitions(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:NDEBUG>")
+endfunction()
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0)
+pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0)
+pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)
+add_library(flutter INTERFACE)
+target_include_directories(flutter INTERFACE "%s")
+target_link_libraries(flutter INTERFACE "%s" PkgConfig::GTK PkgConfig::GLIB PkgConfig::GIO)
+""" % (headers, lib)
+
+
+def linux_block(pubspec):
+    found = re.search(r'^([ \t]*)linux:[ \t]*\n', pubspec, re.M)
+    if not found:
+        return ''
+    indent = len(found.group(1))
+    block = []
+    for line in pubspec[found.end():].splitlines():
+        if not line.strip():
+            continue
+        if len(line) - len(line.lstrip()) <= indent:
+            break
+        block.append(line)
+    return '\n'.join(block)
+
+
+def version_key(name, root):
+    # A pub package is its directory name, name-version; a path package is
+    # the shape of its linux/ directory, so an edit rebuilds it.
+    if os.sep + '.pub-cache' + os.sep in root + os.sep:
+        return os.path.basename(root.rstrip(os.sep))
+    digest = hashlib.sha256()
+    for dirpath, _, files in sorted(os.walk(os.path.join(root, 'linux'))):
+        for f in sorted(files):
+            full = os.path.join(dirpath, f)
+            st = os.stat(full)
+            digest.update(('%s %d %d\n' % (os.path.relpath(full, root), st.st_size, int(st.st_mtime))).encode())
+    return '%s-path-%s' % (name, digest.hexdigest()[:16])
+
+
+# The runner's version is part of the key: the library's ABI is the vendored
+# sources, which change with it. The same key names what the release
+# prebuilt, so its archive drops straight into the cache.
+lib_stamp = runner_version
+
+
+def fetch_prebuilt():
+    """The release's prebuilt plugins into the cache, once per runner version
+    and engine; a marker remembers a miss so it is not asked again."""
+    if os.environ.get('RACCOON_NO_PREBUILT'):
+        return
+    marker = os.path.join(cache, 'prebuilt-%s.%s' % (runner_version, 'done'))
+    if os.path.exists(marker):
+        return
+    os.makedirs(cache, exist_ok=True)
+    try:
+        archive = os.path.join(cache, 'prebuilt-%s.tar.gz' % runner_version)
+        urllib.request.urlretrieve(prebuilt_url, archive)
+        with tarfile.open(archive) as tar:
+            members = [m for m in tar.getmembers()
+                       if m.isfile() and m.name.endswith('.so') and '..' not in m.name]
+            tar.extractall(cache, members=members)
+        os.remove(archive)
+        print('raccoon-device: prebuilt plugins fetched for runner %s' % runner_version, file=sys.stderr)
+    except Exception:
+        pass  # no archive for this version, or no network: build here instead
+    open(marker, 'w').close()
+
+
+def can_build():
+    for need in ('cmake', 'ninja', 'pkg-config'):
+        if shutil.which(need) is None:
+            return 'no ' + need
+    if subprocess.run(['pkg-config', '--exists', 'gtk+-3.0']).returncode != 0:
+        return 'no gtk+-3.0 development files'
+    return None
+
+wanted = []
+status = []  # what never gets as far as a library, for the runner to relay
+packages = []
+for package in json.load(open(config)).get('packages', []):
+    uri = package.get('rootUri', '')
+    root = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, uri))
+    pubspec_path = os.path.join(root, 'pubspec.yaml')
+    if os.path.isfile(pubspec_path):
+        packages.append((package['name'], root, open(pubspec_path).read()))
+# Implementation packages of federated plugins: named as a default_package
+# by their app-facing package, or saying what they implement. Not the ones
+# to blame for a missing host.
+implementations = set()
+for _, _, pubspec in packages:
+    implementations.update(re.findall(r'default_package:\s*(\w+)', pubspec))
+for name, root, pubspec in packages:
+    if name in virtual:
+        status.append({'name': name, 'state': 'built_in', 'detail': 'the runner answers it'})
+        continue
+    if not re.search(r'^\s+plugin:\s*$', pubspec, re.M):
+        continue
+    block = linux_block(pubspec)
+    cls = re.search(r'pluginClass:\s*(\w+)', block)
+    ffi = re.search(r'ffiPlugin:\s*true', block) is not None
+    if cls is None and not ffi:
+        # An app-facing plugin with no Linux at all (its platforms name
+        # others; an implementation package says what it implements and is
+        # not the one to blame): the app's calls to it will fail, and the
+        # pane can say so before they do.
+        if (not block and re.search(r'^\s+platforms:\s*$', pubspec, re.M)
+                and not re.search(r'^\s+linux:', pubspec, re.M)
+                and not re.search(r'^\s+implements:', pubspec, re.M)
+                and name not in implementations):
+            status.append({'name': name, 'state': 'no_host', 'detail': 'no Linux implementation'})
+        continue
+    if not os.path.isfile(os.path.join(root, 'linux', 'CMakeLists.txt')):
+        continue
+    symbol = None
+    if cls is not None:
+        symbol = re.sub(r'(?<!^)(?=[A-Z])', '_', cls.group(1)).lower() + '_register_with_registrar'
+    wanted.append({'name': name, 'root': root, 'symbol': symbol,
+                   'key': version_key(name, root) + '-' + lib_stamp})
+
+if not wanted and not status:
+    sys.exit(0)
+
+os.makedirs(os.path.join(out, 'lib'), exist_ok=True)
+built, failed, empty, from_cache = [], [], [], []
+entries = []
+toolchain = None  # looked up when a build is needed
+for plugin in wanted:
+    name = plugin['name']
+    cached = os.path.join(cache, plugin['key'])
+    libs = sorted(glob.glob(os.path.join(cached, '*.so')))
+    if not libs:
+        fetch_prebuilt()
+        libs = sorted(glob.glob(os.path.join(cached, '*.so')))
+    if libs:
+        from_cache.append(name)
+    else:
+        if toolchain is None:
+            toolchain = can_build() or 'ok'
+        if toolchain != 'ok':
+            failed.append('%s (%s)' % (name, toolchain))
+            status.append({'name': name, 'state': 'failed', 'detail': toolchain + '; native plugins need the desktop toolchain'})
+            continue
+        project = os.path.join(out, 'build', name)
+        os.makedirs(project, exist_ok=True)
+        with open(os.path.join(project, 'CMakeLists.txt'), 'w') as f:
+            f.write(PREAMBLE)
+            f.write('add_subdirectory("%s" "plugin")\n' % os.path.join(plugin['root'], 'linux'))
+        with open(os.path.join(project, 'build.log'), 'w') as log:
+            ok = subprocess.run(['cmake', '-S', project, '-B', os.path.join(project, 'out'), '-G', 'Ninja'],
+                                stdout=log, stderr=subprocess.STDOUT).returncode == 0
+            ok = ok and subprocess.run(['cmake', '--build', os.path.join(project, 'out')],
+                                       stdout=log, stderr=subprocess.STDOUT).returncode == 0
+        libs = sorted(glob.glob(os.path.join(project, 'out', 'plugin', '**', '*.so'), recursive=True)) if ok else []
+        if not ok:
+            failed.append('%s (see %s)' % (name, os.path.join(project, 'build.log')))
+            status.append({'name': name, 'state': 'failed', 'detail': 'did not build; see ' + os.path.join(project, 'build.log')})
+            continue
+        if not libs:
+            # Built fine and made nothing: an FFI plugin whose library wants
+            # a toolchain this machine has not (jni without a JDK).
+            empty.append(name)
+            status.append({'name': name, 'state': 'built_nothing', 'detail': 'built and made no library'})
+            continue
+        os.makedirs(cached, exist_ok=True)
+        for so in libs:
+            shutil.copy2(so, cached)
+        libs = sorted(glob.glob(os.path.join(cached, '*.so')))
+        built.append(name)
+    for so in libs:
+        shutil.copy2(so, os.path.join(out, 'lib'))
+    if plugin['symbol'] is not None:
+        # The plugin's own library is the one named after it.
+        main = [so for so in libs if os.path.basename(so) == 'lib%s_plugin.so' % name] or libs
+        entries.append({'name': name, 'library': os.path.join(out, 'lib', os.path.basename(main[0])),
+                        'symbol': plugin['symbol']})
+
+json.dump({'plugins': entries, 'status': status, 'library_path': os.path.join(out, 'lib')},
+          open(os.path.join(out, 'manifest.json'), 'w'), indent=1)
+parts = []
+if built:
+    parts.append('%d built: %s' % (len(built), ', '.join(built)))
+if from_cache:
+    parts.append('%d from the cache: %s' % (len(from_cache), ', '.join(from_cache)))
+if empty:
+    parts.append('%d built nothing: %s' % (len(empty), ', '.join(empty)))
+if failed:
+    parts.append('%d failed: %s' % (len(failed), '; '.join(failed)))
+if not parts:
+    parts.append('none to build')
+print('raccoon-device: native plugins, ' + '; '.join(parts), file=sys.stderr)
+PY
+}
+
+case "$verb" in
+  ping)
+    test -x "$RUNNER"
+    ;;
+  prebuild)
+    # The plugins a project resolves (its pubspec names them), built into
+    # an archive for the release: the cache's layout, so an install drops
+    # it straight in. For CI; needs the Flutter SDK for the pub get.
+    project="$1"; archive="$2"
+    (cd "$project" && flutter pub get > /dev/null)
+    stage="$(mktemp -d)"
+    RACCOON_PLUGIN_CACHE="$stage/cache" RACCOON_NO_PREBUILT=1 build_plugins "$(cd "$project" && pwd)" "$stage/out"
+    mkdir -p "$(dirname "$archive")"
+    if [ -d "$stage/cache" ]; then
+      tar -C "$stage/cache" -czf "$archive" .
+      echo "raccoon-device: $(find "$stage/cache" -name '*.so' | wc -l) libraries in $archive"
+    else
+      echo "raccoon-device: nothing prebuilt" >&2
+    fi
+    rm -rf "$stage"
+    ;;
+  install)
+    local_path="$1"; key="$(app_key "$2")"
+    rm -rf "$APPS/$key"
+    mkdir -p "$APPS/$key"
+    cp -r "$local_path" "$APPS/$key/flutter_assets"
+    # The project is two levels above its bundle; its native plugins are
+    # built for this host and loaded into the runner.
+    build_plugins "$(cd "$local_path/../.." && pwd)" "$APPS/$key/plugins"
+    ;;
+  uninstall)
+    rm -rf "$APPS/$(app_key "$1")"
+    ;;
+  run)
+    key="$(app_key "$1")"; shift
+    mkdir -p "$SOCKETS" "$DATA/$key"
+    # The run's output, timestamped, for the run that went wrong; the tool
+    # keeps reading the untouched streams.
+    log="$DATA/$key/runner.log"
+    : > "$log"
+    manifest="$APPS/$key/plugins/manifest.json"
+    [ -f "$manifest" ] || manifest=""
+    size_args=""
+    if [ -n "$SIZE" ]; then
+      w="${SIZE%%x*}"; rest="${SIZE#*x}"; h="${rest%%@*}"; r="${rest#*@}"
+      [ "$r" = "$rest" ] && r=1
+      size_args="--width $w --height $h --dpr $r"
+    fi
+    # FFI plugins' libraries, opened by the Dart side by name.
+    if [ -d "$APPS/$key/plugins/lib" ]; then
+      export LD_LIBRARY_PATH="$APPS/$key/plugins/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
+    # The tool passes its engine switches as one argument; split on spaces.
+    # shellcheck disable=SC2068
+    exec "$RUNNER" serve \
+      --engine-dir "$("$ROOT/tool/engine_dir.sh")" \
+      --assets "$APPS/$key/flutter_assets" \
+      --icu "$(sdk_icu)" \
+      --socket "$SOCKETS/$key.sock" \
+      --data-dir "$DATA/$key" \
+      ${manifest:+--plugins "$manifest"} \
+      $size_args \
+      -- $@ \
+      > >(tee >(stamp >> "$log")) \
+      2> >(tee >(stamp >> "$log") >&2)
+    ;;
+  *)
+    echo "usage: raccoon-device ping | install [--instance KEY] <localPath> <appName> | uninstall [--instance KEY] <appName> | run [--instance KEY] [--size WxH@R] <appName> [engine switches] | prebuild <project> <archive.tar.gz>" >&2
+    exit 2
+    ;;
+esac

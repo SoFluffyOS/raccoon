@@ -1,0 +1,3 @@
+build/
+example/*/build/
+example/*/.dart_tool/

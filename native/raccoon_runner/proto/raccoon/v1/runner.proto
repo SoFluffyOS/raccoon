@@ -1,0 +1,284 @@
+// The Raccoon runner protocol, version 1.
+//
+// One client talks to one runner over a local socket. Every message is
+// length-prefixed: a 4-byte little-endian length, then a serialized
+// ClientMessage (client to runner) or RunnerMessage (runner to client).
+// Frames carry pixels inline in v1; shared memory and GPU buffers come later
+// and will add new Frame fields, not change these.
+
+syntax = "proto3";
+
+package raccoon.v1;
+
+option optimize_for = LITE_RUNTIME;
+
+// Client to runner.
+
+message ClientHello {
+  uint32 protocol_version = 1;
+  string client_name = 2;
+  // The client can take frames from shared buffers whose file descriptors
+  // ride along the SharedBuffers message (Unix sockets only).
+  bool shared_buffers = 3;
+  // The client has an input method and sends TextEditing for the active
+  // field; the runner then leaves typing characters to it. Keys still reach
+  // the app.
+  bool composes = 5;
+  // The client can import GPU buffers (DRM dmabufs on Linux, IOSurfaces on
+  // macOS) and will take their file descriptors or IDs from the runner's
+  // GPU socket; frames then arrive as buffer indices, no pixels.
+  bool gpu_buffers = 6;
+  uint32 pid = 4;  // the client process, named to a later client
+}
+
+// Gives a shared buffer back to the runner once its pixels were read.
+message ReleaseBuffer {
+  uint32 index = 1;
+  // Which GPU buffer set the index belongs to; 0 for shared buffers.
+  uint32 generation = 2;
+}
+
+message Resize {
+  uint32 width = 1;
+  uint32 height = 2;
+  double pixel_ratio = 3;
+}
+
+enum PointerPhase {
+  POINTER_PHASE_UNSPECIFIED = 0;
+  POINTER_PHASE_ADD = 1;
+  POINTER_PHASE_REMOVE = 2;
+  POINTER_PHASE_HOVER = 3;
+  POINTER_PHASE_DOWN = 4;
+  POINTER_PHASE_MOVE = 5;
+  POINTER_PHASE_UP = 6;
+  // A trackpad gesture: two-finger scrolling, pinching, rotating. The
+  // framework delivers these as pan-zoom events, not as scroll signals, so
+  // the runner forwards them as such and the app's scrollables treat them
+  // as the drags they are, momentum included.
+  POINTER_PHASE_PAN_ZOOM_START = 7;
+  POINTER_PHASE_PAN_ZOOM_UPDATE = 8;
+  POINTER_PHASE_PAN_ZOOM_END = 9;
+}
+
+enum PointerDevice {
+  POINTER_DEVICE_UNSPECIFIED = 0;
+  POINTER_DEVICE_MOUSE = 1;
+  POINTER_DEVICE_TOUCH = 2;
+  POINTER_DEVICE_TRACKPAD = 3;
+}
+
+message PointerEvent {
+  PointerPhase phase = 1;
+  double x = 2;
+  double y = 3;
+  // Bit set of pressed buttons; bit 0 is the primary button.
+  int64 buttons = 4;
+  PointerDevice device = 5;
+  int32 pointer_id = 6;
+  uint64 timestamp_micros = 7;
+  double scroll_delta_x = 8;
+  double scroll_delta_y = 9;
+  // Pan-zoom phases only: the pan since the gesture began, in frame pixels,
+  // the scale (1 is none) and the rotation in radians.
+  double pan_x = 10;
+  double pan_y = 11;
+  double scale = 12;
+  double rotation = 13;
+}
+
+enum KeyKind {
+  KEY_KIND_UNSPECIFIED = 0;
+  KEY_KIND_DOWN = 1;
+  KEY_KIND_UP = 2;
+  KEY_KIND_REPEAT = 3;
+}
+
+message KeyEvent {
+  KeyKind kind = 1;
+  uint64 physical = 2;
+  uint64 logical = 3;
+  string character = 4;
+  uint64 timestamp_micros = 5;
+  bool synthesized = 6;
+}
+
+message Shutdown {}
+
+// Answers a PlatformMessage. handled=false means "no plugin": the app sees
+// a null reply, as it would on a desktop without that plugin.
+message PlatformResponse {
+  uint64 response_id = 1;
+  bool handled = 2;
+  bytes data = 3;
+}
+
+message ClientMessage {
+  oneof message {
+    ClientHello hello = 1;
+    Resize resize = 2;
+    PointerEvent pointer = 3;
+    KeyEvent key = 4;
+    Shutdown shutdown = 5;
+    PlatformResponse platform_response = 6;
+    ReleaseBuffer release_buffer = 7;
+    TextEditing text_editing = 8;
+  }
+}
+
+// The client's input method produced a value for the active text field:
+// the whole value, as Flutter's TextEditingValue, offsets in UTF-16 code
+// units; -1,-1 for no composing range.
+message TextEditing {
+  string text = 1;
+  int32 selection_base = 2;
+  int32 selection_extent = 3;
+  int32 composing_base = 4;
+  int32 composing_extent = 5;
+}
+
+// Runner to client.
+
+message RunnerHello {
+  uint32 protocol_version = 1;
+  string engine_revision = 2;
+  // The runner's process id, so the client can watch its memory.
+  uint32 pid = 3;
+}
+
+enum PixelFormat {
+  PIXEL_FORMAT_UNSPECIFIED = 0;
+  PIXEL_FORMAT_BGRA8888 = 1;
+  PIXEL_FORMAT_RGBA8888 = 2;
+}
+
+// A frame carries its pixels inline, or names the shared buffer that holds
+// them; then pixels is empty and the client releases the buffer when done.
+message Frame {
+  uint64 sequence = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  uint32 row_bytes = 4;
+  PixelFormat format = 5;
+  bytes pixels = 6;
+  uint64 timestamp_micros = 7;
+  bool in_shared_buffer = 8;
+  uint32 buffer_index = 9;
+  // The frame is GPU buffer buffer_index of GpuBuffers generation
+  // gpu_generation; pixels are empty.
+  bool in_gpu_buffer = 10;
+  uint32 gpu_generation = 11;
+}
+
+// A set of same-sized GPU buffers the engine renders into, one frame each:
+// DRM dmabufs on Linux, IOSurfaces on macOS. What imports them is not
+// here: a native client takes it from the runner's GPU socket (socket),
+// which carries a fixed little-endian layout rather than protobuf, framed
+// like a message: 'RGPU', generation, count, width, height, fourcc (32 bits
+// each), modifier (64), then count pairs of stride and offset. On Linux one
+// descriptor per buffer rides along in index order; on macOS count
+// IOSurface IDs follow the pairs. A new set, with a higher generation,
+// replaces the old one on resize.
+message GpuBuffers {
+  uint32 generation = 1;
+  uint32 count = 2;
+  uint32 width = 3;
+  uint32 height = 4;
+  uint32 fourcc = 5;
+  uint64 modifier = 6;
+  repeated uint32 strides = 7;
+  repeated uint32 offsets = 8;
+  string socket = 9;
+}
+
+// A set of same-sized shared buffers. Their file descriptors travel with this
+// message as ancillary data, in index order. Replaces any earlier set.
+message SharedBuffers {
+  uint32 count = 1;
+  uint64 size = 2;
+}
+
+message VmService {
+  string uri = 1;
+}
+
+message LogLine {
+  string tag = 1;
+  string message = 2;
+}
+
+message Exited {
+  int32 code = 1;
+}
+
+// A platform channel message the app sent, for the client to answer. The
+// client serves channels the way a desktop embedder's plugins would; a
+// response_id of 0 means the app expects no reply.
+message PlatformMessage {
+  uint64 response_id = 1;
+  string channel = 2;
+  bytes data = 3;
+}
+
+// The app's active text field, whenever it changes; active=false once no
+// field has focus. A client with an input method mirrors it there.
+message TextField {
+  bool active = 1;
+  string text = 2;
+  int32 selection_base = 3;
+  int32 selection_extent = 4;
+  int32 composing_base = 5;
+  int32 composing_extent = 6;
+  bool multiline = 7;
+  string input_action = 8;
+  bool obscure = 9;
+}
+
+// What became of the project's native plugins on this host. Sent after
+// Hello, and again when it changes.
+message Plugins {
+  repeated PluginReport plugins = 1;
+}
+
+message PluginReport {
+  string name = 1;
+  PluginState state = 2;
+  // A word of why, for the states that have one: the failure, the log's
+  // path, the host it would need.
+  string detail = 3;
+}
+
+enum PluginState {
+  PLUGIN_STATE_UNSPECIFIED = 0;
+  // Loaded into the runner and registered: its channels are answered.
+  PLUGIN_STATE_LOADED = 1;
+  // Did not build, or did not load; detail says.
+  PLUGIN_STATE_FAILED = 2;
+  // Built and made no library: an FFI plugin without its toolchain.
+  PLUGIN_STATE_BUILT_NOTHING = 3;
+  // Declares no implementation for this host: its calls will fail.
+  PLUGIN_STATE_NO_HOST = 4;
+  // The runner answers its channels itself (the window plugins).
+  PLUGIN_STATE_BUILT_IN = 5;
+}
+
+// The runner has a client already; the connection closes after this.
+message Busy {
+  uint32 pid = 1;  // the client that has it
+}
+
+message RunnerMessage {
+  oneof message {
+    RunnerHello hello = 1;
+    Frame frame = 2;
+    VmService vm_service = 3;
+    LogLine log = 4;
+    Exited exited = 5;
+    PlatformMessage platform_message = 6;
+    SharedBuffers shared_buffers = 7;
+    Busy busy = 8;
+    TextField text_field = 9;
+    GpuBuffers gpu_buffers = 10;
+    Plugins plugins = 11;
+  }
+}
