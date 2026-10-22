@@ -1,0 +1,10 @@
+name: no_plugin_late
+description: The runner's late missing plugin example - draws its first frame, then calls a plugin nobody serves and shows what came back.
+publish_to: "none"
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter

@@ -1,0 +1,10 @@
+name: no_plugin
+description: The runner's missing plugin example - calls a plugin nobody serves in main(), before runApp, and dies of it, as an app does on a host its plugin does not support.
+publish_to: "none"
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter

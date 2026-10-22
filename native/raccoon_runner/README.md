@@ -99,6 +99,9 @@ Design notes: `docs/internal_docs/raccoon/`.
   The lines from before the first frame, the last 200, go again to a
   client that arrives later, so a host can show why an app stopped before
   it drew anything (`StartupFailure` in `raccoon_runtime`).
+  `example/no_plugin` dies in `main()` of a call nobody serves;
+  `example/no_plugin_late` makes the same call after its first frame and
+  goes on.
 - `render`: writes one frame to a PPM file, for tests and a quick look.
 - `tool/raccoon-device`: ping, install, uninstall and run for the Flutter
   tool's custom device, so a stock `flutter run -d raccoon` works.

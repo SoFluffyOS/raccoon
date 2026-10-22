@@ -1081,6 +1081,236 @@ void main() {
     skip: ready ? false : 'build the runner and example first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
+
+  // example/no_plugin calls a Pigeon channel nobody serves in main(), before
+  // runApp, and dies of the null reply; example/no_plugin_late draws first,
+  // then calls a method channel nobody serves, and again on every tap.
+  final noPluginAssets = p.join(
+    runnerDir,
+    'example',
+    'no_plugin',
+    'build',
+    'flutter_assets',
+  );
+  final noPluginLateAssets = p.join(
+    runnerDir,
+    'example',
+    'no_plugin_late',
+    'build',
+    'flutter_assets',
+  );
+  const pigeonChannel =
+      'dev.flutter.pigeon.absent_plugin.AbsentHostApi.initialize';
+  const lateChannel = 'plugins.flutter.io/absent_plugin';
+  const orange = (r: 0xFB, g: 0x8C, b: 0x00);
+  const grey = (r: 0x9E, g: 0x9E, b: 0x9E);
+
+  /// How long the app took for its call, from what it printed last with
+  /// [prefix], such as `NO_PLUGIN:null after 3 ms`.
+  int? replyMillis(Iterable<String> lines, String prefix) {
+    final printed = lines.where((line) => line.contains(prefix)).lastOrNull;
+    if (printed == null) return null;
+    final match = RegExp(r'after (\d+) ms').firstMatch(printed);
+    return int.tryParse(match?.group(1) ?? '');
+  }
+
+  test(
+    'a plugin nobody serves before runApp gets no reply at once, and the '
+    'client is told why the app stopped',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: noPluginAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final stderr = <String>[];
+      runner.stderr.listen(stderr.add);
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        final failure = await client.startupFailures
+            .firstWhere((failure) => failure != null)
+            .timeout(const Duration(seconds: 15));
+        expect(
+          failure?.exception,
+          'PlatformException(channel-error, Unable to establish connection '
+          'on channel: "$pigeonChannel"., null, null)',
+        );
+        expect(failure?.stackTrace.first, startsWith('#0      main'));
+        expect(failure?.channels, [pigeonChannel]);
+        // The reply came back empty, and at once: nothing waited on a bound.
+        final millis = replyMillis(client.startupLog, 'NO_PLUGIN:null');
+        expect(millis, isNotNull, reason: client.startupLog.join('\n'));
+        expect(millis, lessThan(1000));
+        // The runner said so under its own name, for the tool's output.
+        expect(
+          client.startupLog.any(
+            (line) => line.startsWith(
+              'raccoon_runner: nothing answered $pigeonChannel (',
+            ),
+          ),
+          isTrue,
+        );
+        expect(client.latestFrame, isNull);
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready && Directory(noPluginAssets).existsSync()
+            ? false
+            : 'build the runner and example/no_plugin first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'a plugin nobody serves after the first frame fails the call and the '
+    'app goes on drawing',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: noPluginLateAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      runner.stderr.listen(output.add);
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        final failed = await client.frames
+            .firstWhere((frame) => _pixel(frame, 400, 300) == orange)
+            .timeout(const Duration(seconds: 15));
+        expect(_pixel(failed, 5, 5), _blue);
+        expect(client.startupFailure, isNull);
+        final deadline = DateTime.now().add(const Duration(seconds: 5));
+        while (replyMillis(output, 'NO_PLUGIN_LATE:') == null &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        expect(
+          output.where((line) => line.contains('NO_PLUGIN_LATE:')).first,
+          contains('NO_PLUGIN_LATE:MissingPluginException'),
+        );
+        expect(replyMillis(output, 'NO_PLUGIN_LATE:'), lessThan(1000));
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready && Directory(noPluginLateAssets).existsSync()
+            ? false
+            : 'build the runner and example/no_plugin_late first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'a reply the client never sends is answered empty after the bound',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: noPluginLateAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      runner.stderr.listen(output.add);
+      final client = await RunnerClient.connect(endpoint);
+      // A client that takes the call and never answers.
+      final asked = <DateTime>[];
+      client.registerChannel(lateChannel, (data) {
+        asked.add(DateTime.now());
+        return Completer<Uint8List?>().future;
+      });
+      try {
+        // The call at the first frame went out before or after the client
+        // took the channel; either way it fails in the end.
+        await client.frames
+            .firstWhere((frame) => _pixel(frame, 400, 300) == orange)
+            .timeout(const Duration(seconds: 20));
+        for (final (phase, buttons) in [
+          (PointerPhase.POINTER_PHASE_DOWN, 1),
+          (PointerPhase.POINTER_PHASE_UP, 0),
+        ]) {
+          client.sendPointer(
+            PointerEvent(
+              phase: phase,
+              x: 400,
+              y: 300,
+              buttons: Int64(buttons),
+              device: PointerDevice.POINTER_DEVICE_MOUSE,
+              pointerId: 1,
+            ),
+          );
+        }
+        await client.frames
+            .firstWhere((frame) => _pixel(frame, 400, 300) == grey)
+            .timeout(const Duration(seconds: 10));
+        final tapped = DateTime.now();
+        await client.frames
+            .firstWhere((frame) => _pixel(frame, 400, 300) == orange)
+            .timeout(const Duration(seconds: 15));
+        final waited = DateTime.now().difference(tapped);
+        final printed = DateTime.now().add(const Duration(seconds: 5));
+        while (output.where((line) => line.contains('NO_PLUGIN_LATE:')).length <
+                2 &&
+            DateTime.now().isBefore(printed)) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        expect(asked, isNotEmpty);
+        expect(waited, greaterThan(const Duration(seconds: 3)));
+        expect(waited, lessThan(const Duration(seconds: 10)));
+        expect(
+          replyMillis(output, 'NO_PLUGIN_LATE:MissingPluginException'),
+          greaterThanOrEqualTo(4000),
+        );
+        expect(
+          output.where(
+            (line) =>
+                line ==
+                'raccoon_runner: nothing answered $lateChannel (the client '
+                    'did not answer in 5 s); the app sees no plugin',
+          ),
+          hasLength(1),
+          reason: 'once per channel',
+        );
+        expect(client.startupFailure, isNull);
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready && Directory(noPluginLateAssets).existsSync()
+            ? false
+            : 'build the runner and example/no_plugin_late first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 }
 
 /// A release of buffer [index] of [generation] as the GPU socket takes it,
