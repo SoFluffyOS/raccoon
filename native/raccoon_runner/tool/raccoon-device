@@ -180,7 +180,7 @@ build_plugins_linux() {
   cache="${RACCOON_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/$engine}"
   python3 - "$project/.dart_tool/package_config.json" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS" \
     "$cache" "$version" "$(uname -m)" \
-    "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon_runner/releases/download/v$version/plugins-$engine-linux-$(uname -m).tar.gz}" <<'PY'
+    "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-$engine-linux-$(uname -m).tar.gz}" <<'PY'
 import glob, hashlib, json, os, re, shutil, subprocess, sys, tarfile, urllib.request
 from urllib.parse import unquote, urlparse
 
