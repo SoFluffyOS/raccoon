@@ -153,6 +153,20 @@ final class RunnerClient
   @override
   TextField? get latestTextField => _latestTextField;
 
+  Plugins? _latestPlugins;
+
+  /// What became of the project's native plugins on the runner's host, as
+  /// the runner last said; null until it has.
+  Plugins? get latestPlugins => _latestPlugins;
+
+  /// The latest word on the plugins first, then every change.
+  Stream<Plugins> get plugins async* {
+    if (_latestPlugins case final plugins?) yield plugins;
+    yield* messages
+        .where((message) => message.hasPlugins())
+        .map((message) => message.plugins);
+  }
+
   @override
   Stream<TextField> get textFields async* {
     if (_latestTextField case final field?) yield field;
@@ -204,6 +218,7 @@ final class RunnerClient
       }
       if (message.hasVmService()) _vmServiceUri = message.vmService.uri;
       if (message.hasTextField()) _latestTextField = message.textField;
+      if (message.hasPlugins()) _latestPlugins = message.plugins;
       if (message.hasPlatformMessage()) {
         unawaited(_servePlatformMessage(message.platformMessage));
       }
