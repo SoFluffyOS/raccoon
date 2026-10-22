@@ -360,6 +360,27 @@ int Serve(const Options& options) {
   raccoon::RunnerServer* server_ptr = nullptr;
   // The active text field, to the client; a client with an input method
   // mirrors it there.
+  // What became of the plugins, for a client that just arrived.
+  auto SendPlugins = [&server_ptr, &host]() {
+    if (server_ptr == nullptr || !server_ptr->has_client()) return;
+#if RACCOON_HAS_PLUGINS
+    raccoon::v1::RunnerMessage message;
+    auto* plugins = message.mutable_plugins();
+    for (const raccoon::PluginStatus& status : host.plugin_statuses()) {
+      auto* entry = plugins->add_plugins();
+      entry->set_name(status.name);
+      entry->set_detail(status.detail);
+      entry->set_state(
+          status.state == "loaded"          ? raccoon::v1::PLUGIN_STATE_LOADED
+          : status.state == "failed"        ? raccoon::v1::PLUGIN_STATE_FAILED
+          : status.state == "built_nothing" ? raccoon::v1::PLUGIN_STATE_BUILT_NOTHING
+          : status.state == "no_host"       ? raccoon::v1::PLUGIN_STATE_NO_HOST
+          : status.state == "built_in"      ? raccoon::v1::PLUGIN_STATE_BUILT_IN
+                                            : raccoon::v1::PLUGIN_STATE_UNSPECIFIED);
+    }
+    if (plugins->plugins_size() > 0) server_ptr->Send(message);
+#endif
+  };
   auto SendTextField = [&server_ptr](const raccoon::TextFieldState& state) {
     if (server_ptr == nullptr || !server_ptr->has_client()) return;
     raccoon::v1::RunnerMessage message;
@@ -448,6 +469,7 @@ int Serve(const Options& options) {
     host.text_input().SetComposer(hello.composes());
     // A client that arrives mid-run learns which field is active.
     SendTextField(host.text_input().state());
+    SendPlugins();
   };
   handler.on_text_editing = [&host](const raccoon::v1::TextEditing& editing) {
     host.text_input().ApplyEditing(editing.text(), editing.selection_base(),

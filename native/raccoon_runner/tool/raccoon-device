@@ -194,29 +194,49 @@ def version_key(name, root):
 lib_stamp = '%d' % int(os.stat(lib).st_mtime)
 
 wanted = []
+status = []  # what never gets as far as a library, for the runner to relay
+packages = []
 for package in json.load(open(config)).get('packages', []):
     uri = package.get('rootUri', '')
     root = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, uri))
     pubspec_path = os.path.join(root, 'pubspec.yaml')
-    if not os.path.isfile(pubspec_path) or package['name'] in virtual:
+    if os.path.isfile(pubspec_path):
+        packages.append((package['name'], root, open(pubspec_path).read()))
+# Implementation packages of federated plugins: named as a default_package
+# by their app-facing package, or saying what they implement. Not the ones
+# to blame for a missing host.
+implementations = set()
+for _, _, pubspec in packages:
+    implementations.update(re.findall(r'default_package:\s*(\w+)', pubspec))
+for name, root, pubspec in packages:
+    if name in virtual:
+        status.append({'name': name, 'state': 'built_in', 'detail': 'the runner answers it'})
         continue
-    pubspec = open(pubspec_path).read()
     if not re.search(r'^\s+plugin:\s*$', pubspec, re.M):
         continue
     block = linux_block(pubspec)
     cls = re.search(r'pluginClass:\s*(\w+)', block)
     ffi = re.search(r'ffiPlugin:\s*true', block) is not None
     if cls is None and not ffi:
+        # An app-facing plugin with no Linux at all (its platforms name
+        # others; an implementation package says what it implements and is
+        # not the one to blame): the app's calls to it will fail, and the
+        # pane can say so before they do.
+        if (not block and re.search(r'^\s+platforms:\s*$', pubspec, re.M)
+                and not re.search(r'^\s+linux:', pubspec, re.M)
+                and not re.search(r'^\s+implements:', pubspec, re.M)
+                and name not in implementations):
+            status.append({'name': name, 'state': 'no_host', 'detail': 'no Linux implementation'})
         continue
     if not os.path.isfile(os.path.join(root, 'linux', 'CMakeLists.txt')):
         continue
     symbol = None
     if cls is not None:
         symbol = re.sub(r'(?<!^)(?=[A-Z])', '_', cls.group(1)).lower() + '_register_with_registrar'
-    wanted.append({'name': package['name'], 'root': root, 'symbol': symbol,
-                   'key': version_key(package['name'], root) + '-' + lib_stamp})
+    wanted.append({'name': name, 'root': root, 'symbol': symbol,
+                   'key': version_key(name, root) + '-' + lib_stamp})
 
-if not wanted:
+if not wanted and not status:
     sys.exit(0)
 
 os.makedirs(os.path.join(out, 'lib'), exist_ok=True)
@@ -242,11 +262,13 @@ for plugin in wanted:
         libs = sorted(glob.glob(os.path.join(project, 'out', 'plugin', '**', '*.so'), recursive=True)) if ok else []
         if not ok:
             failed.append('%s (see %s)' % (name, os.path.join(project, 'build.log')))
+            status.append({'name': name, 'state': 'failed', 'detail': 'did not build; see ' + os.path.join(project, 'build.log')})
             continue
         if not libs:
             # Built fine and made nothing: an FFI plugin whose library wants
             # a toolchain this machine has not (jni without a JDK).
             empty.append(name)
+            status.append({'name': name, 'state': 'built_nothing', 'detail': 'built and made no library'})
             continue
         os.makedirs(cached, exist_ok=True)
         for so in libs:
@@ -261,7 +283,7 @@ for plugin in wanted:
         entries.append({'name': name, 'library': os.path.join(out, 'lib', os.path.basename(main[0])),
                         'symbol': plugin['symbol']})
 
-json.dump({'plugins': entries, 'library_path': os.path.join(out, 'lib')},
+json.dump({'plugins': entries, 'status': status, 'library_path': os.path.join(out, 'lib')},
           open(os.path.join(out, 'manifest.json'), 'w'), indent=1)
 parts = []
 if built:
@@ -272,6 +294,8 @@ if empty:
     parts.append('%d built nothing: %s' % (len(empty), ', '.join(empty)))
 if failed:
     parts.append('%d failed: %s' % (len(failed), '; '.join(failed)))
+if not parts:
+    parts.append('none to build')
 print('raccoon-device: native plugins, ' + '; '.join(parts), file=sys.stderr)
 PY
 }

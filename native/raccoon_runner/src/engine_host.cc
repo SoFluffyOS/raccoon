@@ -530,6 +530,13 @@ bool EngineHost::LoadPlugins(const std::string& manifest, std::string* error) {
 #endif
 }
 
+#if RACCOON_HAS_PLUGINS
+const std::vector<PluginStatus>& EngineHost::plugin_statuses() const {
+  static const std::vector<PluginStatus> kNone;
+  return plugins_ ? plugins_->statuses() : kNone;
+}
+#endif
+
 size_t EngineHost::plugins_loaded() const {
 #if RACCOON_HAS_PLUGINS
   return plugins_ ? plugins_->loaded() : 0;

@@ -78,6 +78,9 @@ class EngineHost {
   // when this runner cannot or the manifest cannot be read.
   bool LoadPlugins(const std::string& manifest, std::string* error);
   size_t plugins_loaded() const;
+#if RACCOON_HAS_PLUGINS
+  const std::vector<PluginStatus>& plugin_statuses() const;
+#endif
 
   void Resize(size_t width, size_t height, double pixel_ratio);
   void SendPointer(const FlutterPointerEvent& event);

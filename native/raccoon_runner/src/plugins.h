@@ -22,6 +22,14 @@ struct PluginEntry {
   std::string symbol;   // its <name>_plugin_register_with_registrar
 };
 
+// What became of a plugin: the manifest's word on the ones that never got
+// as far as a library, the runner's own on the ones it loaded or not.
+struct PluginStatus {
+  std::string name;
+  std::string state;   // loaded, failed, built_nothing, no_host, built_in
+  std::string detail;
+};
+
 class PluginHost {
  public:
   // What plugins need from the runner.
@@ -52,6 +60,8 @@ class PluginHost {
   bool Load(const PluginEntry& entry, std::string* error);
   size_t loaded() const { return names_.size(); }
   const std::vector<std::string>& names() const { return names_; }
+  // Every plugin the manifest spoke of, with what became of it.
+  const std::vector<PluginStatus>& statuses() const { return statuses_; }
 
   // A message from the app, on the platform thread: true when a plugin
   // took it (it answers through the bridge).
@@ -82,6 +92,7 @@ class PluginHost {
   FlPluginRegistrar* registrar_ = nullptr;
   std::vector<void*> handles_;
   std::vector<std::string> names_;
+  std::vector<PluginStatus> statuses_;
 };
 
 }  // namespace raccoon

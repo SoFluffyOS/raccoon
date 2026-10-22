@@ -220,6 +220,34 @@ message TextField {
   bool obscure = 9;
 }
 
+// What became of the project's native plugins on this host. Sent after
+// Hello, and again when it changes.
+message Plugins {
+  repeated PluginStatus plugins = 1;
+}
+
+message PluginStatus {
+  string name = 1;
+  PluginState state = 2;
+  // A word of why, for the states that have one: the failure, the log's
+  // path, the host it would need.
+  string detail = 3;
+}
+
+enum PluginState {
+  PLUGIN_STATE_UNSPECIFIED = 0;
+  // Loaded into the runner and registered: its channels are answered.
+  PLUGIN_STATE_LOADED = 1;
+  // Did not build, or did not load; detail says.
+  PLUGIN_STATE_FAILED = 2;
+  // Built and made no library: an FFI plugin without its toolchain.
+  PLUGIN_STATE_BUILT_NOTHING = 3;
+  // Declares no implementation for this host: its calls will fail.
+  PLUGIN_STATE_NO_HOST = 4;
+  // The runner answers its channels itself (the window plugins).
+  PLUGIN_STATE_BUILT_IN = 5;
+}
+
 // The runner has a client already; the connection closes after this.
 message Busy {
   uint32 pid = 1;  // the client that has it
@@ -237,5 +265,6 @@ message RunnerMessage {
     Busy busy = 8;
     TextField text_field = 9;
     GpuBuffers gpu_buffers = 10;
+    Plugins plugins = 11;
   }
 }
