@@ -4,11 +4,13 @@
 //   raccoon_runner serve  --engine-dir DIR --assets DIR --icu FILE --socket P
 //   raccoon_runner --version
 
+#include <signal.h>
 #include <unistd.h>
 #if defined(__linux__)
 #include <sys/prctl.h>
 #endif
 
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -586,7 +588,15 @@ int Serve(const Options& options) {
   };
   handler.on_shutdown = [&stop] { stop = true; };
   // The Flutter tool started this runner; when it is gone, so is the run.
+  // Through the device helper, the helper is the parent and
+  // RACCOON_PARENT_PID names the tool.
   const pid_t parent = getppid();
+  const char* tool_env = std::getenv("RACCOON_PARENT_PID");
+  const pid_t tool = tool_env == nullptr ? 0 : static_cast<pid_t>(std::atoi(tool_env));
+  auto ParentGone = [parent, tool] {
+    if (getppid() != parent) return true;
+    return tool > 1 && kill(tool, 0) != 0 && errno == ESRCH;
+  };
   handler.on_hello = [&](const raccoon::v1::ClientHello& hello) {
     client_shared = hello.shared_buffers();
     client_gpu = false;
@@ -805,9 +815,9 @@ int Serve(const Options& options) {
         }
       }
     }
-    if (getppid() != parent) {
+    if (ParentGone()) {
       std::fprintf(stderr, "raccoon_runner: parent %d is gone; stopping\n",
-                   static_cast<int>(parent));
+                   static_cast<int>(getppid() == parent && tool > 1 ? tool : parent));
       stop = true;
     }
     loop.RunOnce(NextWait(host, ExpireReplies(1000)));

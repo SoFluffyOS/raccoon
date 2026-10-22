@@ -10,6 +10,8 @@
 # runtime's app store; run starts raccoon_runner serve on it and leaves the
 # engine's log lines on stdout, where the tool reads the VM service URI, and
 # keeps a timestamped copy of the run's output in the app's data directory.
+# A runner that ends badly is said so on stderr: its exit code, or the
+# signal it died of.
 #
 # --instance KEY (the "raccoon-KEY" device: 2, phone, tablet, desktop, a name) keeps the same project apart from its
 # first run: socket, app store and data directory are named <appName>@N, so
@@ -397,9 +399,15 @@ case "$verb" in
     if [ -d "$APPS/$key/plugins/lib" ]; then
       export LD_LIBRARY_PATH="$APPS/$key/plugins/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     fi
+    # The runner is this script's child rather than its replacement, so a
+    # runner that dies (a native crash in a plugin, say) says how in the
+    # tool's output. The tool stops a run by stopping this script, which
+    # passes it on; the runner watches the tool itself, which may go
+    # without a word.
+    export RACCOON_PARENT_PID="$PPID"
     # The tool passes its engine switches as one argument; split on spaces.
     # shellcheck disable=SC2068
-    exec "$RUNNER" serve \
+    "$RUNNER" serve \
       --engine-dir "$("$ROOT/tool/engine_dir.sh")" \
       --assets "$APPS/$key/flutter_assets" \
       --icu "$(sdk_icu)" \
@@ -409,7 +417,27 @@ case "$verb" in
       $size_args \
       -- $@ \
       > >(tee >(stamp >> "$log")) \
-      2> >(tee >(stamp >> "$log") >&2)
+      2> >(tee >(stamp >> "$log") >&2) &
+    runner=$!
+    trap 'kill -TERM "$runner" 2>/dev/null' TERM INT HUP
+    # A signal cuts the wait short; the runner is gone once kill -0 says so
+    # (until it is waited for, an exited runner still answers).
+    while :; do
+      status=0
+      wait "$runner" 2>/dev/null || status=$?
+      kill -0 "$runner" 2>/dev/null || break
+    done
+    said=""
+    if [ "$status" -gt 128 ]; then
+      said="raccoon-device: raccoon_runner died of signal $(kill -l $((status - 128)) 2>/dev/null || echo '?') ($((status - 128)))"
+    elif [ "$status" -ne 0 ]; then
+      said="raccoon-device: raccoon_runner exited with code $status"
+    fi
+    if [ -n "$said" ]; then
+      echo "$said" >&2
+      echo "$said" | stamp >> "$log"
+    fi
+    exit "$status"
     ;;
   *)
     echo "usage: raccoon-device ping | install [--instance KEY] <localPath> <appName> | uninstall [--instance KEY] <appName> | run [--instance KEY] [--size WxH@R] <appName> [engine switches] | prebuild <project> <archive.tar.gz>" >&2

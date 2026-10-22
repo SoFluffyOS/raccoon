@@ -106,7 +106,9 @@ Design notes: `docs/internal_docs/raccoon/`.
   `raccoon-2`, `raccoon-phone`, `raccoon-tablet` and `raccoon-desktop`
   devices keep their runs of the same project apart; `--size 820x1180@2`
   starts the runner at a device's logical size and pixel ratio; each run's
-  output lands timestamped in the app's data directory as `runner.log`.
+  output lands timestamped in the app's data directory as `runner.log`. A
+  runner that ends badly is said so in the run's output: `raccoon-device:
+  raccoon_runner exited with code N`, or `died of signal SEGV (11)`.
 
 ## Build
 
