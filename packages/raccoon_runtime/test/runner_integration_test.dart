@@ -719,6 +719,88 @@ void main() {
   );
 
   test(
+    'the runner tells a client what became of the plugins',
+    () async {
+      // The manifest carries the helper's word on what never got as far as a
+      // library; the runner adds its own on what it loaded, and sends the
+      // lot after Hello.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final manifest = File(p.join(temp.path, 'plugins.json'))
+        ..writeAsStringSync(
+          jsonEncode({
+            'plugins': [
+              {
+                'name': 'raccoon_echo',
+                'library': pluginLibrary,
+                'symbol': 'raccoon_echo_plugin_register_with_registrar',
+              },
+              {
+                'name': 'nowhere',
+                'library': p.join(temp.path, 'libnowhere_plugin.so'),
+                'symbol': 'nowhere_plugin_register_with_registrar',
+              },
+            ],
+            'status': [
+              {
+                'name': 'firebase_core',
+                'state': 'no_host',
+                'detail': 'no Linux implementation',
+              },
+              {
+                'name': 'desktop_window',
+                'state': 'built_in',
+                'detail': 'the runner answers it',
+              },
+            ],
+          }),
+        );
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: pluginsAppAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          plugins: manifest.path,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        final plugins = await client.plugins.first.timeout(
+          const Duration(seconds: 10),
+        );
+        final byName = {for (final s in plugins.plugins) s.name: s};
+        expect(byName['raccoon_echo']?.state, PluginState.PLUGIN_STATE_LOADED);
+        expect(byName['nowhere']?.state, PluginState.PLUGIN_STATE_FAILED);
+        expect(byName['nowhere']?.detail, contains('libnowhere_plugin.so'));
+        expect(
+          byName['firebase_core']?.state,
+          PluginState.PLUGIN_STATE_NO_HOST,
+        );
+        expect(
+          byName['desktop_window']?.state,
+          PluginState.PLUGIN_STATE_BUILT_IN,
+        );
+        expect(client.latestPlugins, plugins);
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready &&
+            File(pluginLibrary).existsSync() &&
+            Directory(pluginsAppAssets).existsSync()
+        ? false
+        : 'build the runner with plugins and example/plugins_app first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'a plugin\'s texture draws through the renderer',
     () async {
       // The echo plugin registers a 64 by 64 pixel-buffer texture, orange;
