@@ -87,6 +87,7 @@ add_executable(raccoon_runner
   src/server.cc
   src/shared_buffers.cc
   src/software_frame.cc
+  src/stderr_capture.cc
   src/standard_codec.cc
   src/text_input.cc
   src/user_defaults_channels.cc

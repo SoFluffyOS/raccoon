@@ -14,7 +14,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -26,6 +28,7 @@
 #include "flutter_embedder.h"
 #include "server.h"
 #include "shared_buffers.h"
+#include "stderr_capture.h"
 
 namespace {
 
@@ -50,6 +53,10 @@ struct Options {
 constexpr auto kReplyTimeout = std::chrono::seconds(5);
 const std::string kNoReplyWhy =
     "the client did not answer in " + std::to_string(kReplyTimeout.count()) + " s";
+
+// The log lines kept from before the first frame, the latest, for a client
+// that arrives after them: an app that dies in main() has said why by then.
+constexpr size_t kStartupLines = 200;
 
 constexpr uint32_t kProtocolVersion = 1;
 constexpr raccoon::v1::PixelFormat kPixelFormat =
@@ -124,6 +131,61 @@ void OnSignal(int) {
 void PrintEngineLog(const std::string&, const std::string& message) {
   std::fprintf(stdout, "%s\n", message.c_str());
   std::fflush(stdout);
+}
+
+// Log lines on their way to the client: the engine's, from its thread, and
+// stderr's, from the capture's. The loop takes them.
+class LogQueue {
+ public:
+  explicit LogQueue(raccoon::EventLoop& loop) : loop_(loop) {}
+
+  void Push(const std::string& tag, const std::string& message) {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      lines_.emplace_back(tag, message);
+    }
+    loop_.Wake();
+  }
+
+  std::vector<std::pair<std::string, std::string>> Take() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return std::exchange(lines_, {});
+  }
+
+ private:
+  raccoon::EventLoop& loop_;
+  std::mutex mutex_;
+  std::vector<std::pair<std::string, std::string>> lines_;
+};
+
+// |text| with every byte that is not part of valid UTF-8 replaced by '?':
+// protobuf strings must be UTF-8, and a plugin may print anything.
+std::string ValidUtf8(const std::string& text) {
+  std::string out;
+  out.reserve(text.size());
+  size_t i = 0;
+  while (i < text.size()) {
+    // The sequence's length, from its lead byte; 0 for a byte that leads
+    // none.
+    const auto lead = static_cast<unsigned char>(text[i]);
+    size_t length = 0;
+    if (lead < 0x80) length = 1;
+    else if ((lead >> 5) == 0x6) length = 2;
+    else if ((lead >> 4) == 0xE) length = 3;
+    else if ((lead >> 3) == 0x1E) length = 4;
+    bool ok = length > 0 && i + length <= text.size();
+    for (size_t k = 1; ok && k < length; ++k) {
+      ok = (static_cast<unsigned char>(text[i + k]) >> 6) == 0x2;
+    }
+    if (!ok) {
+      out.push_back('?');
+      ++i;
+      continue;
+    }
+    out.append(text, i, length);
+    i += length;
+  }
+  return out;
 }
 
 // Where the GPU buffers' descriptors are served: the runner's socket path
@@ -349,6 +411,15 @@ int Serve(const Options& options) {
   std::signal(SIGINT, OnSignal);
   std::signal(SIGTERM, OnSignal);
 
+  // The app's log reaches the client too: the engine's lines, and stderr,
+  // where the engine prints what main() died of and the runner what went
+  // unanswered. A client is often not there yet when that happens.
+  LogQueue logs(loop);
+  raccoon::StderrCapture capture;
+  if (!capture.Start([&logs](const std::string& line) { logs.Push("stderr", line); })) {
+    std::fprintf(stderr, "raccoon_runner: stderr stays the client's blind spot\n");
+  }
+
   raccoon::EngineHost host;
   std::string error;
   // RACCOON_RENDERER=gl|metal|software|auto stands in for --renderer.
@@ -357,8 +428,11 @@ int Serve(const Options& options) {
       env != nullptr && engine.renderer == "auto") {
     engine.renderer = env;
   }
-  if (!host.Start(engine, PrintEngineLog, [&loop] { loop.Wake(); },
-                  &error)) {
+  auto on_log = [&logs](const std::string& tag, const std::string& message) {
+    PrintEngineLog(tag, message);
+    logs.Push(tag, message);
+  };
+  if (!host.Start(engine, on_log, [&loop] { loop.Wake(); }, &error)) {
     std::fprintf(stderr, "raccoon_runner: %s\n", error.c_str());
     return 1;
   }
@@ -463,6 +537,25 @@ int Serve(const Options& options) {
     return wait;
   };
 
+  // The lines from before the first frame, for a client that comes later.
+  std::deque<raccoon::v1::RunnerMessage> startup_lines;
+  bool startup_over = false;
+  auto SendLogs = [&]() {
+    for (auto& [tag, text] : logs.Take()) {
+      raccoon::v1::RunnerMessage message;
+      message.mutable_log()->set_tag(ValidUtf8(tag));
+      message.mutable_log()->set_message(ValidUtf8(text));
+      if (server_ptr != nullptr && server_ptr->has_client()) server_ptr->Send(message);
+      if (startup_over) continue;
+      startup_lines.push_back(std::move(message));
+      if (startup_lines.size() > kStartupLines) startup_lines.pop_front();
+    }
+    if (!startup_over && host.frame().FrameCount() > 0) {
+      startup_over = true;
+      startup_lines.clear();
+    }
+  };
+
   raccoon::RunnerServer::Handler handler;
   handler.on_resize = [&host](const raccoon::v1::Resize& resize) {
     if (std::getenv("RACCOON_TRACE") != nullptr) {
@@ -545,6 +638,8 @@ int Serve(const Options& options) {
     hello.mutable_hello()->set_protocol_version(kProtocolVersion);
     hello.mutable_hello()->set_pid(static_cast<uint32_t>(getpid()));
     server_ptr->Send(hello);
+    // What the app said before it drew anything, why it stopped if it did.
+    for (const auto& line : startup_lines) server_ptr->Send(line);
     last_sent = 0;
     vm_sent = false;
     std::fprintf(stderr, "raccoon_runner: client connected\n");
@@ -608,6 +703,7 @@ int Serve(const Options& options) {
   while (!stop && g_stop == 0) {
     host.platform().RunDueTasks();
     host.ServiceVsync();
+    SendLogs();
     if (server.has_client()) {
       if (!vm_sent) {
         const std::string uri = host.vm_service_uri();
@@ -723,6 +819,7 @@ int Serve(const Options& options) {
     server.Send(exited);
   }
   host.Shutdown();
+  capture.Stop();
   std::fprintf(stderr, "raccoon_runner: stopped\n");
   return 0;
 }
