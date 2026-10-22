@@ -81,6 +81,123 @@ if [ "${1:-}" = "--instance" ]; then
   INSTANCE="$2"; shift 2
 fi
 
+
+# The window plugins stay the runner's own: their window is the client's pane.
+VIRTUAL_PLUGINS="desktop_window window_manager window_size screen_retriever"
+
+# The plugin-facing library and its headers: beside the runner in an archive,
+# in build/ and third_party/ in a checkout.
+plugin_library() {
+  local dir
+  dir="$(dirname "$RUNNER")"
+  [ -f "$dir/libflutter_linux_gtk.so" ] && echo "$dir/libflutter_linux_gtk.so"
+}
+plugin_headers() {
+  if [ -d "$ROOT/include/flutter_linux" ]; then
+    echo "$ROOT/include"
+  elif [ -d "$ROOT/third_party/flutter_linux/flutter/shell/platform/linux/public/flutter_linux" ]; then
+    echo "$ROOT/third_party/flutter_linux/flutter/shell/platform/linux/public"
+  fi
+}
+
+# Builds the native plugins a project lists (.flutter-plugins-dependencies)
+# into |out| and writes |out|/manifest.json for the runner's --plugins: one
+# CMake project with what Flutter's desktop template gives a plugin. When it
+# cannot, says why and leaves no manifest; the app then sees no plugin.
+build_plugins() {
+  local project="$1" out="$2" lib headers need count
+  rm -rf "$out"
+  [ "$(uname -s)" = Linux ] || return 0
+  [ -f "$project/.flutter-plugins-dependencies" ] || return 0
+  lib="$(plugin_library || true)"
+  headers="$(plugin_headers || true)"
+  if [ -z "$lib" ] || [ -z "$headers" ]; then
+    echo "raccoon-device: this runner has no plugin library; native plugins skipped" >&2
+    return 0
+  fi
+  for need in cmake ninja python3 pkg-config; do
+    if ! command -v "$need" >/dev/null; then
+      echo "raccoon-device: no $need; native plugins skipped" >&2
+      return 0
+    fi
+  done
+  if ! pkg-config --exists gtk+-3.0; then
+    echo "raccoon-device: no gtk+-3.0 development files; native plugins skipped" >&2
+    return 0
+  fi
+  mkdir -p "$out"
+  count="$(python3 - "$project/.flutter-plugins-dependencies" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS" <<'PY'
+import json, os, re, sys
+deps, out, lib, headers, virtual = sys.argv[1:6]
+virtual = set(virtual.split())
+plugins = json.load(open(deps)).get('plugins', {}).get('linux', [])
+lines = [
+    'cmake_minimum_required(VERSION 3.14)',
+    'project(raccoon_plugins LANGUAGES CXX)',
+    'set(CMAKE_BUILD_TYPE Release)',
+    'function(APPLY_STANDARD_SETTINGS TARGET)',
+    '  target_compile_features(${TARGET} PUBLIC cxx_std_14)',
+    '  target_compile_options(${TARGET} PRIVATE -Wall -Werror)',
+    '  target_compile_options(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:-O3>")',
+    '  target_compile_definitions(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:NDEBUG>")',
+    'endfunction()',
+    'find_package(PkgConfig REQUIRED)',
+    'pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0)',
+    'pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0)',
+    'pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)',
+    'add_library(flutter INTERFACE)',
+    'target_include_directories(flutter INTERFACE "%s")' % headers,
+    'target_link_libraries(flutter INTERFACE "%s" PkgConfig::GTK PkgConfig::GLIB PkgConfig::GIO)' % lib,
+]
+wanted = []
+for plugin in plugins:
+    name, path = plugin['name'], plugin['path']
+    if not plugin.get('native_build', False) or name in virtual:
+        continue
+    pubspec = open(os.path.join(path, 'pubspec.yaml')).read()
+    found = re.search(r'^([ \t]*)linux:[ \t]*\n', pubspec, re.M)
+    block = []
+    if found:
+        indent = len(found.group(1))
+        for line in pubspec[found.end():].splitlines():
+            if not line.strip():
+                continue
+            if len(line) - len(line.lstrip()) <= indent:
+                break
+            block.append(line)
+    cls = re.search(r'pluginClass:\s*(\w+)', '\n'.join(block))
+    if cls is None:
+        continue  # an FFI plugin, or Dart only on Linux: nothing to register
+    symbol = re.sub(r'(?<!^)(?=[A-Z])', '_', cls.group(1)).lower() + '_register_with_registrar'
+    lines.append('add_subdirectory("%s" "plugins/%s")' % (os.path.join(path, 'linux'), name))
+    wanted.append({'name': name, 'symbol': symbol})
+open(os.path.join(out, 'CMakeLists.txt'), 'w').write('\n'.join(lines) + '\n')
+json.dump(wanted, open(os.path.join(out, 'wanted.json'), 'w'))
+print(len(wanted))
+PY
+)"
+  if [ "$count" = 0 ]; then
+    rm -rf "$out"
+    return 0
+  fi
+  if ! cmake -S "$out" -B "$out/build" -G Ninja > "$out/build.log" 2>&1 ||
+     ! cmake --build "$out/build" >> "$out/build.log" 2>&1; then
+    echo "raccoon-device: native plugins did not build; see $out/build.log" >&2
+    return 0
+  fi
+  python3 - "$out" <<'PY'
+import glob, json, os, sys
+out = sys.argv[1]
+entries = []
+for plugin in json.load(open(os.path.join(out, 'wanted.json'))):
+    libs = glob.glob(os.path.join(out, 'build', 'plugins', plugin['name'], '*.so'))
+    if libs:
+        entries.append({'name': plugin['name'], 'library': libs[0], 'symbol': plugin['symbol']})
+json.dump({'plugins': entries}, open(os.path.join(out, 'manifest.json'), 'w'), indent=1)
+print('raccoon-device: %d native plugins built: %s' % (len(entries), ', '.join(e['name'] for e in entries)), file=sys.stderr)
+PY
+}
+
 case "$verb" in
   ping)
     test -x "$RUNNER"
@@ -90,6 +207,9 @@ case "$verb" in
     rm -rf "$APPS/$key"
     mkdir -p "$APPS/$key"
     cp -r "$local_path" "$APPS/$key/flutter_assets"
+    # The project is two levels above its bundle; its native plugins are
+    # built for this host and loaded into the runner.
+    build_plugins "$(cd "$local_path/../.." && pwd)" "$APPS/$key/plugins"
     ;;
   uninstall)
     rm -rf "$APPS/$(app_key "$1")"
@@ -101,6 +221,8 @@ case "$verb" in
     # keeps reading the untouched streams.
     log="$DATA/$key/runner.log"
     : > "$log"
+    manifest="$APPS/$key/plugins/manifest.json"
+    [ -f "$manifest" ] || manifest=""
     # The tool passes its engine switches as one argument; split on spaces.
     # shellcheck disable=SC2068
     exec "$RUNNER" serve \
@@ -109,6 +231,7 @@ case "$verb" in
       --icu "$(sdk_icu)" \
       --socket "$SOCKETS/$key.sock" \
       --data-dir "$DATA/$key" \
+      ${manifest:+--plugins "$manifest"} \
       -- $@ \
       > >(tee >(stamp >> "$log")) \
       2> >(tee >(stamp >> "$log") >&2)
