@@ -8,33 +8,37 @@ import 'package:raccoon_runtime/raccoon_runtime.dart';
 import 'package:test/test.dart';
 
 List<int> _linuxEmbedderZip() {
-  final archive = Archive()
-    ..addFile(
-      ArchiveFile.bytes('libflutter_engine.so', [0x7f, 0x45, 0x4c, 0x46]),
-    )
-    ..addFile(
-      ArchiveFile.string(
-        'flutter_embedder.h',
-        '#define FLUTTER_ENGINE_VERSION 1\n',
-      ),
-    );
+  final archive =
+      Archive()
+        ..addFile(
+          ArchiveFile.bytes('libflutter_engine.so', [0x7f, 0x45, 0x4c, 0x46]),
+        )
+        ..addFile(
+          ArchiveFile.string(
+            'flutter_embedder.h',
+            '#define FLUTTER_ENGINE_VERSION 1\n',
+          ),
+        );
   return ZipEncoder().encodeBytes(archive);
 }
 
 /// The framework zip's shape: the contents of FlutterEmbedder.framework at
 /// the root, with the usual links into Versions/A.
 List<int> _darwinEmbedderZip() {
-  final archive = Archive()
-    ..addFile(ArchiveFile.bytes('Versions/A/FlutterEmbedder', [0xcf, 0xfa]))
-    ..addFile(
-      ArchiveFile.string(
-        'Versions/A/Headers/FlutterEmbedder.h',
-        '#define FLUTTER_ENGINE_VERSION 1\n',
-      ),
-    )
-    ..addFile(_symlink('Versions/Current', 'A'))
-    ..addFile(_symlink('FlutterEmbedder', 'Versions/Current/FlutterEmbedder'))
-    ..addFile(_symlink('Headers', 'Versions/Current/Headers'));
+  final archive =
+      Archive()
+        ..addFile(ArchiveFile.bytes('Versions/A/FlutterEmbedder', [0xcf, 0xfa]))
+        ..addFile(
+          ArchiveFile.string(
+            'Versions/A/Headers/FlutterEmbedder.h',
+            '#define FLUTTER_ENGINE_VERSION 1\n',
+          ),
+        )
+        ..addFile(_symlink('Versions/Current', 'A'))
+        ..addFile(
+          _symlink('FlutterEmbedder', 'Versions/Current/FlutterEmbedder'),
+        )
+        ..addFile(_symlink('Headers', 'Versions/Current/Headers'));
   return _madeOnUnix(ZipEncoder().encodeBytes(archive));
 }
 
@@ -179,9 +183,10 @@ void main() {
     final store = RuntimeStore(
       cacheDirectory: p.join(temp.path, 'engines'),
       platform: 'linux-x64',
-      download: (_) async => ZipEncoder().encodeBytes(
-        Archive()..addFile(ArchiveFile.string('README', 'empty')),
-      ),
+      download:
+          (_) async => ZipEncoder().encodeBytes(
+            Archive()..addFile(ArchiveFile.string('README', 'empty')),
+          ),
     );
 
     expect(store.ensure('rev2'), throwsStateError);

@@ -70,13 +70,17 @@ class _FakeTextures implements HostGpuTextures {
 }
 
 /// The transform the texture is drawn through.
-Matrix4 _flipOf(WidgetTester tester) => tester
-    .widget<Transform>(
-      find
-          .ancestor(of: find.byType(Texture), matching: find.byType(Transform))
-          .first,
-    )
-    .transform;
+Matrix4 _flipOf(WidgetTester tester) =>
+    tester
+        .widget<Transform>(
+          find
+              .ancestor(
+                of: find.byType(Texture),
+                matching: find.byType(Transform),
+              )
+              .first,
+        )
+        .transform;
 
 void main() {
   testWidgets(

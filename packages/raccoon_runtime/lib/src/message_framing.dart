@@ -45,9 +45,10 @@ final class MessageUnframer {
     final head = Uint8List(MessageFraming.prefixLength);
     var filled = 0;
     for (final chunk in _chunks) {
-      final take = chunk.length < head.length - filled
-          ? chunk.length
-          : head.length - filled;
+      final take =
+          chunk.length < head.length - filled
+              ? chunk.length
+              : head.length - filled;
       head.setRange(filled, filled + take, chunk);
       filled += take;
       if (filled == head.length) break;
@@ -61,9 +62,8 @@ final class MessageUnframer {
     var filled = 0;
     while (filled < count) {
       final chunk = _chunks.first;
-      final take = chunk.length < count - filled
-          ? chunk.length
-          : count - filled;
+      final take =
+          chunk.length < count - filled ? chunk.length : count - filled;
       out.setRange(filled, filled + take, chunk);
       filled += take;
       if (take == chunk.length) {

@@ -14,12 +14,12 @@ void main() {
   setUp(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, (call) async {
-      return switch (call.method) {
-        'Clipboard.getData' => {'text': 'from the ide'},
-        'Clipboard.setData' => null,
-        _ => throw MissingPluginException(),
-      };
-    });
+          return switch (call.method) {
+            'Clipboard.getData' => {'text': 'from the ide'},
+            'Clipboard.setData' => null,
+            _ => throw MissingPluginException(),
+          };
+        });
   });
 
   test('answers Clipboard.getData with the ide clipboard', () async {

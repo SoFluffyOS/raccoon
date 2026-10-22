@@ -32,13 +32,13 @@ class _FakeConnection implements RunnerConnection {
 }
 
 rc.Frame _solidFrame(int width, int height) => rc.Frame(
-      sequence: Int64(1),
-      width: width,
-      height: height,
-      rowBytes: width * 4,
-      format: rc.PixelFormat.PIXEL_FORMAT_BGRA8888,
-      pixels: List.filled(width * height * 4, 0x80),
-    );
+  sequence: Int64(1),
+  width: width,
+  height: height,
+  rowBytes: width * 4,
+  format: rc.PixelFormat.PIXEL_FORMAT_BGRA8888,
+  pixels: List.filled(width * height * 4, 0x80),
+);
 
 void main() {
   testWidgets('sends its size scaled by the pixel ratio', (tester) async {
@@ -123,43 +123,43 @@ void main() {
   });
 
   testWidgets(
-      'forwards a trackpad gesture as pan-zoom, the pan in frame pixels', (
-    tester,
-  ) async {
-    final connection = _FakeConnection();
-    await tester.pumpWidget(
-      MediaQuery(
-        data: const MediaQueryData(devicePixelRatio: 2),
-        child: RaccoonView(connection: connection),
-      ),
-    );
+    'forwards a trackpad gesture as pan-zoom, the pan in frame pixels',
+    (tester) async {
+      final connection = _FakeConnection();
+      await tester.pumpWidget(
+        MediaQuery(
+          data: const MediaQueryData(devicePixelRatio: 2),
+          child: RaccoonView(connection: connection),
+        ),
+      );
 
-    // Two-finger scrolling: the framework delivers it this way, not as a
-    // scroll signal, so the app's scrollables see the drag it is.
-    final pointer = TestPointer(1, PointerDeviceKind.trackpad);
-    await tester.sendEventToBinding(
-      pointer.panZoomStart(const Offset(10, 20)),
-    );
-    await tester.sendEventToBinding(
-      pointer.panZoomUpdate(const Offset(10, 20), pan: const Offset(0, -30)),
-    );
-    await tester.sendEventToBinding(pointer.panZoomEnd());
+      // Two-finger scrolling: the framework delivers it this way, not as a
+      // scroll signal, so the app's scrollables see the drag it is.
+      final pointer = TestPointer(1, PointerDeviceKind.trackpad);
+      await tester.sendEventToBinding(
+        pointer.panZoomStart(const Offset(10, 20)),
+      );
+      await tester.sendEventToBinding(
+        pointer.panZoomUpdate(const Offset(10, 20), pan: const Offset(0, -30)),
+      );
+      await tester.sendEventToBinding(pointer.panZoomEnd());
 
-    final phases = connection.pointers.map((p) => p.phase).toList();
-    expect(phases, [
-      rc.PointerPhase.POINTER_PHASE_PAN_ZOOM_START,
-      rc.PointerPhase.POINTER_PHASE_PAN_ZOOM_UPDATE,
-      rc.PointerPhase.POINTER_PHASE_PAN_ZOOM_END,
-    ]);
-    final update = connection.pointers[1];
-    expect(update.device, rc.PointerDevice.POINTER_DEVICE_TRACKPAD);
-    expect(update.x, 20);
-    expect(update.y, 40);
-    expect(update.panX, 0);
-    expect(update.panY, -60);
-    expect(update.scale, 1);
-    expect(update.rotation, 0);
-  });
+      final phases = connection.pointers.map((p) => p.phase).toList();
+      expect(phases, [
+        rc.PointerPhase.POINTER_PHASE_PAN_ZOOM_START,
+        rc.PointerPhase.POINTER_PHASE_PAN_ZOOM_UPDATE,
+        rc.PointerPhase.POINTER_PHASE_PAN_ZOOM_END,
+      ]);
+      final update = connection.pointers[1];
+      expect(update.device, rc.PointerDevice.POINTER_DEVICE_TRACKPAD);
+      expect(update.x, 20);
+      expect(update.y, 40);
+      expect(update.panX, 0);
+      expect(update.panY, -60);
+      expect(update.scale, 1);
+      expect(update.rotation, 0);
+    },
+  );
 
   testWidgets('forwards key events', (tester) async {
     final connection = _FakeConnection();

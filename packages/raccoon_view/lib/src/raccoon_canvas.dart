@@ -49,11 +49,11 @@ class RaccoonCanvas extends StatelessWidget {
     };
   }
 
-  static String _ratioLabel(double ratio) =>
-      switch (ratio == ratio.roundToDouble()) {
-        true => '${ratio.round()}',
-        false => '$ratio',
-      };
+  static String _ratioLabel(double ratio) => switch (ratio ==
+      ratio.roundToDouble()) {
+    true => '${ratio.round()}',
+    false => '$ratio',
+  };
 
   @override
   Widget build(BuildContext context) {

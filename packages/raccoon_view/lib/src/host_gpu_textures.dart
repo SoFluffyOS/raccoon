@@ -8,11 +8,11 @@ import 'package:flutter/services.dart';
 abstract interface class HostGpuTextures {
   /// The implementation for this host, null where there is none.
   static HostGpuTextures? forHost() => switch (Platform.operatingSystem) {
-        // GL textures start at the bottom left; Metal's at the top.
-        'linux' => const MethodChannelGpuTextures(bottomUp: true),
-        'macos' => const MethodChannelGpuTextures(bottomUp: false),
-        _ => null,
-      };
+    // GL textures start at the bottom left; Metal's at the top.
+    'linux' => const MethodChannelGpuTextures(bottomUp: true),
+    'macos' => const MethodChannelGpuTextures(bottomUp: false),
+    _ => null,
+  };
 
   /// Whether the texture's first row is the frame's last, as a GL texture's
   /// is: the view then draws it the other way up.

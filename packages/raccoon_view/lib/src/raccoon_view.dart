@@ -344,9 +344,9 @@ class _RaccoonViewState extends State<RaccoonView> {
                     // A texture that starts at the bottom left (GL's do)
                     // is drawn the other way up.
                     (true, final id?, final gpu?) => Transform.flip(
-                        flipY: gpu.bottomUp,
-                        child: Texture(textureId: id),
-                      ),
+                      flipY: gpu.bottomUp,
+                      child: Texture(textureId: id),
+                    ),
                     _ => RaccoonFrameView(frame: _image, fit: BoxFit.fill),
                   },
                   if (_lost) const DisconnectedOverlay(),

@@ -41,21 +41,20 @@ final class UrlLauncherMacosCodec extends StandardMessageCodec {
 
   @override
   Object? readValueOfType(int type, ReadBuffer buffer) => switch (type) {
-        _errorType => switch (readValue(buffer)) {
-            _invalidUrlIndex => const _InvalidUrl(),
-            final other =>
-              throw FormatException('unknown url_launcher error $other'),
-          },
-        _resultType => switch (readValue(buffer)) {
-            [final bool value, _InvalidUrl()] => UrlLauncherMacosResult(
-                value,
-                invalidUrl: true,
-              ),
-            [final bool value, null] => UrlLauncherMacosResult(value),
-            _ => throw const FormatException('not a url_launcher result'),
-          },
-        _ => super.readValueOfType(type, buffer),
-      };
+    _errorType => switch (readValue(buffer)) {
+      _invalidUrlIndex => const _InvalidUrl(),
+      final other => throw FormatException('unknown url_launcher error $other'),
+    },
+    _resultType => switch (readValue(buffer)) {
+      [final bool value, _InvalidUrl()] => UrlLauncherMacosResult(
+        value,
+        invalidUrl: true,
+      ),
+      [final bool value, null] => UrlLauncherMacosResult(value),
+      _ => throw const FormatException('not a url_launcher result'),
+    },
+    _ => super.readValueOfType(type, buffer),
+  };
 }
 
 /// The plugin's error enum has one value; this stands for it.

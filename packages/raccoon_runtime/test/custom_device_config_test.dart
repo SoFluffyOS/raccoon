@@ -59,6 +59,30 @@ void main() {
     expect(entry['platform'], 'linux-x64');
   });
 
+  test('remove takes one entry out and says whether it was there', () {
+    final file = CustomDevicesFile(p.join(temp.path, 'custom_devices.json'));
+    file.upsert(CustomDeviceConfig(deviceHelper: '/h/raccoon-device'));
+    file.upsert(
+      CustomDeviceConfig.forDevice(
+        RaccoonDevice.tablet,
+        deviceHelper: '/h/raccoon-device',
+      ),
+    );
+    expect(file.remove('raccoon-tablet'), isTrue);
+    expect(file.ids(), ['raccoon']);
+    expect(file.remove('raccoon-tablet'), isFalse);
+    expect(file.remove('raccoon'), isTrue);
+    expect(file.ids(), isEmpty);
+  });
+
+  test('the helper of an entry is read off its ping command', () {
+    final file = CustomDevicesFile(p.join(temp.path, 'custom_devices.json'));
+    expect(file.helperOf('raccoon'), isNull);
+    file.upsert(CustomDeviceConfig(deviceHelper: '/h/raccoon-device'));
+    expect(file.helperOf('raccoon'), '/h/raccoon-device');
+    expect(file.helperOf('raccoon-2'), isNull);
+  });
+
   test('upsert keeps other devices', () {
     final file = CustomDevicesFile(p.join(temp.path, 'custom_devices.json'));
     File(file.path).writeAsStringSync(

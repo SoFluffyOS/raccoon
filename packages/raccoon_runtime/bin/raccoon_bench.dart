@@ -106,12 +106,13 @@ int _cpuTicks(int processId) {
     final fields = stat.substring(stat.lastIndexOf(')') + 2).split(' ');
     return int.parse(fields[11]) + int.parse(fields[12]);
   }
-  final time = Process.runSync('ps', [
-    '-p',
-    '$processId',
-    '-o',
-    'time=',
-  ]).stdout.toString().trim();
+  final time =
+      Process.runSync('ps', [
+        '-p',
+        '$processId',
+        '-o',
+        'time=',
+      ]).stdout.toString().trim();
   var seconds = 0.0;
   for (final part in time.split(':')) {
     seconds = seconds * 60 + double.parse(part);

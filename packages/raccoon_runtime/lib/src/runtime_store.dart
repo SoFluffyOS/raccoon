@@ -142,9 +142,8 @@ final class RuntimeStore {
 
   /// The SDK root behind the `flutter` on the PATH, or null without one.
   static String? sdkRootOnPath() {
-    final which = Process.runSync('which', [
-      'flutter',
-    ]).stdout.toString().trim();
+    final which =
+        Process.runSync('which', ['flutter']).stdout.toString().trim();
     if (which.isEmpty) return null;
     return sdkRootOfFlutter(which);
   }

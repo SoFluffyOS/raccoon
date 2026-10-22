@@ -12,12 +12,13 @@ final class IdeUrlLauncherChannels {
   IdeUrlLauncherChannels({
     Future<bool> Function(Uri url)? canLaunch,
     Future<bool> Function(Uri url)? launch,
-  })  : _canLaunch = canLaunch ?? launcher.canLaunchUrl,
-        _launch = launch ??
-            ((url) => launcher.launchUrl(
-                  url,
-                  mode: launcher.LaunchMode.externalApplication,
-                ));
+  }) : _canLaunch = canLaunch ?? launcher.canLaunchUrl,
+       _launch =
+           launch ??
+           ((url) => launcher.launchUrl(
+             url,
+             mode: launcher.LaunchMode.externalApplication,
+           ));
 
   static const String linuxCanLaunchChannel =
       'dev.flutter.pigeon.url_launcher_linux.UrlLauncherApi.canLaunchUrl';

@@ -35,9 +35,9 @@ final class HostedTextInput with TextInputClient {
       ),
       composing: switch ((field.composingBase, field.composingExtent)) {
         (final start, final end) when start >= 0 && end >= start => TextRange(
-            start: start,
-            end: end,
-          ),
+          start: start,
+          end: end,
+        ),
         _ => TextRange.empty,
       },
     );

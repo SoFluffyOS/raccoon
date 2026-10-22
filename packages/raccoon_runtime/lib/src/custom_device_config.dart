@@ -148,6 +148,42 @@ final class CustomDevicesFile {
     );
   }
 
+  /// Removes the entry with [id]; tells whether there was one.
+  bool remove(String id) {
+    final file = File(path);
+    if (!file.existsSync()) return false;
+    final decoded = jsonDecode(file.readAsStringSync());
+    if (decoded case {_key: final List<Object?> existing}) {
+      final kept = existing.where((d) => d is! Map || d['id'] != id).toList();
+      if (kept.length == existing.length) return false;
+      file.writeAsStringSync(
+        '${const JsonEncoder.withIndent('  ').convert({_key: kept})}\n',
+      );
+      return true;
+    }
+    return false;
+  }
+
+  /// The device helper the entry with [id] runs, read off its ping
+  /// command; null without such an entry. The `raccoon` entry's helper is
+  /// what every added device points at.
+  String? helperOf(String id) {
+    final file = File(path);
+    if (!file.existsSync()) return null;
+    final decoded = jsonDecode(file.readAsStringSync());
+    if (decoded case {_key: final List<Object?> devices}) {
+      for (final device in devices) {
+        if (device case {
+          'id': final String deviceId,
+          'ping': final List ping,
+        } when deviceId == id && ping.isNotEmpty) {
+          return ping.first as String?;
+        }
+      }
+    }
+    return null;
+  }
+
   /// Ids of the configured devices.
   List<String> ids() {
     final file = File(path);

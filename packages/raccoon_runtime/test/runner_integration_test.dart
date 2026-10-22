@@ -63,9 +63,8 @@ void main() {
   final engineDir =
       environment['RACCOON_ENGINE_DIR'] ??
       switch (revision) {
-        final rev? => RuntimeStore.forHost(
-          environment,
-        ).installed(rev)?.directory,
+        final rev? =>
+          RuntimeStore.forHost(environment).installed(rev)?.directory,
         null => null,
       };
   final icu = _firstExisting([
@@ -144,9 +143,10 @@ void main() {
         temp.deleteSync(recursive: true);
       }
     },
-    skip: ready
-        ? false
-        : 'build the runner and example first: $binary / $engineDir / $icu',
+    skip:
+        ready
+            ? false
+            : 'build the runner and example first: $binary / $engineDir / $icu',
     timeout: const Timeout(Duration(minutes: 2)),
   );
   test(
@@ -315,9 +315,10 @@ void main() {
         temp.deleteSync(recursive: true);
       }
     },
-    skip: ready && Directory(channelsAssets).existsSync()
-        ? false
-        : 'build the runner and example/channels first',
+    skip:
+        ready && Directory(channelsAssets).existsSync()
+            ? false
+            : 'build the runner and example/channels first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
@@ -375,10 +376,11 @@ void main() {
             DateTime.now().isBefore(deadline)) {
           await Future<void>.delayed(const Duration(milliseconds: 100));
         }
-        final text = output
-            .where((line) => line.contains('TEXT:'))
-            .map((line) => line.substring(line.indexOf('TEXT:')))
-            .toList();
+        final text =
+            output
+                .where((line) => line.contains('TEXT:'))
+                .map((line) => line.substring(line.indexOf('TEXT:')))
+                .toList();
         expect(text, ['TEXT:h', 'TEXT:hi', 'TEXT:h', 'TEXT:hy']);
         expect(
           output.where((line) => line.contains('KEY:KeyDownEvent')).length,
@@ -393,16 +395,16 @@ void main() {
     },
     skip:
         ready &&
-            Directory(
-              p.join(
-                p.dirname(p.dirname(p.dirname(assets))),
-                'text',
-                'build',
-                'flutter_assets',
-              ),
-            ).existsSync()
-        ? false
-        : 'build the runner and the text example first',
+                Directory(
+                  p.join(
+                    p.dirname(p.dirname(p.dirname(assets))),
+                    'text',
+                    'build',
+                    'flutter_assets',
+                  ),
+                ).existsSync()
+            ? false
+            : 'build the runner and the text example first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
@@ -479,9 +481,10 @@ void main() {
         temp.deleteSync(recursive: true);
       }
     },
-    skip: ready && !Platform.isWindows
-        ? false
-        : 'build the runner and example first',
+    skip:
+        ready && !Platform.isWindows
+            ? false
+            : 'build the runner and example first',
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
@@ -589,16 +592,16 @@ void main() {
     },
     skip:
         ready &&
-            Directory(
-              p.join(
-                p.dirname(p.dirname(p.dirname(assets))),
-                'text',
-                'build',
-                'flutter_assets',
-              ),
-            ).existsSync()
-        ? false
-        : 'build the runner and the text example first',
+                Directory(
+                  p.join(
+                    p.dirname(p.dirname(p.dirname(assets))),
+                    'text',
+                    'build',
+                    'flutter_assets',
+                  ),
+                ).existsSync()
+            ? false
+            : 'build the runner and the text example first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
@@ -642,22 +645,24 @@ void main() {
         temp.deleteSync(recursive: true);
       }
     },
-    skip: ready && Directory(channelsAssets).existsSync()
-        ? false
-        : 'build the runner and example/channels first',
+    skip:
+        ready && Directory(channelsAssets).existsSync()
+            ? false
+            : 'build the runner and example/channels first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
   // example/plugins/echo is a native plugin the runner's build compiles
   // against its own flutter_linux library; example/plugins_app calls it.
-  final pluginLibrary = binary == null
-      ? ''
-      : p.join(
-          p.dirname(binary),
-          'example_plugins',
-          'echo',
-          'libraccoon_echo_plugin.so',
-        );
+  final pluginLibrary =
+      binary == null
+          ? ''
+          : p.join(
+            p.dirname(binary),
+            'example_plugins',
+            'echo',
+            'libraccoon_echo_plugin.so',
+          );
   final pluginsAppAssets = p.join(
     p.dirname(p.dirname(p.dirname(assets))),
     'plugins_app',
@@ -711,10 +716,10 @@ void main() {
     },
     skip:
         ready &&
-            File(pluginLibrary).existsSync() &&
-            Directory(pluginsAppAssets).existsSync()
-        ? false
-        : 'build the runner with plugins and example/plugins_app first',
+                File(pluginLibrary).existsSync() &&
+                Directory(pluginsAppAssets).existsSync()
+            ? false
+            : 'build the runner with plugins and example/plugins_app first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
@@ -793,10 +798,10 @@ void main() {
     },
     skip:
         ready &&
-            File(pluginLibrary).existsSync() &&
-            Directory(pluginsAppAssets).existsSync()
-        ? false
-        : 'build the runner with plugins and example/plugins_app first',
+                File(pluginLibrary).existsSync() &&
+                Directory(pluginsAppAssets).existsSync()
+            ? false
+            : 'build the runner with plugins and example/plugins_app first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
@@ -864,10 +869,10 @@ void main() {
     },
     skip:
         ready &&
-            File(pluginLibrary).existsSync() &&
-            Directory(pluginsAppAssets).existsSync()
-        ? false
-        : 'build the runner with plugins and example/plugins_app first',
+                File(pluginLibrary).existsSync() &&
+                Directory(pluginsAppAssets).existsSync()
+            ? false
+            : 'build the runner with plugins and example/plugins_app first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
@@ -996,9 +1001,8 @@ void main() {
           }
         });
         await described.future.timeout(const Duration(seconds: 10));
-        final messages = MessageUnframer()
-            .add(Uint8List.fromList(bytes))
-            .toList();
+        final messages =
+            MessageUnframer().add(Uint8List.fromList(bytes)).toList();
         expect(messages, isNotEmpty);
         // A fixed layout, so a native client needs no protobuf.
         final data = ByteData.sublistView(messages.first);
@@ -1025,10 +1029,11 @@ void main() {
         // Where EGL has native fences, each frame's fence comes ahead of it:
         // 'RFEN', generation, index, one descriptor riding along. Metal
         // names a frame once it is drawn instead, so there are none.
-        List<Uint8List> fences() => MessageUnframer()
-            .add(Uint8List.fromList(bytes))
-            .where((m) => String.fromCharCodes(m.sublist(0, 4)) == 'RFEN')
-            .toList();
+        List<Uint8List> fences() =>
+            MessageUnframer()
+                .add(Uint8List.fromList(bytes))
+                .where((m) => String.fromCharCodes(m.sublist(0, 4)) == 'RFEN')
+                .toList();
         final deadline = DateTime.now().add(
           Platform.isMacOS ? Duration.zero : const Duration(seconds: 3),
         );
@@ -1081,10 +1086,11 @@ void main() {
 /// A release of buffer [index] of [generation] as the GPU socket takes it,
 /// framed, without a fence.
 Uint8List _release(int generation, int index) {
-  final payload = ByteData(16)
-    ..setUint32(4, generation, Endian.little)
-    ..setUint32(8, index, Endian.little)
-    ..setUint32(12, 0, Endian.little);
+  final payload =
+      ByteData(16)
+        ..setUint32(4, generation, Endian.little)
+        ..setUint32(8, index, Endian.little)
+        ..setUint32(12, 0, Endian.little);
   payload.buffer.asUint8List().setAll(0, 'RREL'.codeUnits);
   return MessageFraming.frame(payload.buffer.asUint8List());
 }

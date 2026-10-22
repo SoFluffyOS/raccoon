@@ -27,9 +27,10 @@ final class RaccoonBoardFrame {
     final device = RaccoonDevice.forKey(RunnerDiscovery.instanceOf(name));
     final width = device?.width;
     final height = device?.height;
-    final size = width != null && height != null
-        ? Size(width.toDouble(), height.toDouble())
-        : const Size(390, 844);
+    final size =
+        width != null && height != null
+            ? Size(width.toDouble(), height.toDouble())
+            : const Size(390, 844);
     var x = gap;
     for (final frame in existing) {
       x = math.max(x, frame.position.dx + frame.size.width + gap);
@@ -77,9 +78,10 @@ final class RaccoonBoardFrame {
 
   /// `820 × 1180 · 2x`.
   String get label {
-    final ratio = pixelRatio == pixelRatio.roundToDouble()
-        ? '${pixelRatio.round()}'
-        : '$pixelRatio';
+    final ratio =
+        pixelRatio == pixelRatio.roundToDouble()
+            ? '${pixelRatio.round()}'
+            : '$pixelRatio';
     return '${size.width.round()} × ${size.height.round()} · ${ratio}x';
   }
 
@@ -95,13 +97,13 @@ final class RaccoonBoardFrame {
       );
 
   Map<String, Object?> toJson() => {
-        'name': name,
-        'x': position.dx,
-        'y': position.dy,
-        'width': size.width,
-        'height': size.height,
-        'pixelRatio': pixelRatio,
-      };
+    'name': name,
+    'x': position.dx,
+    'y': position.dy,
+    'width': size.width,
+    'height': size.height,
+    'pixelRatio': pixelRatio,
+  };
 }
 
 /// Where every device sits on the board and how big it is. A host keeps it
@@ -337,7 +339,8 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
               child: Transform(
                 // Built from the old constructors, so it runs on the oldest
                 // Flutter the package allows.
-                transform: Matrix4.translationValues(_pan.dx, _pan.dy, 0) *
+                transform:
+                    Matrix4.translationValues(_pan.dx, _pan.dy, 0) *
                     Matrix4.diagonal3Values(_zoom, _zoom, 1) *
                     Matrix4.translationValues(
                       -RaccoonBoard.reach,
@@ -525,9 +528,10 @@ class _HandlePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = ink
-      ..strokeWidth = 1.5;
+    final paint =
+        Paint()
+          ..color = ink
+          ..strokeWidth = 1.5;
     canvas.drawLine(
       Offset(size.width - 2, 6),
       Offset(6, size.height - 2),
@@ -552,10 +556,11 @@ class _CrossPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = ink
-      ..strokeWidth = 1.5
-      ..strokeCap = StrokeCap.round;
+    final paint =
+        Paint()
+          ..color = ink
+          ..strokeWidth = 1.5
+          ..strokeCap = StrokeCap.round;
     canvas.drawLine(Offset.zero, Offset(size.width, size.height), paint);
     canvas.drawLine(Offset(size.width, 0), Offset(0, size.height), paint);
   }
