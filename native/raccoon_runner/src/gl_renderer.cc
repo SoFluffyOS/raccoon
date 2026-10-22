@@ -385,32 +385,45 @@ bool GlRenderer::BuildPool(size_t width, size_t height) {
 
 uint32_t GlRenderer::Fbo(size_t width, size_t height) {
   if (width == 0 || height == 0) return 0;
-  std::lock_guard<std::mutex> lock(mutex_);
-  current_ = -1;
-  if (!pool_wanted_ && !pool_.empty()) DestroyPool();
-  if (pool_wanted_ && can_export_) {
-    if (pool_.empty() || pool_width_ != width || pool_height_ != height) {
-      if (!BuildPool(width, height)) pool_wanted_ = false;
-    }
-    for (size_t i = 0; i < pool_.size(); ++i) {
-      if (pool_[i].busy) continue;
-      pool_[i].busy = true;
-      current_ = static_cast<int>(i);
-      if (pool_[i].fence >= 0) {
-        // The client may still be reading it: draw after that.
-        WaitFence(pool_[i].fence);
-        pool_[i].fence = -1;
+  int fence = -1;
+  uint32_t fbo = 0;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    current_ = -1;
+    if (!pool_wanted_ && !pool_.empty()) DestroyPool();
+    if (pool_wanted_ && can_export_) {
+      if (pool_.empty() || pool_width_ != width || pool_height_ != height) {
+        if (!BuildPool(width, height)) {
+          pool_wanted_ = false;
+          std::fprintf(stderr,
+                       "raccoon_runner: no GPU buffers: the pool could not be "
+                       "built; frames by readback\n");
+        }
       }
-      glBindFramebuffer(GL_FRAMEBUFFER, pool_fbo_);
-      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                             GL_TEXTURE_2D, pool_[i].texture, 0);
-      if (kTrace) std::fprintf(stderr, "raccoon_runner: gl fbo -> pool %zu\n", i);
-      return pool_fbo_;
+      for (size_t i = 0; i < pool_.size(); ++i) {
+        if (pool_[i].busy) continue;
+        pool_[i].busy = true;
+        current_ = static_cast<int>(i);
+        fence = pool_[i].fence;
+        pool_[i].fence = -1;
+        glBindFramebuffer(GL_FRAMEBUFFER, pool_fbo_);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_2D, pool_[i].texture, 0);
+        if (kTrace) std::fprintf(stderr, "raccoon_runner: gl fbo -> pool %zu\n", i);
+        fbo = pool_fbo_;
+        break;
+      }
+      // Every buffer is with the client: this frame goes by readback.
     }
-    // Every buffer is with the client: this frame goes by readback.
+    if (fbo == 0) {
+      if (kTrace && pool_wanted_) std::fprintf(stderr, "raccoon_runner: gl fbo -> readback\n");
+      fbo = EnsureSize(width, height) ? fbo_ : 0;
+    }
   }
-  if (kTrace && pool_wanted_) std::fprintf(stderr, "raccoon_runner: gl fbo -> readback\n");
-  return EnsureSize(width, height) ? fbo_ : 0;
+  // The client may still be reading the buffer: draw after that. Outside
+  // the lock, so a wait on the CPU does not hold up releases.
+  if (fence >= 0) WaitFence(fence);
+  return fbo;
 }
 
 bool GlRenderer::Present(const FrameCallback& callback) {
