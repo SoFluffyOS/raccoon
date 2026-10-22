@@ -186,6 +186,49 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('a frame that came before the texture shows once it is there', (
+    tester,
+  ) async {
+    // A still app sends one frame, and it may land before the set names
+    // the socket: the view keeps the latest such frame and names it to the
+    // host once connected, giving back any earlier one it kept.
+    final connection = _GpuConnection();
+    final textures = _FakeTextures(releases: true);
+    await tester.pumpWidget(
+      RaccoonView(connection: connection, gpuTextures: textures),
+    );
+    for (final index in [0, 1]) {
+      connection.frameController.add(
+        rc.Frame(
+          sequence: Int64(index + 1),
+          inGpuBuffer: true,
+          bufferIndex: index,
+          gpuGeneration: 1,
+        ),
+      );
+      await tester.pump();
+    }
+    expect(textures.calls, isEmpty);
+    expect(connection.released, [(1, 0)]);
+
+    connection.sets.add(
+      rc.GpuBuffers(
+        generation: 1,
+        count: 3,
+        width: 8,
+        height: 8,
+        socket: '/run/r.gpu',
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(textures.calls, ['create', 'connect 7 /run/r.gpu', 'show 7 1/1']);
+    expect(find.byType(Texture), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    expect(connection.released, [(1, 0)]);
+  });
+
   testWidgets('a texture that starts at the top is drawn as it is', (
     tester,
   ) async {

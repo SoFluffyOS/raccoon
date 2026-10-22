@@ -49,6 +49,7 @@ class _RaccoonViewState extends State<RaccoonView> {
   StreamSubscription<rc.GpuBuffers>? _gpuSets;
   HostGpuTextures? _gpu;
   int? _textureId;
+  bool _creatingTexture = false;
   // Whether frames arrive as GPU buffers, and the buffer the texture shows.
   bool _gpuLive = false;
   // When the last GPU frame came; pixel frames are dropped while the ring
@@ -58,6 +59,9 @@ class _RaccoonViewState extends State<RaccoonView> {
   // Whether the host gives buffers back to the runner itself.
   bool _hostReleases = false;
   (int, int)? _shown;
+  // The latest GPU frame that came before the texture was ready to show it:
+  // shown once it is, since a still app sends no other.
+  rc.Frame? _unshownGpu;
   StreamSubscription<rc.Frame>? _frames;
   StreamSubscription<rc.TextField>? _fields;
   HostedTextInput? _text;
@@ -133,12 +137,32 @@ class _RaccoonViewState extends State<RaccoonView> {
 
   Future<void> _onGpuSet(rc.GpuBuffers set) async {
     final gpu = _gpu;
-    if (gpu == null) return;
+    if (gpu == null || _creatingTexture) return;
     if (_textureId == null) {
+      _creatingTexture = true;
       final id = await gpu.create();
-      if (!mounted || id < 0) return;
+      if (!mounted) {
+        if (id >= 0) unawaited(gpu.dispose(id));
+        return;
+      }
+      if (id < 0) {
+        _creatingTexture = false;
+        return;
+      }
+      final releases = await gpu.connect(id, set.socket);
+      if (!mounted) {
+        unawaited(gpu.dispose(id));
+        return;
+      }
+      // Frames name the texture only once the host reads the socket, so
+      // the host and the view agree on who gives each buffer back.
       _textureId = id;
-      _hostReleases = await gpu.connect(id, set.socket);
+      _hostReleases = releases;
+      _creatingTexture = false;
+    }
+    if (_unshownGpu case final frame?) {
+      _unshownGpu = null;
+      await _showGpuFrame(frame);
     }
   }
 
@@ -146,17 +170,22 @@ class _RaccoonViewState extends State<RaccoonView> {
     unawaited(_gpuSets?.cancel());
     _gpuSets = null;
     final connection = widget.connection;
-    if (_shown case (
-      final generation,
-      final index,
-    ) when connection is GpuBufferConnection && !_hostReleases) {
-      connection.releaseGpuBuffer(generation, index);
+    if (connection is GpuBufferConnection) {
+      if (_shown case (final generation, final index) when !_hostReleases) {
+        connection.releaseGpuBuffer(generation, index);
+      }
+      // Never named to the host, so the host never gives it back.
+      if (_unshownGpu case final frame?) {
+        connection.releaseGpuBuffer(frame.gpuGeneration, frame.bufferIndex);
+      }
     }
+    _unshownGpu = null;
     _shown = null;
     _lastGpuFrame = null;
     _hostReleases = false;
     if (_textureId case final id?) unawaited(_gpu?.dispose(id));
     _textureId = null;
+    _creatingTexture = false;
     _gpu = null;
     _gpuLive = false;
   }
@@ -195,12 +224,18 @@ class _RaccoonViewState extends State<RaccoonView> {
 
   /// Names the frame's buffer to the host's texture, then gives the one
   /// shown before back to the runner, unless the host does that itself once
-  /// it is done drawing it.
+  /// it is done drawing it. Before the texture is ready, the frame waits
+  /// for it, and the one waiting before goes back.
   Future<void> _showGpuFrame(rc.Frame frame) async {
     final gpu = _gpu;
     final id = _textureId;
     final connection = widget.connection;
-    if (gpu == null || id == null || connection is! GpuBufferConnection) {
+    if (connection is! GpuBufferConnection) return;
+    if (gpu == null || id == null) {
+      if (_unshownGpu case final waiting?) {
+        connection.releaseGpuBuffer(waiting.gpuGeneration, waiting.bufferIndex);
+      }
+      _unshownGpu = frame;
       return;
     }
     final previous = _shown;
