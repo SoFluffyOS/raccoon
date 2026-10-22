@@ -100,15 +100,17 @@ plugin_headers() {
   fi
 }
 
-# Builds the native plugins a project lists (.flutter-plugins-dependencies)
-# into |out| and writes |out|/manifest.json for the runner's --plugins: one
-# CMake project with what Flutter's desktop template gives a plugin. When it
-# cannot, says why and leaves no manifest; the app then sees no plugin.
+# Builds a project's native plugins into |out| and writes |out|/manifest.json
+# for the runner's --plugins. The plugins are the resolved packages
+# (.dart_tool/package_config.json) whose pubspec names a Linux pluginClass,
+# as the Flutter tool finds them; built in one CMake project with what the
+# desktop template gives a plugin. When it cannot, says why and leaves no
+# manifest; the app then sees no plugin.
 build_plugins() {
   local project="$1" out="$2" lib headers need count
   rm -rf "$out"
   [ "$(uname -s)" = Linux ] || return 0
-  [ -f "$project/.flutter-plugins-dependencies" ] || return 0
+  [ -f "$project/.dart_tool/package_config.json" ] || return 0
   lib="$(plugin_library || true)"
   headers="$(plugin_headers || true)"
   if [ -z "$lib" ] || [ -z "$headers" ]; then
@@ -126,11 +128,21 @@ build_plugins() {
     return 0
   fi
   mkdir -p "$out"
-  count="$(python3 - "$project/.flutter-plugins-dependencies" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS" <<'PY'
+  count="$(python3 - "$project/.dart_tool/package_config.json" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS" <<'PY'
 import json, os, re, sys
-deps, out, lib, headers, virtual = sys.argv[1:6]
+from urllib.parse import unquote, urlparse
+config, out, lib, headers, virtual = sys.argv[1:6]
 virtual = set(virtual.split())
-plugins = json.load(open(deps)).get('plugins', {}).get('linux', [])
+dart_tool = os.path.dirname(os.path.abspath(config))
+plugins = []
+for package in json.load(open(config)).get('packages', []):
+    uri = package.get('rootUri', '')
+    if uri.startswith('file://'):
+        root = unquote(urlparse(uri).path)
+    else:
+        root = os.path.normpath(os.path.join(dart_tool, uri))
+    if os.path.isfile(os.path.join(root, 'pubspec.yaml')):
+        plugins.append({'name': package['name'], 'path': root})
 lines = [
     'cmake_minimum_required(VERSION 3.14)',
     'project(raccoon_plugins LANGUAGES CXX)',
@@ -152,9 +164,11 @@ lines = [
 wanted = []
 for plugin in plugins:
     name, path = plugin['name'], plugin['path']
-    if not plugin.get('native_build', False) or name in virtual:
+    if name in virtual:
         continue
     pubspec = open(os.path.join(path, 'pubspec.yaml')).read()
+    if not re.search(r'^\s+plugin:\s*$', pubspec, re.M):
+        continue
     found = re.search(r'^([ \t]*)linux:[ \t]*\n', pubspec, re.M)
     block = []
     if found:
