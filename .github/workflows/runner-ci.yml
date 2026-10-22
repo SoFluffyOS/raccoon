@@ -112,7 +112,9 @@ jobs:
           done
 
       # Libraries on Linux, frameworks on macOS: at least one, or it fails.
+      # No native plugins on Windows yet (#36).
       - name: Prebuild the common plugins
+        if: runner.os != 'Windows'
         run: tool/raccoon-device prebuild tool/plugins build/plugins-test.tar.gz && tar tzf build/plugins-test.tar.gz | grep -c -E '\.so$|\.framework/$'
 
       - name: Render a frame of example/hello

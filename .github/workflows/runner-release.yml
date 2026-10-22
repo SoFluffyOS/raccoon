@@ -92,7 +92,9 @@ jobs:
       # The common plugins, built against this archive's library (Linux) or
       # the SDK's FlutterMacOS (macOS), in the cache's layout: an install
       # fetches it once and copies.
+      # No native plugins on Windows yet (#36).
       - name: Prebuild the common plugins
+        if: runner.os != 'Windows'
         run: |
           ENGINE="$(basename "$(dirname "$(tool/engine_dir.sh)")")"
           case "$(uname -s)" in
