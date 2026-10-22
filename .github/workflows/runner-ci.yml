@@ -44,9 +44,17 @@ jobs:
             desktop: macos
             target: darwin
             sdk-engine: darwin-x64
+          - name: windows-x64
+            os: windows-latest
+            desktop: windows
+            target: windows-x64
+            sdk-engine: windows-x64
+            exe: .exe
     defaults:
       run:
         working-directory: native/raccoon_runner
+        # Git Bash on Windows, as the device helper uses there.
+        shell: bash
     steps:
       - uses: actions/checkout@v5
 
@@ -56,6 +64,10 @@ jobs:
       - name: Install CMake and Ninja
         if: runner.os == 'macOS'
         run: brew install cmake ninja
+      # MSVC on the PATH, and Visual Studio's own CMake and Ninja with it.
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
 
       # cache: true keeps the SDK and the pub cache between runs.
       - uses: subosito/flutter-action@v2
@@ -75,11 +87,14 @@ jobs:
       - name: Precache the desktop artifacts, for the ICU data
         run: flutter precache --${{ matrix.desktop }}
 
+      # On Windows the Dart side reads these too, so they are written C:/...
       - name: Locate the engine and the ICU data
         run: |
           SDK="$(cd "$(dirname "$(readlink -f "$(command -v flutter)")")/.." && pwd)"
+          ICU="$SDK/bin/cache/artifacts/engine/${{ matrix.sdk-engine }}/icudtl.dat"
+          if command -v cygpath >/dev/null; then ICU="$(cygpath -m "$ICU")"; fi
           echo "RACCOON_ENGINE_DIR=$(tool/engine_dir.sh)" >> "$GITHUB_ENV"
-          echo "RACCOON_ICU=$SDK/bin/cache/artifacts/engine/${{ matrix.sdk-engine }}/icudtl.dat" >> "$GITHUB_ENV"
+          echo "RACCOON_ICU=$ICU" >> "$GITHUB_ENV"
 
       - name: Install protoc
         run: tool/protoc.sh
@@ -116,10 +131,10 @@ jobs:
       - name: Run the runtime's tests against the runner
         working-directory: packages/raccoon_runtime
         env:
-          RACCOON_RUNNER: ${{ github.workspace }}/native/raccoon_runner/build/raccoon_runner
+          RACCOON_RUNNER: ${{ github.workspace }}/native/raccoon_runner/build/raccoon_runner${{ matrix.exe }}
         run: dart test --reporter expanded
 
       - uses: actions/upload-artifact@v6
         with:
           name: raccoon_runner-${{ matrix.name }}
-          path: native/raccoon_runner/build/raccoon_runner
+          path: native/raccoon_runner/build/raccoon_runner${{ matrix.exe }}

@@ -2,7 +2,8 @@
 # Packs the built runner for a release: the binary, the custom device helper,
 # the engine fetcher, VERSION and LICENSE, flat in
 # raccoon_runner-<version>-<platform>.tar.gz, where the platform is linux-x64,
-# linux-arm64, macos-arm64 or macos-x64. Unpacked into a folder, tool/
+# linux-arm64, macos-arm64, macos-x64 or windows-x64 (raccoon_runner.exe
+# there; Windows' own tar unpacks it). Unpacked into a folder, tool/
 # raccoon-device finds the binary beside it, so the folder works as a runtime
 # on its own. Prints the archive's path.
 #
@@ -11,15 +12,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-BINARY="$ROOT/build/raccoon_runner"
-if [ ! -x "$BINARY" ]; then
-  echo "no $BINARY; build the runner first" >&2
-  exit 1
-fi
 
+EXE=""
 case "$(uname -s)" in
   Darwin) OS=macos ;;
   Linux) OS=linux ;;
+  MINGW*|MSYS*|CYGWIN*) OS=windows; EXE=.exe ;;
   *) echo "unsupported system $(uname -s)" >&2; exit 1 ;;
 esac
 case "$(uname -m)" in
@@ -28,18 +26,27 @@ case "$(uname -m)" in
   *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
 esac
 
+BINARY="$ROOT/build/raccoon_runner$EXE"
+if [ ! -x "$BINARY" ]; then
+  echo "no $BINARY; build the runner first" >&2
+  exit 1
+fi
+
 NAME="raccoon_runner-$VERSION-$OS-$ARCH"
 OUT="${1:-$ROOT/build/dist}"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
 mkdir -p "$STAGE/tool" "$OUT"
-cp "$BINARY" "$STAGE/raccoon_runner"
+# As the shell names it: GNU tar would take the C: of a Windows path for a
+# remote host.
+OUT="$(cd "$OUT" && pwd)"
+cp "$BINARY" "$STAGE/raccoon_runner$EXE"
 cp "$ROOT/tool/raccoon-device" "$ROOT/tool/engine_dir.sh" "$STAGE/tool/"
 cp "$ROOT/VERSION" "$ROOT/LICENSE" "$STAGE/"
-chmod 755 "$STAGE/raccoon_runner" "$STAGE/tool/"*
+chmod 755 "$STAGE/raccoon_runner$EXE" "$STAGE/tool/"*
 # No AppleDouble (._*) entries from macOS's tar.
-CONTENTS="raccoon_runner tool VERSION LICENSE"
+CONTENTS="raccoon_runner$EXE tool VERSION LICENSE"
 # The plugin-facing library and its headers, where the runner was built
 # with them: a project's native plugins build against these.
 if [ -f "$ROOT/build/libflutter_linux_gtk.so" ]; then

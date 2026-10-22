@@ -31,9 +31,13 @@ jobs:
             os: macos-latest
           - name: macos-x64
             os: macos-15-intel
+          - name: windows-x64
+            os: windows-latest
     defaults:
       run:
         working-directory: native/raccoon_runner
+        # Git Bash on Windows.
+        shell: bash
     steps:
       - uses: actions/checkout@v5
 
@@ -52,6 +56,9 @@ jobs:
       - name: Install CMake and Ninja
         if: runner.os == 'macOS'
         run: brew install cmake ninja
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
 
       - uses: subosito/flutter-action@v2
         with:
@@ -119,7 +126,7 @@ jobs:
           (cd dist && sha256sum *.tar.gz > SHA256SUMS)
           ls -l dist
           cat > notes.md <<NOTES
-          Prebuilt \`raccoon_runner\` $VERSION for Linux x64, macOS arm64 and macOS x64. Each archive holds the binary, \`tool/raccoon-device\`, \`tool/engine_dir.sh\`, \`VERSION\` and \`LICENSE\`, and works as a runtime on its own once unpacked:
+          Prebuilt \`raccoon_runner\` $VERSION for Linux x64, macOS arm64, macOS x64 and Windows x64. Each archive holds the binary, \`tool/raccoon-device\`, \`tool/engine_dir.sh\`, \`VERSION\` and \`LICENSE\`, and works as a runtime on its own once unpacked (on Windows the helper runs in Git Bash):
 
               mkdir raccoon_runner && tar xzf raccoon_runner-$VERSION-<platform>.tar.gz -C raccoon_runner
               raccoon_runner/raccoon_runner --version
