@@ -40,58 +40,15 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   frame_.SetPresentedCallback(on_wake_);
 
   FlutterRendererConfig renderer{};
-  bool on_gpu = false;
-#if RACCOON_HAS_GL
-  if (options.renderer != "software") {
-    gl_ = std::make_unique<GlRenderer>();
-    std::string gl_error;
-    if (gl_->Init(&gl_error)) {
-      on_gpu = true;
-    } else if (options.renderer == "gl") {
-      *error = "GL renderer: " + gl_error;
-      return false;
-    } else {
-      renderer_ = "software (no GL: " + gl_error + ")";
-      gl_.reset();
-    }
-  }
-#else
-  if (options.renderer == "gl") {
-    *error = "this runner was built without the GL renderer";
-    return false;
-  }
-#endif
-  if (on_gpu) {
-#if RACCOON_HAS_GL
-    renderer.type = kOpenGL;
-    auto& gl = renderer.open_gl;
-    gl.struct_size = sizeof(FlutterOpenGLRendererConfig);
-    gl.make_current = GlMakeCurrent;
-    gl.clear_current = GlClearCurrent;
-    gl.make_resource_current = GlMakeResourceCurrent;
-    gl.fbo_with_frame_info_callback = GlFbo;
-    gl.present_with_info = GlPresent;
-#if RACCOON_HAS_PLUGINS
-    gl.gl_external_texture_frame_callback = GlExternalTexture;
-#endif
-    gl.gl_proc_resolver = GlProc;
-    // Ask for the framebuffer every frame: with a pool it is a different
-    // buffer each time.
-    gl.fbo_reset_after_present = true;
-    renderer_ = "gl (" + gl_->description() + ")";
-    gl_->SetGpuFrameCallback([this](uint32_t generation, int index, size_t width,
-                                    size_t height, int fence_fd) {
+  if (!ConfigureRenderer(options.renderer, &renderer, error)) return false;
+  if (gpu_) {
+    gpu_->SetGpuFrameCallback([this](uint32_t generation, int index, size_t width,
+                                     size_t height, int fence_fd) {
       frame_.PresentGpu(generation, index, width, height, fence_fd);
     });
-    frame_.SetGpuReleaseCallback(
-        [this](uint32_t generation, int index) {
-          gl_->Release(generation, index);
-        });
-#endif
-  } else {
-    renderer.type = kSoftware;
-    renderer.software.struct_size = sizeof(FlutterSoftwareRendererConfig);
-    renderer.software.surface_present_callback = OnPresent;
+    frame_.SetGpuReleaseCallback([this](uint32_t generation, int index) {
+      gpu_->Release(generation, index, -1);
+    });
   }
 
   command_line_ = {"raccoon_runner", "--enable-impeller=false"};
@@ -155,6 +112,75 @@ void EngineHost::Resize(size_t width, size_t height, double pixel_ratio) {
   windows_.SetViewSize(width, height, pixel_ratio);
 }
 
+bool EngineHost::ConfigureRenderer(const std::string& wanted,
+                                   FlutterRendererConfig* renderer,
+                                   std::string* error) {
+  // "auto" takes the GPU renderer this host builds when it starts, else
+  // software; "gl" and "metal" insist on theirs; "software" never tries.
+  const bool insists = wanted == "gl" || wanted == "metal";
+  std::string gpu_error;
+  const char* kind = "GPU";
+#if RACCOON_HAS_GL
+  if (wanted != "software" && wanted != "metal") {
+    kind = "GL";
+    auto gl = std::make_unique<GlRenderer>();
+    if (gl->Init(&gpu_error)) {
+      gl_ = gl.get();
+      gpu_ = std::move(gl);
+      renderer->type = kOpenGL;
+      auto& config = renderer->open_gl;
+      config.struct_size = sizeof(FlutterOpenGLRendererConfig);
+      config.make_current = GlMakeCurrent;
+      config.clear_current = GlClearCurrent;
+      config.make_resource_current = GlMakeResourceCurrent;
+      config.fbo_with_frame_info_callback = GlFbo;
+      config.present_with_info = GlPresent;
+#if RACCOON_HAS_PLUGINS
+      config.gl_external_texture_frame_callback = GlExternalTexture;
+#endif
+      config.gl_proc_resolver = GlProc;
+      // Ask for the framebuffer every frame: with a pool it is a different
+      // buffer each time.
+      config.fbo_reset_after_present = true;
+      renderer_ = "gl (" + gl_->description() + ")";
+      return true;
+    }
+  }
+#endif
+#if RACCOON_HAS_METAL
+  if (wanted != "software" && wanted != "gl") {
+    kind = "Metal";
+    auto metal = std::make_unique<MetalRenderer>();
+    if (metal->Init(&gpu_error)) {
+      metal_ = metal.get();
+      gpu_ = std::move(metal);
+      renderer->type = kMetal;
+      auto& config = renderer->metal;
+      config.struct_size = sizeof(FlutterMetalRendererConfig);
+      config.device = metal_->device();
+      config.present_command_queue = metal_->command_queue();
+      config.get_next_drawable_callback = MetalNextDrawable;
+      config.present_drawable_callback = MetalPresent;
+      renderer_ = "metal (" + metal_->description() + ")";
+      return true;
+    }
+  }
+#endif
+  if (insists) {
+    *error = gpu_error.empty()
+                 ? "this runner was built without the " + wanted + " renderer"
+                 : wanted + " renderer: " + gpu_error;
+    return false;
+  }
+  if (!gpu_error.empty()) {
+    renderer_ = "software (no " + std::string(kind) + ": " + gpu_error + ")";
+  }
+  renderer->type = kSoftware;
+  renderer->software.struct_size = sizeof(FlutterSoftwareRendererConfig);
+  renderer->software.surface_present_callback = OnPresent;
+  return true;
+}
+
 #if RACCOON_HAS_GL
 bool EngineHost::GlMakeCurrent(void* user_data) {
   return static_cast<EngineHost*>(user_data)->gl_->MakeCurrent();
@@ -186,41 +212,46 @@ void* EngineHost::GlProc(void* user_data, const char* name) {
 }
 #endif
 
-bool EngineHost::EnableGpuBuffers(size_t count, std::string* error) {
-#if RACCOON_HAS_GL
-  if (gl_) return gl_->EnablePool(count, error);
-#else
-  (void)count;
+#if RACCOON_HAS_METAL
+FlutterMetalTexture EngineHost::MetalNextDrawable(void* user_data,
+                                                  const FlutterFrameInfo* info) {
+  // A null texture tells the engine there is none for this frame.
+  FlutterMetalTexture texture{};
+  texture.struct_size = sizeof(FlutterMetalTexture);
+  static_cast<EngineHost*>(user_data)->metal_->NextDrawable(
+      info->size.width, info->size.height, &texture.texture_id, &texture.texture);
+  return texture;
+}
+
+bool EngineHost::MetalPresent(void* user_data, const FlutterMetalTexture* texture) {
+  auto* host = static_cast<EngineHost*>(user_data);
+  return host->metal_->Present(
+      texture->texture_id,
+      [host](const void* pixels, size_t row_bytes, size_t height) {
+        OnPresent(host, pixels, row_bytes, height);
+      });
+}
 #endif
+
+bool EngineHost::EnableGpuBuffers(size_t count, std::string* error) {
+  if (gpu_) return gpu_->EnablePool(count, error);
   *error = "the software renderer has no GPU buffers";
   return false;
 }
 
 void EngineHost::DisableGpuBuffers() {
-#if RACCOON_HAS_GL
-  if (gl_) gl_->DisablePool();
-#endif
+  if (gpu_) gpu_->DisablePool();
 }
 
 bool EngineHost::GpuBufferSetNow(GpuBufferSet* out) const {
-#if RACCOON_HAS_GL
-  if (gl_) return gl_->pool_set(out);
-#else
-  (void)out;
-#endif
-  return false;
+  return gpu_ && gpu_->pool_set(out);
 }
 
 void EngineHost::ReleaseGpuBuffer(uint32_t generation, int index, int fence_fd) {
-#if RACCOON_HAS_GL
-  if (gl_) {
-    gl_->Release(generation, index, fence_fd);
+  if (gpu_) {
+    gpu_->Release(generation, index, fence_fd);
     return;
   }
-#else
-  (void)generation;
-  (void)index;
-#endif
   if (fence_fd >= 0) close(fence_fd);
 }
 
@@ -250,9 +281,7 @@ void EngineHost::ServiceVsync() {
     const uint64_t now = loader_.procs().GetCurrentTime();
     if (now < next_frame_nanos_) return;
     bool free = true;
-#if RACCOON_HAS_GL
-    if (gl_) free = gl_->HasFreeBuffer();
-#endif
+    if (gpu_) free = gpu_->HasFreeBuffer();
     if (!free && now - vsync_asked_nanos_ < kRingHoldNanos) return;
     vsync_pending_ = false;
     baton = vsync_baton_;
@@ -268,9 +297,7 @@ int EngineHost::MillisUntilVsync() const {
   const uint64_t now = loader_.procs().GetCurrentTime();
   uint64_t due = next_frame_nanos_;
   bool free = true;
-#if RACCOON_HAS_GL
-  if (gl_) free = gl_->HasFreeBuffer();
-#endif
+  if (gpu_) free = gpu_->HasFreeBuffer();
   // A release wakes the loop sooner; this is only the cap.
   if (!free) due = std::max(due, vsync_asked_nanos_ + kRingHoldNanos);
   if (due <= now) return 0;
@@ -278,9 +305,7 @@ int EngineHost::MillisUntilVsync() const {
 }
 
 void EngineHost::ReleaseAllGpuBuffers() {
-#if RACCOON_HAS_GL
-  if (gl_) gl_->ReleaseAll();
-#endif
+  if (gpu_) gpu_->ReleaseAll();
 }
 
 void EngineHost::SendPointer(const FlutterPointerEvent& event) {
@@ -512,9 +537,7 @@ void EngineHost::Shutdown() {
   platform_->RunDueTasks();
   loader_.procs().Shutdown(engine_);
   engine_ = nullptr;
-#if RACCOON_HAS_GL
-  if (gl_) gl_->Shutdown();
-#endif
+  if (gpu_) gpu_->Shutdown();
 }
 
 std::string EngineHost::vm_service_uri() const {

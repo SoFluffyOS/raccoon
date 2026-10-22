@@ -40,21 +40,26 @@ Design notes: `docs/internal_docs/raccoon/`.
 - Types: it answers `flutter/textinput` and keeps the active field's editing
   state, so the keys the framework leaves unhandled insert text, delete,
   move and act; `example/text` shows it. Composition (an IME) is not here yet.
-- Rasterizes on the GPU where EGL offers one without a window (Linux, Mesa:
-  the surfaceless platform or a render node). By default each frame is read
-  back as BGRA, so clients see the same frames as from the software
+- Rasterizes on the GPU where the host offers one without a window: through
+  EGL on Linux (Mesa: the surfaceless platform or a render node), through
+  Metal on macOS. By default each frame is read back as pixels in the
+  host's order, so clients see the same frames as from the software
   renderer; at 2400×1600 that halves the runner's CPU. A client that asks
-  for `gpu_buffers` gets a ring of four textures exported as DRM dmabufs
-  instead: the engine draws straight into them and a frame is the index of
-  its buffer, no pixels. The descriptors, and a native fence with every
-  frame where EGL has them, go over a second socket, the main one's path
-  with `.gpu` in place of `.sock` (its layout is in `main.cc`); a buffer
-  goes back on either socket, with a fence of its own on the second. The
-  raccoon_view plugin does this on Linux. `--renderer auto|gl|software`, or
-  `RACCOON_RENDERER` in the environment: `auto` falls back to software; the
-  start-up log says which is in use, and `RACCOON_TRACE=1` traces every
-  frame's buffer. Built when `egl` and `glesv2` are found by pkg-config
-  (`libegl1-mesa-dev libgles2-mesa-dev` on Debian).
+  for `gpu_buffers` gets a ring of four textures instead, exported as DRM
+  dmabufs on Linux and backed by IOSurfaces on macOS: the engine draws
+  straight into them and a frame is the index of its buffer, no pixels. The
+  ring is described over a second socket, the main one's path with `.gpu`
+  in place of `.sock` (its layout is in `main.cc`). On Linux the
+  descriptors ride along, and a native fence goes ahead of every frame
+  where EGL has them; on macOS the message names the surfaces by ID, and a
+  frame leaves once the GPU has drawn it. A buffer goes back on either
+  socket, with a fence of its own on the second where there are fences. The
+  raccoon_view plugin does this on Linux and macOS. `--renderer
+  auto|gl|metal|software`, or `RACCOON_RENDERER` in the environment: `auto`
+  falls back to software; the start-up log says which is in use, and
+  `RACCOON_TRACE=1` traces every frame's buffer. On Linux, built when `egl`
+  and `glesv2` are found by pkg-config (`libegl1-mesa-dev
+  libgles2-mesa-dev` on Debian).
 - `render`: writes one frame to a PPM file, for tests and a quick look.
 - `tool/raccoon-device`: ping, install, uninstall and run for the Flutter
   tool's custom device, so a stock `flutter run -d raccoon` works.
@@ -155,8 +160,9 @@ and run `pub_packages/raccoon/tool/gen_proto.sh` for the Dart side. Bump
 Linux and macOS, from the same sources; the per-host seams are the wake
 descriptor (eventfd or a pipe), socket flags, the shared buffers' backing
 (a memfd, or an unlinked temporary file on macOS, whose POSIX shared memory
-cannot be read with `read()`), the engine library's name and the pixel
-order. Windows follows the same seams.
+cannot be read with `read()`), the GPU renderer (EGL and dmabufs, or Metal
+and IOSurfaces), the engine library's name and the pixel order. Windows
+follows the same seams.
 
 ## Issues
 

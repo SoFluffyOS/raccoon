@@ -1,6 +1,6 @@
 // raccoon_runner: hosts a Flutter app on the C embedder API.
 //
-//   raccoon_runner render --engine-dir DIR --assets DIR --icu FILE [--renderer auto|gl|software] [--out F]
+//   raccoon_runner render --engine-dir DIR --assets DIR --icu FILE [--renderer auto|gl|metal|software] [--out F]
 //   raccoon_runner serve  --engine-dir DIR --assets DIR --icu FILE --socket P
 //   raccoon_runner --version
 
@@ -55,7 +55,7 @@ void Usage() {
                "       raccoon_runner serve --engine-dir DIR --assets DIR"
                " --icu FILE --socket PATH\n"
                "       raccoon_runner --version\n"
-               "common: [--width N] [--height N] [--dpr X] [--data-dir DIR] [--renderer auto|gl|software]"
+               "common: [--width N] [--height N] [--dpr X] [--data-dir DIR] [--renderer auto|gl|metal|software]"
                " [--plugins MANIFEST]"
                " [-- engine switches...]\n");
 }
@@ -170,8 +170,9 @@ uint32_t Read32(const uint8_t* at) {
 
 // What the GPU socket carries, so a native client needs no protobuf: little
 // endian, 'RGPU', generation, count, width, height, fourcc, modifier (64
-// bits), then count pairs of stride and offset; one descriptor per buffer
-// rides along, in index order.
+// bits), then count pairs of stride and offset. On Linux one descriptor per
+// buffer rides along, in index order; on macOS count IOSurface IDs follow
+// the pairs instead, and nothing rides along.
 //
 // Then, ahead of each frame that has one, 'RFEN', generation, index, with
 // the frame's fence riding along: signalled when the draw is done. And the
@@ -188,15 +189,16 @@ std::vector<uint8_t> GpuSocketPayload(const raccoon::GpuBufferSet& set) {
   };
   out.insert(out.end(), {'R', 'G', 'P', 'U'});
   put32(set.generation);
-  put32(static_cast<uint32_t>(set.fds.size()));
+  put32(static_cast<uint32_t>(set.strides.size()));
   put32(static_cast<uint32_t>(set.width));
   put32(static_cast<uint32_t>(set.height));
   put32(set.fourcc);
   put64(set.modifier);
-  for (size_t i = 0; i < set.fds.size(); ++i) {
+  for (size_t i = 0; i < set.strides.size(); ++i) {
     put32(set.strides[i]);
     put32(set.offsets[i]);
   }
+  for (const uint32_t id : set.surface_ids) put32(id);
   return out;
 }
 
@@ -211,7 +213,7 @@ std::vector<uint8_t> FencePayload(const raccoon::SoftwareFrame::Gpu& gpu) {
 void FillGpuBuffers(const raccoon::GpuBufferSet& set, const std::string& socket,
                     raccoon::v1::GpuBuffers* out) {
   out->set_generation(set.generation);
-  out->set_count(static_cast<uint32_t>(set.fds.size()));
+  out->set_count(static_cast<uint32_t>(set.strides.size()));
   out->set_width(static_cast<uint32_t>(set.width));
   out->set_height(static_cast<uint32_t>(set.height));
   out->set_fourcc(set.fourcc);
@@ -278,7 +280,7 @@ int Render(const Options& options) {
   raccoon::EventLoop loop;
   raccoon::EngineHost host;
   std::string error;
-  // RACCOON_RENDERER=gl|software|auto stands in for --renderer.
+  // RACCOON_RENDERER=gl|metal|software|auto stands in for --renderer.
   raccoon::EngineOptions engine = options.engine;
   if (const char* env = std::getenv("RACCOON_RENDERER");
       env != nullptr && engine.renderer == "auto") {
@@ -331,7 +333,7 @@ int Serve(const Options& options) {
 
   raccoon::EngineHost host;
   std::string error;
-  // RACCOON_RENDERER=gl|software|auto stands in for --renderer.
+  // RACCOON_RENDERER=gl|metal|software|auto stands in for --renderer.
   raccoon::EngineOptions engine = options.engine;
   if (const char* env = std::getenv("RACCOON_RENDERER");
       env != nullptr && engine.renderer == "auto") {

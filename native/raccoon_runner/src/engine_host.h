@@ -9,26 +9,15 @@
 
 #include "engine_loader.h"
 #include "flutter_embedder.h"
+#include "gpu_renderer.h"
 #if RACCOON_HAS_PLUGINS
 #include "plugins.h"
 #endif
 #if RACCOON_HAS_GL
 #include "gl_renderer.h"
-#else
-namespace raccoon {
-// Without a GPU renderer there are no GPU buffers; the type stays so callers
-// compile.
-struct GpuBufferSet {
-  uint32_t generation = 0;
-  size_t width = 0;
-  size_t height = 0;
-  uint32_t fourcc = 0;
-  uint64_t modifier = 0;
-  std::vector<uint32_t> strides;
-  std::vector<uint32_t> offsets;
-  std::vector<int> fds;
-};
-}  // namespace raccoon
+#endif
+#if RACCOON_HAS_METAL
+#include "metal_renderer.h"
 #endif
 #include "platform_task_runner.h"
 #include "software_frame.h"
@@ -50,12 +39,14 @@ struct EngineOptions {
   std::string data_dir;
   // Engine switches appended to the command line, e.g. --vm-service-port=N.
   std::vector<std::string> extra_args;
-  // "auto" rasterizes on the GPU when EGL offers one and falls back to the
-  // software renderer; "gl" insists; "software" never tries.
+  // "auto" rasterizes on the GPU when this host offers one (EGL on Linux,
+  // Metal on macOS) and falls back to the software renderer; "gl" or
+  // "metal" insists; "software" never tries.
   std::string renderer = "auto";
 };
 
-// One engine on the software renderer: start, metrics, input, shutdown.
+// One engine: start, metrics, input, shutdown. Rasterizes on the GPU where
+// the host has one, in software otherwise.
 class EngineHost {
  public:
   using LogCallback =
@@ -116,7 +107,7 @@ class EngineHost {
   const std::string& renderer() const { return renderer_; }
 
   // GPU buffers: the engine draws into a ring of exported buffers and frames
-  // are buffer indices (see GlRenderer). False, with why, without a GPU
+  // are buffer indices (see GpuRenderer). False, with why, without a GPU
   // renderer that exports.
   bool EnableGpuBuffers(size_t count, std::string* error);
   void DisableGpuBuffers();
@@ -135,6 +126,12 @@ class EngineHost {
  private:
   static bool OnPresent(void* user_data, const void* allocation,
                         size_t row_bytes, size_t height);
+  // Picks the renderer |wanted| names and fills |renderer| for the engine.
+  bool ConfigureRenderer(const std::string& wanted,
+                         FlutterRendererConfig* renderer, std::string* error);
+  // The GPU renderer this host built, null on the software renderer; the
+  // typed pointer beside it serves the engine's callbacks.
+  std::unique_ptr<GpuRenderer> gpu_;
 #if RACCOON_HAS_GL
   static bool GlMakeCurrent(void* user_data);
   static bool GlClearCurrent(void* user_data);
@@ -142,7 +139,13 @@ class EngineHost {
   static uint32_t GlFbo(void* user_data, const FlutterFrameInfo* info);
   static bool GlPresent(void* user_data, const FlutterPresentInfo* info);
   static void* GlProc(void* user_data, const char* name);
-  std::unique_ptr<GlRenderer> gl_;
+  GlRenderer* gl_ = nullptr;
+#endif
+#if RACCOON_HAS_METAL
+  static FlutterMetalTexture MetalNextDrawable(void* user_data,
+                                               const FlutterFrameInfo* info);
+  static bool MetalPresent(void* user_data, const FlutterMetalTexture* texture);
+  MetalRenderer* metal_ = nullptr;
 #endif
   std::string renderer_ = "software";
   static void OnLog(const char* tag, const char* message, void* user_data);

@@ -319,13 +319,16 @@ bool RunnerServer::SendBytesWithFds(const std::vector<uint8_t>& payload,
   msghdr header{};
   header.msg_iov = parts;
   header.msg_iovlen = 2;
-  header.msg_control = control.data();
-  header.msg_controllen = control.size();
-  cmsghdr* cmsg = CMSG_FIRSTHDR(&header);
-  cmsg->cmsg_level = SOL_SOCKET;
-  cmsg->cmsg_type = SCM_RIGHTS;
-  cmsg->cmsg_len = CMSG_LEN(sizeof(int) * fds.size());
-  std::memcpy(CMSG_DATA(cmsg), fds.data(), sizeof(int) * fds.size());
+  // Nothing to attach (a set named by IDs) goes as plain bytes.
+  if (!fds.empty()) {
+    header.msg_control = control.data();
+    header.msg_controllen = control.size();
+    cmsghdr* cmsg = CMSG_FIRSTHDR(&header);
+    cmsg->cmsg_level = SOL_SOCKET;
+    cmsg->cmsg_type = SCM_RIGHTS;
+    cmsg->cmsg_len = CMSG_LEN(sizeof(int) * fds.size());
+    std::memcpy(CMSG_DATA(cmsg), fds.data(), sizeof(int) * fds.size());
+  }
   ssize_t sent;
   while (true) {
     sent = sendmsg(client_fd_, &header, kSendFlags);
