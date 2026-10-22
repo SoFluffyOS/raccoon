@@ -5,7 +5,15 @@
 //   raccoon_runner --version
 
 #include <signal.h>
+#if defined(_WIN32)
+#include <io.h>
+#include <windows.h>
+#include <tlhelp32.h>
+// A windows.h macro that would rename the embedder's GetCurrentTime.
+#undef GetCurrentTime
+#else
 #include <unistd.h>
+#endif
 #if defined(__linux__)
 #include <sys/prctl.h>
 #endif
@@ -118,7 +126,8 @@ bool ParseOptions(int argc, char** argv, Options* options) {
 
 long MillisBetween(std::chrono::steady_clock::time_point from,
                    std::chrono::steady_clock::time_point to) {
-  return std::chrono::duration_cast<std::chrono::milliseconds>(to - from).count();
+  return static_cast<long>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(to - from).count());
 }
 
 raccoon::EventLoop* g_loop = nullptr;
@@ -128,6 +137,62 @@ void OnSignal(int) {
   g_stop = 1;
   if (g_loop != nullptr) g_loop->Wake();
 }
+
+#if defined(_WIN32)
+
+uint32_t ThisProcessId() { return GetCurrentProcessId(); }
+
+// Windows has no getppid; a parent is found once, in a snapshot of the
+// process table. 0 when |pid| is not there.
+uint32_t ParentProcessId(uint32_t pid) {
+  const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+  if (snapshot == INVALID_HANDLE_VALUE) return 0;
+  PROCESSENTRY32 entry{};
+  entry.dwSize = sizeof(entry);
+  uint32_t parent = 0;
+  for (BOOL more = Process32First(snapshot, &entry); more;
+       more = Process32Next(snapshot, &entry)) {
+    if (entry.th32ProcessID == pid) {
+      parent = entry.th32ParentProcessID;
+      break;
+    }
+  }
+  CloseHandle(snapshot);
+  return parent;
+}
+
+// Says when a process has exited. Its handle is opened up front, so a pid
+// the system hands out again later is not taken for it.
+class ProcessWatch {
+ public:
+  // A pid of 0 or 1 is no process, as on the other hosts.
+  explicit ProcessWatch(uint32_t pid) : pid_(pid) {
+    if (pid <= 1) return;
+    handle_ = OpenProcess(SYNCHRONIZE, FALSE, pid);
+    gone_ = handle_ == nullptr && GetLastError() == ERROR_INVALID_PARAMETER;
+  }
+  ~ProcessWatch() {
+    if (handle_ != nullptr) CloseHandle(handle_);
+  }
+  ProcessWatch(const ProcessWatch&) = delete;
+  ProcessWatch& operator=(const ProcessWatch&) = delete;
+
+  uint32_t pid() const { return pid_; }
+  bool Exited() const {
+    return gone_ || (handle_ != nullptr && WaitForSingleObject(handle_, 0) == WAIT_OBJECT_0);
+  }
+
+ private:
+  uint32_t pid_;
+  HANDLE handle_ = nullptr;
+  bool gone_ = false;
+};
+
+#else
+
+uint32_t ThisProcessId() { return static_cast<uint32_t>(getpid()); }
+
+#endif
 
 // Engine log lines go to stdout unchanged: the Flutter tool reads the VM
 // service line from there.
@@ -394,9 +459,7 @@ int Render(const Options& options) {
                    MillisBetween(host.started(), std::chrono::steady_clock::now()));
     }
     // An idle app posts no tasks, so never wait past the deadline.
-    const long remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-                               deadline - std::chrono::steady_clock::now())
-                               .count();
+    const long remaining = MillisBetween(std::chrono::steady_clock::now(), deadline);
     const int cap = static_cast<int>(remaining < 0 ? 0 : remaining);
     loop.RunOnce(NextWait(host, cap));
   }
@@ -419,6 +482,9 @@ int Serve(const Options& options) {
   g_loop = &loop;
   std::signal(SIGINT, OnSignal);
   std::signal(SIGTERM, OnSignal);
+#if defined(_WIN32)
+  std::signal(SIGBREAK, OnSignal);
+#endif
 
   // The app's log reaches the client too: the engine's lines, and stderr,
   // where the engine prints what main() died of and the runner what went
@@ -596,14 +662,32 @@ int Serve(const Options& options) {
   handler.on_shutdown = [&stop] { stop = true; };
   // The Flutter tool started this runner; when it is gone, so is the run.
   // Through the device helper, the helper is the parent and
-  // RACCOON_PARENT_PID names the tool.
-  const pid_t parent = getppid();
+  // RACCOON_PARENT_PID names the tool. On Windows the helper runs in Git
+  // Bash, which knows neither the tool's pid nor starts the runner as its
+  // own child (a forked copy of the shell waits on it instead, and outlives
+  // a helper the tool kills), so there it names the helper itself and its
+  // parent is the tool.
   const char* tool_env = std::getenv("RACCOON_PARENT_PID");
-  const pid_t tool = tool_env == nullptr ? 0 : static_cast<pid_t>(std::atoi(tool_env));
-  auto ParentGone = [parent, tool] {
-    if (getppid() != parent) return true;
-    return tool > 1 && kill(tool, 0) != 0 && errno == ESRCH;
+#if defined(_WIN32)
+  const uint32_t named = tool_env == nullptr ? 0 : static_cast<uint32_t>(std::atoi(tool_env));
+  const ProcessWatch parent(ParentProcessId(ThisProcessId()));
+  const ProcessWatch helper(named);
+  const ProcessWatch tool(named > 1 ? ParentProcessId(named) : 0);
+  // The pid that is gone, or 0.
+  auto GonePid = [&]() -> int {
+    for (const ProcessWatch* watch : {&parent, &helper, &tool}) {
+      if (watch->Exited()) return static_cast<int>(watch->pid());
+    }
+    return 0;
   };
+#else
+  const pid_t parent = getppid();
+  const pid_t tool = tool_env == nullptr ? 0 : static_cast<pid_t>(std::atoi(tool_env));
+  auto GonePid = [parent, tool]() -> int {
+    if (getppid() != parent) return static_cast<int>(parent);
+    return tool > 1 && kill(tool, 0) != 0 && errno == ESRCH ? static_cast<int>(tool) : 0;
+  };
+#endif
   handler.on_hello = [&](const raccoon::v1::ClientHello& hello) {
     client_shared = hello.shared_buffers();
     client_gpu = false;
@@ -653,7 +737,7 @@ int Serve(const Options& options) {
   handler.on_client_connected = [&] {
     raccoon::v1::RunnerMessage hello;
     hello.mutable_hello()->set_protocol_version(kProtocolVersion);
-    hello.mutable_hello()->set_pid(static_cast<uint32_t>(getpid()));
+    hello.mutable_hello()->set_pid(ThisProcessId());
     server_ptr->Send(hello);
     // What the app said before it drew anything, why it stopped if it did.
     for (const auto& line : startup_lines) server_ptr->Send(line);
@@ -822,9 +906,8 @@ int Serve(const Options& options) {
         }
       }
     }
-    if (ParentGone()) {
-      std::fprintf(stderr, "raccoon_runner: parent %d is gone; stopping\n",
-                   static_cast<int>(getppid() == parent && tool > 1 ? tool : parent));
+    if (const int gone = GonePid(); gone != 0) {
+      std::fprintf(stderr, "raccoon_runner: parent %d is gone; stopping\n", gone);
       stop = true;
     }
     loop.RunOnce(NextWait(host, ExpireReplies(1000)));

@@ -1,11 +1,15 @@
 #include "server.h"
 
+#if defined(_WIN32)
+#include "win_sockets.h"
+#else
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <sys/un.h>
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <cerrno>
@@ -21,7 +25,9 @@ constexpr size_t kMaxMessage = 64 * 1024 * 1024;
 // Sockets are non-blocking and close-on-exec, and a client that went away
 // must fail a send with EPIPE rather than raise SIGPIPE. Linux asks for all of
 // it in the calls themselves; macOS sets the flags afterwards and silences
-// SIGPIPE per socket.
+// SIGPIPE per socket. Windows has neither signal nor exec: its sockets are
+// made non-blocking and kept from the programs the app starts, and nothing
+// rides along with the bytes.
 #if defined(__linux__)
 
 constexpr int kSendFlags = MSG_NOSIGNAL;
@@ -36,6 +42,14 @@ int OpenListenSocket() {
 int AcceptClient(int listen_fd) {
   return accept4(listen_fd, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
 }
+
+#elif defined(_WIN32)
+
+constexpr int kSendFlags = 0;
+
+int OpenListenSocket() { return OpenSocket(AF_UNIX); }
+
+int AcceptClient(int listen_fd) { return AcceptSocket(listen_fd); }
 
 #else
 
@@ -72,6 +86,63 @@ int AcceptClient(int listen_fd) {
 
 #endif
 
+// The calls whose names or errors differ on Windows, where a socket is not a
+// file descriptor.
+#if defined(_WIN32)
+
+void CloseFd(int fd) { CloseSocket(fd); }
+
+void RemoveSocketFile(const std::string& path) { DeleteFileA(path.c_str()); }
+
+std::string ErrorText(const char* what) { return SocketError(what); }
+
+bool WouldBlock() { return WSAGetLastError() == WSAEWOULDBLOCK; }
+
+int SendSome(int fd, const uint8_t* data, size_t size) {
+  const int chunk = size > INT32_MAX ? INT32_MAX : static_cast<int>(size);
+  return send(AsSocket(fd), reinterpret_cast<const char*>(data), chunk, kSendFlags);
+}
+
+int RecvSome(int fd, uint8_t* buffer, size_t size) {
+  return recv(AsSocket(fd), reinterpret_cast<char*>(buffer), static_cast<int>(size), 0);
+}
+
+void ShutWrite(int fd) { shutdown(AsSocket(fd), SD_SEND); }
+
+bool WaitWritable(int fd, int timeout_ms) {
+  WSAPOLLFD wait{AsSocket(fd), POLLWRNORM, 0};
+  return WSAPoll(&wait, 1, timeout_ms) > 0;
+}
+
+#else
+
+void CloseFd(int fd) { close(fd); }
+
+void RemoveSocketFile(const std::string& path) { unlink(path.c_str()); }
+
+std::string ErrorText(const char* what) {
+  return std::string(what) + ": " + std::strerror(errno);
+}
+
+bool WouldBlock() { return errno == EAGAIN || errno == EWOULDBLOCK; }
+
+ssize_t SendSome(int fd, const uint8_t* data, size_t size) {
+  return send(fd, data, size, kSendFlags);
+}
+
+ssize_t RecvSome(int fd, uint8_t* buffer, size_t size) {
+  return read(fd, buffer, size);
+}
+
+void ShutWrite(int fd) { shutdown(fd, SHUT_WR); }
+
+bool WaitWritable(int fd, int timeout_ms) {
+  pollfd wait{fd, POLLOUT, 0};
+  return poll(&wait, 1, timeout_ms) > 0;
+}
+
+#endif
+
 uint32_t ReadLength(const uint8_t* data) {
   return static_cast<uint32_t>(data[0]) | (static_cast<uint32_t>(data[1]) << 8) |
          (static_cast<uint32_t>(data[2]) << 16) |
@@ -88,8 +159,8 @@ RunnerServer::~RunnerServer() {
   while (!lingering_.empty()) Unlinger(lingering_.front());
   if (listen_fd_ >= 0) {
     loop_.Unwatch(listen_fd_);
-    close(listen_fd_);
-    unlink(socket_path_.c_str());
+    CloseFd(listen_fd_);
+    RemoveSocketFile(socket_path_);
   }
 }
 
@@ -105,17 +176,17 @@ bool RunnerServer::Listen(const std::string& socket_path, std::string* error) {
 
   listen_fd_ = OpenListenSocket();
   if (listen_fd_ < 0) {
-    *error = std::string("socket: ") + std::strerror(errno);
+    *error = ErrorText("socket");
     return false;
   }
-  unlink(socket_path.c_str());
+  RemoveSocketFile(socket_path);
   if (bind(listen_fd_, reinterpret_cast<sockaddr*>(&address),
            sizeof(address)) < 0) {
-    *error = std::string("bind: ") + std::strerror(errno);
+    *error = ErrorText("bind");
     return false;
   }
   if (listen(listen_fd_, 1) < 0) {
-    *error = std::string("listen: ") + std::strerror(errno);
+    *error = ErrorText("listen");
     return false;
   }
   socket_path_ = socket_path;
@@ -156,15 +227,15 @@ void RunnerServer::OnListenReadable() {
 // so it reads the reply and then an end, and whatever it sends is read and
 // dropped until it hangs up.
 void RunnerServer::Linger(int fd) {
-  shutdown(fd, SHUT_WR);
+  ShutWrite(fd);
   if (lingering_.size() >= kMaxLingering) Unlinger(lingering_.front());
   lingering_.push_back(fd);
   loop_.Watch(fd, POLLIN, [this, fd](short) {
     uint8_t buffer[4096];
     while (true) {
-      const ssize_t got = read(fd, buffer, sizeof(buffer));
+      const auto got = RecvSome(fd, buffer, sizeof(buffer));
       if (got > 0) continue;
-      if (got < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
+      if (got < 0 && WouldBlock()) return;
       break;
     }
     Unlinger(fd);
@@ -173,14 +244,20 @@ void RunnerServer::Linger(int fd) {
 
 void RunnerServer::Unlinger(int fd) {
   loop_.Unwatch(fd);
-  close(fd);
+  CloseFd(fd);
   lingering_.erase(std::find(lingering_.begin(), lingering_.end(), fd));
 }
 
 bool RunnerServer::ReadAvailable() {
   uint8_t buffer[64 * 1024];
+#if !defined(_WIN32)
   alignas(cmsghdr) uint8_t control[CMSG_SPACE(sizeof(int) * 16)];
+#endif
   while (true) {
+#if defined(_WIN32)
+    // Nothing rides along on Windows, raw client or not.
+    const int got = RecvSome(client_fd_, buffer, sizeof(buffer));
+#else
     ssize_t got;
     if (handler_.on_raw) {
       // A raw client may attach descriptors; they ride with the first bytes
@@ -206,13 +283,14 @@ bool RunnerServer::ReadAvailable() {
         }
       }
     } else {
-      got = read(client_fd_, buffer, sizeof(buffer));
+      got = RecvSome(client_fd_, buffer, sizeof(buffer));
     }
+#endif
     if (got > 0) {
       inbox_.insert(inbox_.end(), buffer, buffer + got);
       continue;
     }
-    return got == 0 || (errno != EAGAIN && errno != EWOULDBLOCK);
+    return got == 0 || !WouldBlock();
   }
 }
 
@@ -297,10 +375,12 @@ void RunnerServer::CloseClient() {
   closing_ = false;
   if (client_fd_ < 0) return;
   loop_.Unwatch(client_fd_);
-  close(client_fd_);
+  CloseFd(client_fd_);
   client_fd_ = -1;
   inbox_.clear();
+#if !defined(_WIN32)
   for (int fd : fds_in_) close(fd);
+#endif
   fds_in_.clear();
   if (handler_.on_client_disconnected) handler_.on_client_disconnected();
 }
@@ -312,14 +392,13 @@ bool RunnerServer::WriteAll(const uint8_t* data, size_t size) {
 bool RunnerServer::WriteAllTo(int fd, const uint8_t* data, size_t size) {
   size_t sent = 0;
   while (sent < size) {
-    const ssize_t wrote = send(fd, data + sent, size - sent, kSendFlags);
+    const auto wrote = SendSome(fd, data + sent, size - sent);
     if (wrote >= 0) {
       sent += static_cast<size_t>(wrote);
       continue;
     }
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      pollfd wait{fd, POLLOUT, 0};
-      if (poll(&wait, 1, 5000) <= 0) return false;
+    if (WouldBlock()) {
+      if (!WaitWritable(fd, 5000)) return false;
       continue;
     }
     return false;
@@ -334,6 +413,25 @@ bool RunnerServer::SendWithFds(const v1::RunnerMessage& message,
   return SendBytesWithFds(
       std::vector<uint8_t>(serialized.begin(), serialized.end()), fds);
 }
+
+#if defined(_WIN32)
+
+bool RunnerServer::SendBytesWithFds(const std::vector<uint8_t>& payload,
+                                    const std::vector<int>& fds) {
+  // No descriptor crosses a Windows socket; a set named by IDs still goes.
+  if (client_fd_ < 0 || !fds.empty()) return false;
+  const uint32_t length = static_cast<uint32_t>(payload.size());
+  const uint8_t prefix[kLengthPrefix] = {
+      static_cast<uint8_t>(length), static_cast<uint8_t>(length >> 8),
+      static_cast<uint8_t>(length >> 16), static_cast<uint8_t>(length >> 24)};
+  if (!WriteAll(prefix, kLengthPrefix) || !WriteAll(payload.data(), payload.size())) {
+    CloseClient();
+    return false;
+  }
+  return true;
+}
+
+#else
 
 bool RunnerServer::SendBytesWithFds(const std::vector<uint8_t>& payload,
                                     const std::vector<int>& fds) {
@@ -362,9 +460,8 @@ bool RunnerServer::SendBytesWithFds(const std::vector<uint8_t>& payload,
   while (true) {
     sent = sendmsg(client_fd_, &header, kSendFlags);
     if (sent >= 0) break;
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      pollfd wait{client_fd_, POLLOUT, 0};
-      if (poll(&wait, 1, 5000) <= 0) {
+    if (WouldBlock()) {
+      if (!WaitWritable(client_fd_, 5000)) {
         CloseClient();
         return false;
       }
@@ -386,6 +483,8 @@ bool RunnerServer::SendBytesWithFds(const std::vector<uint8_t>& payload,
   }
   return true;
 }
+
+#endif
 
 bool RunnerServer::Send(const v1::RunnerMessage& message) {
   if (client_fd_ < 0) return false;

@@ -4,7 +4,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <nlohmann/json.hpp>
+#if defined(_WIN32)
+#include <io.h>
+#else
 #include <unistd.h>
+#endif
 
 namespace raccoon {
 
@@ -26,6 +30,7 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   assets_ = options.assets;
   if (!options.data_dir.empty()) {
     user_defaults_.SetStorePath(options.data_dir + "/shared_preferences.bin");
+#if !defined(_WIN32)
     // On Linux, path_provider and shared_preferences are Dart only: they
     // name their directories after the executable under the XDG base
     // directories, so every hosted app would share one. Pointed into the
@@ -47,6 +52,9 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
     }
     setenv("XDG_DATA_HOME", (options.data_dir + "/xdg/data").c_str(), 1);
     setenv("XDG_CACHE_HOME", (options.data_dir + "/xdg/cache").c_str(), 1);
+#endif
+    // Windows' path_provider asks the shell for its known folders, which no
+    // variable moves, so apps there still share theirs.
   }
   icu_ = options.icu;
 

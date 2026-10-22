@@ -1,14 +1,30 @@
 #include "shared_buffers.h"
 
+#if !defined(_WIN32)
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#endif
 
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
 
 namespace raccoon {
+
+#if defined(_WIN32)
+
+// A buffer's handle would have to be duplicated into the client, and a
+// Windows socket carries no handles, nor can Dart take one; frames ride
+// inline there.
+SharedBufferPool::~SharedBufferPool() = default;
+
+bool SharedBufferPool::Allocate(size_t, size_t, std::string* error) {
+  *error = "no shared buffers on Windows";
+  return false;
+}
+
+#else
 
 namespace {
 
@@ -70,6 +86,8 @@ bool SharedBufferPool::Allocate(size_t count, size_t size, std::string* error) {
   }
   return true;
 }
+
+#endif
 
 std::vector<int> SharedBufferPool::fds() const {
   std::vector<int> out;

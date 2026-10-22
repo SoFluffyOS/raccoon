@@ -3,6 +3,9 @@ project(raccoon_runner CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# On Windows the C runtime is linked in, protobuf's too, so a prebuilt runner
+# needs no Visual C++ redistributable.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # The runner's version, one line in VERSION: what --version prints, what the
 # release archives are named after (tool/package.sh), and what the Simulator
@@ -12,7 +15,8 @@ file(READ ${CMAKE_SOURCE_DIR}/VERSION RACCOON_RUNNER_VERSION)
 string(STRIP "${RACCOON_RUNNER_VERSION}" RACCOON_RUNNER_VERSION)
 
 # The runtime directory for the engine revision in use: flutter_embedder.h
-# next to libflutter_engine.so on Linux, FlutterEmbedder.framework on macOS.
+# next to libflutter_engine.so on Linux and flutter_engine.dll on Windows,
+# FlutterEmbedder.framework on macOS.
 # The engine library itself is loaded at run time with --engine-dir, so one
 # runner binary serves several runtimes.
 set(RACCOON_ENGINE_DIR "" CACHE PATH "Runtime directory with the embedder header")
@@ -37,7 +41,12 @@ else()
 endif()
 
 # protoc for the C++ message code; tool/protoc.sh installs a user-local one.
-set(RACCOON_PROTOC "$ENV{HOME}/.local/raccoon/protoc/bin/protoc" CACHE FILEPATH "protoc binary")
+if(WIN32)
+  file(TO_CMAKE_PATH "$ENV{USERPROFILE}/.local/raccoon/protoc/bin/protoc.exe" RACCOON_PROTOC_DEFAULT)
+else()
+  set(RACCOON_PROTOC_DEFAULT "$ENV{HOME}/.local/raccoon/protoc/bin/protoc")
+endif()
+set(RACCOON_PROTOC "${RACCOON_PROTOC_DEFAULT}" CACHE FILEPATH "protoc binary")
 
 # protobuf-lite, built from source so the runner needs no system package. The
 # version matches protoc 21.12.
@@ -92,14 +101,26 @@ add_executable(raccoon_runner
   src/standard_codec.cc
   src/text_input.cc
   src/user_defaults_channels.cc
+  src/win_sockets.cc
   src/window_channels.cc
 )
 target_include_directories(raccoon_runner PRIVATE ${RACCOON_EMBEDDER_INCLUDE_DIR} src)
 target_compile_definitions(raccoon_runner PRIVATE RACCOON_RUNNER_VERSION="${RACCOON_RUNNER_VERSION}")
-target_compile_options(raccoon_runner PRIVATE -Wall -Wextra)
+if(MSVC)
+  target_compile_options(raccoon_runner PRIVATE /W3 /utf-8)
+  # The POSIX names the C runtime keeps (close, strerror, getenv) without
+  # their deprecation warnings, and windows.h without min and max.
+  target_compile_definitions(raccoon_runner PRIVATE
+    NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+else()
+  target_compile_options(raccoon_runner PRIVATE -Wall -Wextra)
+endif()
 find_package(Threads REQUIRED)
 target_link_libraries(raccoon_runner PRIVATE raccoon_proto ${CMAKE_DL_LIBS} Threads::Threads)
 target_link_libraries(raccoon_runner PRIVATE nlohmann_json::nlohmann_json)
+if(WIN32)
+  target_link_libraries(raccoon_runner PRIVATE ws2_32)
+endif()
 
 # The GPU renderer, one per host; without it the runner rasterizes in
 # software. On macOS, Metal, with the ring of buffers backed by IOSurfaces.
@@ -152,6 +173,11 @@ if(APPLE)
   else()
     message(STATUS "No FlutterMacOS.framework in the SDK cache: example plugin skipped")
   endif()
+elseif(WIN32)
+  # Software rendering, frames inline. D3D11 shared textures and native
+  # plugins come later (raccoon#25, raccoon#36).
+  message(STATUS "GPU renderer: off (not on Windows yet)")
+  message(STATUS "Native plugins: off (not on Windows yet)")
 else()
   find_package(PkgConfig QUIET)
   if(PkgConfig_FOUND)

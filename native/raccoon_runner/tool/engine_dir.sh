@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Prints the runtime directory for the active Flutter SDK's engine revision,
 # downloading the prebuilt debug embedder when missing: flutter_embedder.h and
-# libflutter_engine.so on Linux, FlutterEmbedder.framework on macOS. Reads the
+# libflutter_engine.so on Linux, FlutterEmbedder.framework on macOS,
+# flutter_embedder.h and flutter_engine.dll on Windows (from Git Bash, which
+# every Flutter install there has; the path comes out as C:/...). Reads the
 # SDK's engine stamp when it can, which is much faster than asking the tool.
 set -euo pipefail
 
@@ -47,6 +49,17 @@ case "$(uname -s)" in
     URL="$BUCKET/$PLATFORM/$PLATFORM-embedder.zip"
     UNZIP_INTO="$DIR"
     ;;
+  MINGW*|MSYS*|CYGWIN*)
+    case "${PROCESSOR_ARCHITEW6432:-${PROCESSOR_ARCHITECTURE:-}}" in
+      AMD64) PLATFORM=windows-x64 ;;
+      ARM64) PLATFORM=windows-arm64 ;;
+      *) echo "unsupported architecture ${PROCESSOR_ARCHITECTURE:-}" >&2; exit 1 ;;
+    esac
+    DIR="$CACHE/$PLATFORM"
+    LIBRARY="$DIR/flutter_engine.dll"
+    URL="$BUCKET/$PLATFORM/$PLATFORM-embedder.zip"
+    UNZIP_INTO="$DIR"
+    ;;
   *) echo "unsupported system $(uname -s)" >&2; exit 1 ;;
 esac
 
@@ -56,4 +69,4 @@ if [ ! -e "$LIBRARY" ]; then
   unzip -q -o "$DIR/dl/embedder.zip" -d "$UNZIP_INTO"
   rm -rf "$DIR/dl"
 fi
-echo "$DIR"
+if command -v cygpath >/dev/null; then cygpath -m "$DIR"; else echo "$DIR"; fi

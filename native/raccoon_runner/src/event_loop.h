@@ -1,6 +1,12 @@
 #pragma once
 
+#if defined(_WIN32)
+#include <winsock2.h>
+// windows.h, which winsock2.h brings, renames the embedder's GetCurrentTime.
+#undef GetCurrentTime
+#else
 #include <poll.h>
+#endif
 
 #include <functional>
 #include <unordered_map>
@@ -9,8 +15,18 @@
 
 namespace raccoon {
 
+// A pollfd for |fd|: on Windows its descriptor is a SOCKET, which an int
+// cannot initialize without a cast.
+inline pollfd PollEntry(int fd, short events) {
+  pollfd entry{};
+  entry.fd = static_cast<decltype(entry.fd)>(fd);
+  entry.events = events;
+  return entry;
+}
+
 // A poll loop over watched descriptors plus a wake descriptor that any thread
-// can signal.
+// can signal. On Windows the descriptors are sockets and the poll is
+// WSAPoll's.
 class EventLoop {
  public:
   using Handler = std::function<void(short revents)>;
@@ -47,7 +63,8 @@ class EventLoop {
 
  private:
   // The read and write ends of the wake descriptor: one eventfd on Linux, the
-  // two ends of a pipe elsewhere.
+  // two ends of a pipe on macOS, a connected socket pair on Windows, whose
+  // WSAPoll takes nothing but sockets.
   int wake_fd_ = -1;
   int wake_write_fd_ = -1;
   std::unordered_map<int, std::pair<short, Handler>> watches_;

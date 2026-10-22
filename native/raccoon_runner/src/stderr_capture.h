@@ -10,6 +10,7 @@
 // signal copies what is still in the pipe before the process dies, so
 // nothing the tool would have shown is lost.
 
+#include <atomic>
 #include <functional>
 #include <string>
 #include <thread>
@@ -45,6 +46,10 @@ class StderrCapture {
   int saved_fd_ = -1;
   int stop_read_fd_ = -1;
   int stop_write_fd_ = -1;
+  // Windows: no poll on a pipe, so Stop says so here and cancels the
+  // thread's read until it has finished.
+  std::atomic<bool> stopping_{false};
+  std::atomic<bool> finished_{false};
 };
 
 }  // namespace raccoon

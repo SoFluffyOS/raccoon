@@ -2,7 +2,11 @@
 
 #include <cstdio>
 #include <cstring>
+#if defined(_WIN32)
+#include <io.h>
+#else
 #include <unistd.h>
+#endif
 
 namespace raccoon {
 
