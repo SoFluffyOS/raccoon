@@ -122,6 +122,55 @@ void main() {
     },
   );
 
+  testWidgets('pixel frames are dropped while the texture is live', (
+    tester,
+  ) async {
+    final connection = _GpuConnection();
+    final textures = _FakeTextures(releases: true);
+    await tester.pumpWidget(
+      RaccoonView(connection: connection, gpuTextures: textures),
+    );
+    connection.sets.add(
+      rc.GpuBuffers(
+        generation: 1,
+        count: 3,
+        width: 8,
+        height: 8,
+        socket: '/run/r.gpu',
+      ),
+    );
+    await tester.pump();
+    connection.frameController.add(
+      rc.Frame(
+        sequence: Int64(1),
+        inGpuBuffer: true,
+        bufferIndex: 0,
+        gpuGeneration: 1,
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(Texture), findsOneWidget);
+
+    // A readback frame right after: the texture stays, nothing is decoded.
+    connection.frameController.add(
+      rc.Frame(
+        sequence: Int64(2),
+        width: 8,
+        height: 8,
+        rowBytes: 32,
+        format: rc.PixelFormat.PIXEL_FORMAT_BGRA8888,
+        pixels: List.filled(8 * 8 * 4, 0),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(Texture), findsOneWidget);
+    expect(find.byType(RaccoonFrameView), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('a host that gives buffers back itself is left to it', (
     tester,
   ) async {

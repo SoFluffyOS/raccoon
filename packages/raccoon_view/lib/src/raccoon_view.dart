@@ -51,6 +51,10 @@ class _RaccoonViewState extends State<RaccoonView> {
   int? _textureId;
   // Whether frames arrive as GPU buffers, and the buffer the texture shows.
   bool _gpuLive = false;
+  // When the last GPU frame came; pixel frames are dropped while the ring
+  // is live, and the ring counts as live for this long after that.
+  DateTime? _lastGpuFrame;
+  static const _ringQuiet = Duration(milliseconds: 500);
   // Whether the host gives buffers back to the runner itself.
   bool _hostReleases = false;
   (int, int)? _shown;
@@ -149,6 +153,7 @@ class _RaccoonViewState extends State<RaccoonView> {
       connection.releaseGpuBuffer(generation, index);
     }
     _shown = null;
+    _lastGpuFrame = null;
     _hostReleases = false;
     if (_textureId case final id?) unawaited(_gpu?.dispose(id));
     _textureId = null;
@@ -171,8 +176,18 @@ class _RaccoonViewState extends State<RaccoonView> {
 
   void _onFrame(rc.Frame frame) {
     if (frame.inGpuBuffer) {
+      _lastGpuFrame = DateTime.now();
       unawaited(_showGpuFrame(frame));
       return;
+    }
+    // While the texture is live the host draws the ring, not pixels: a
+    // pixel frame is the runner going by readback for one frame, and
+    // decoding it would be for nothing. A ring quiet for a while is given
+    // up on, so an app whose ring died still shows.
+    if (_gpuLive) {
+      final last = _lastGpuFrame;
+      if (last != null && DateTime.now().difference(last) < _ringQuiet) return;
+      setState(() => _gpuLive = false);
     }
     _pending = frame;
     unawaited(_decodePending());
