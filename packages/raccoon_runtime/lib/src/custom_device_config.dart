@@ -18,13 +18,15 @@ final class CustomDeviceConfig {
     this.sdkNameAndVersion = 'Raccoon runtime',
     String? platform,
     String? size,
+    List<String>? launcher,
   }) : id = id ?? (instance == '1' ? 'raccoon' : 'raccoon-$instance'),
        size = size ?? RaccoonDevice.forKey(instance)?.sizeArgument,
        label =
            label ??
            RaccoonDevice.forKey(instance)?.label ??
            (instance == '1' ? 'Raccoon' : 'Raccoon $instance'),
-       platform = platform ?? hostPlatform;
+       platform = platform ?? hostPlatform,
+       launcher = launcher ?? hostLauncher;
 
   /// The entry for a device, built in or the user's own: its id, label
   /// and, for the sized ones, the size the runner starts at.
@@ -32,12 +34,14 @@ final class CustomDeviceConfig {
     RaccoonDevice device, {
     required String deviceHelper,
     String? platform,
+    List<String>? launcher,
   }) : this(
          deviceHelper: deviceHelper,
          instance: device.key,
          id: device.id,
          label: device.label,
          platform: platform,
+         launcher: launcher,
          size: device.sizeArgument,
        );
 
@@ -55,8 +59,44 @@ final class CustomDeviceConfig {
     _ => throw UnsupportedError('no custom device platform for $abi'),
   };
 
+  /// What starts the helper on this host: nothing where the system runs a
+  /// script by its first line, Git's `bash.exe` on Windows, where the tool
+  /// starts only programs. Every Flutter install there has Git.
+  static final List<String> hostLauncher = switch (Platform.operatingSystem) {
+    'windows' => [
+      gitBashFor(Platform.environment, (path) => File(path).existsSync()),
+    ],
+    _ => const [],
+  };
+
+  /// Git for Windows' `bin\bash.exe`, found from the `git` on the PATH
+  /// (in Git's `cmd`, `bin` or `mingw64\bin`), else where Git installs by
+  /// default. Not just any `bash` on the PATH: System32's starts WSL.
+  static String gitBashFor(
+    Map<String, String> environment,
+    bool Function(String path) exists,
+  ) {
+    final path = environment['PATH'] ?? environment['Path'] ?? '';
+    for (final directory in path.split(';')) {
+      if (directory.isEmpty) continue;
+      if (!exists(p.windows.join(directory, 'git.exe'))) continue;
+      for (final root in [
+        p.windows.dirname(directory),
+        p.windows.dirname(p.windows.dirname(directory)),
+      ]) {
+        final bash = p.windows.join(root, 'bin', 'bash.exe');
+        if (exists(bash)) return bash;
+      }
+    }
+    return r'C:\Program Files\Git\bin\bash.exe';
+  }
+
   /// Path to the `raccoon-device` helper (ping, install, uninstall, run).
   final String deviceHelper;
+
+  /// What runs [deviceHelper], ahead of it in every command; see
+  /// [hostLauncher].
+  final List<String> launcher;
 
   /// Which run of a project this device hosts. 1 is `raccoon`; `raccoon-N`
   /// keeps a second run of the same project apart from the first, with its
@@ -90,18 +130,26 @@ final class CustomDeviceConfig {
     'sdkNameAndVersion': sdkNameAndVersion,
     'platform': platform,
     'enabled': true,
-    'ping': [deviceHelper, 'ping'],
+    'ping': [...launcher, deviceHelper, 'ping'],
     'pingSuccessRegex': null,
     'postBuild': null,
     'install': [
+      ...launcher,
       deviceHelper,
       'install',
       ..._instanceArgs,
       r'${localPath}',
       r'${appName}',
     ],
-    'uninstall': [deviceHelper, 'uninstall', ..._instanceArgs, r'${appName}'],
+    'uninstall': [
+      ...launcher,
+      deviceHelper,
+      'uninstall',
+      ..._instanceArgs,
+      r'${appName}',
+    ],
     'runDebug': [
+      ...launcher,
       deviceHelper,
       'run',
       ..._instanceArgs,
@@ -121,14 +169,26 @@ final class CustomDevicesFile {
   const CustomDevicesFile(this.path);
 
   /// The tool's location on this host: `$XDG_CONFIG_HOME/flutter` or
-  /// `~/.config/flutter`.
-  factory CustomDevicesFile.forHost(Map<String, String> environment) {
+  /// `~/.config/flutter` on Linux and macOS, `.flutter_custom_devices.json`
+  /// in `%APPDATA%` on Windows.
+  factory CustomDevicesFile.forHost(
+    Map<String, String> environment, {
+    String? operatingSystem,
+  }) {
+    if ((operatingSystem ?? Platform.operatingSystem) == 'windows') {
+      return CustomDevicesFile(
+        p.windows.join(
+          environment['APPDATA'] ?? '.',
+          '.flutter_custom_devices.json',
+        ),
+      );
+    }
     final configHome = switch (environment['XDG_CONFIG_HOME']) {
       final dir? when dir.isNotEmpty => dir,
-      _ => p.join(environment['HOME'] ?? '', '.config'),
+      _ => p.posix.join(environment['HOME'] ?? '', '.config'),
     };
     return CustomDevicesFile(
-      p.join(configHome, 'flutter', 'custom_devices.json'),
+      p.posix.join(configHome, 'flutter', 'custom_devices.json'),
     );
   }
 
@@ -172,10 +232,12 @@ final class CustomDevicesFile {
   }
 
   /// The device helper the entry with [id] runs, read off its ping
-  /// command; null without such an entry. The `raccoon` entry's helper is
-  /// what every added device points at.
+  /// command (the word before `ping`, past any launcher); null without such
+  /// an entry. The `raccoon` entry's helper is what every added device
+  /// points at.
   String? helperOf(String id) => switch (_entry(id)) {
-    {'ping': final List ping} when ping.isNotEmpty => ping.first as String?,
+    {'ping': [..., final String helper, 'ping']} => helper,
+    {'ping': [final String helper, ...]} => helper,
     _ => null,
   };
 

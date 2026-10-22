@@ -29,6 +29,18 @@ void main() {
     );
     expect(macos.directory, '/var/folders/x/T/raccoon');
     expect(macos.pollInterval, isNotNull, reason: 'FSEvents misses sockets');
+
+    final windows = RunnerDiscovery.forHost(
+      operatingSystem: 'windows',
+      environment: const {},
+      temporaryDirectory: r'C:\Users\me\AppData\Local\Temp',
+    );
+    expect(windows.directory, r'C:\Users\me\AppData\Local\Temp\raccoon');
+    expect(
+      windows.pollInterval,
+      isNull,
+      reason: 'directory changes include sockets',
+    );
   });
 
   test('lists sockets only and names the app after the file', () async {
@@ -50,7 +62,7 @@ void main() {
       (String dir) =>
           RunnerDiscovery(dir, pollInterval: const Duration(milliseconds: 50)),
     ),
-    if (Platform.isLinux) ('file system events', RunnerDiscovery.new),
+    if (!Platform.isMacOS) ('file system events', RunnerDiscovery.new),
   ]) {
     test('watch reports runners as they appear and go, by $mode', () async {
       final watching = discovery(p.join(temp.path, 'raccoon'));

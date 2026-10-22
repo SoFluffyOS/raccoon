@@ -14,13 +14,65 @@ void main() {
 
   test('resolves the tool config path from XDG_CONFIG_HOME, then HOME', () {
     expect(
-      CustomDevicesFile.forHost({'XDG_CONFIG_HOME': '/xdg', 'HOME': '/h'}).path,
+      CustomDevicesFile.forHost({
+        'XDG_CONFIG_HOME': '/xdg',
+        'HOME': '/h',
+      }, operatingSystem: 'linux').path,
       '/xdg/flutter/custom_devices.json',
     );
     expect(
-      CustomDevicesFile.forHost({'HOME': '/h'}).path,
+      CustomDevicesFile.forHost({'HOME': '/h'}, operatingSystem: 'macos').path,
       '/h/.config/flutter/custom_devices.json',
     );
+  });
+
+  test('resolves the tool config path from APPDATA on Windows', () {
+    expect(
+      CustomDevicesFile.forHost({
+        'APPDATA': r'C:\Users\me\AppData\Roaming',
+        'HOME': '/h',
+      }, operatingSystem: 'windows').path,
+      r'C:\Users\me\AppData\Roaming\.flutter_custom_devices.json',
+    );
+  });
+
+  test('starts the helper with Git Bash on Windows', () {
+    final present = {
+      r'C:\Windows\System32\bash.exe',
+      r'D:\Tools\Git\mingw64\bin\git.exe',
+      r'D:\Tools\Git\bin\bash.exe',
+    };
+    expect(
+      CustomDeviceConfig.gitBashFor({
+        'PATH': r'C:\Windows\System32;D:\Tools\Git\mingw64\bin',
+      }, present.contains),
+      r'D:\Tools\Git\bin\bash.exe',
+    );
+    expect(
+      CustomDeviceConfig.gitBashFor({
+        'PATH': r'C:\Windows\System32',
+      }, present.contains),
+      r'C:\Program Files\Git\bin\bash.exe',
+    );
+
+    final config = CustomDeviceConfig(
+      deviceHelper: r'C:\r\tool\raccoon-device',
+      launcher: [r'C:\Git\bin\bash.exe'],
+    );
+    final json = config.toJson();
+    expect(json['ping'], [
+      r'C:\Git\bin\bash.exe',
+      r'C:\r\tool\raccoon-device',
+      'ping',
+    ]);
+    expect((json['runDebug'] as List).take(3), [
+      r'C:\Git\bin\bash.exe',
+      r'C:\r\tool\raccoon-device',
+      'run',
+    ]);
+    final file = CustomDevicesFile(p.join(temp.path, 'devices.json'))
+      ..upsert(config);
+    expect(file.helperOf('raccoon'), r'C:\r\tool\raccoon-device');
   });
 
   test('tells the tool a linux platform of the host architecture', () {
@@ -42,6 +94,7 @@ void main() {
       CustomDeviceConfig(
         deviceHelper: '/b/raccoon-device',
         platform: 'linux-x64',
+        launcher: const [],
       ),
     );
 
@@ -118,7 +171,11 @@ void main() {
   });
 
   test('a second instance is raccoon-2 with --instance in its commands', () {
-    final config = CustomDeviceConfig(deviceHelper: '/h', instance: '2');
+    final config = CustomDeviceConfig(
+      deviceHelper: '/h',
+      instance: '2',
+      launcher: const [],
+    );
     expect(config.id, 'raccoon-2');
     expect(config.label, 'Raccoon 2');
     final json = config.toJson();
@@ -145,7 +202,8 @@ void main() {
       r'${appName}',
       r'${engineOptions}',
     ]);
-    final first = CustomDeviceConfig(deviceHelper: '/h').toJson();
+    final first =
+        CustomDeviceConfig(deviceHelper: '/h', launcher: const []).toJson();
     expect(first['id'], 'raccoon');
     expect(first['runDebug'], [
       '/h',
@@ -169,6 +227,7 @@ void main() {
       RaccoonDevice.tablet,
       deviceHelper: '/h',
       platform: 'linux-x64',
+      launcher: const [],
     );
     expect(config.id, 'raccoon-tablet');
     expect(config.label, 'Raccoon Tablet');
@@ -197,6 +256,7 @@ void main() {
         RaccoonDevice.host,
         deviceHelper: '/h',
         platform: 'linux-x64',
+        launcher: const [],
       ).toJson()['runDebug'],
       ['/h', 'run', r'${appName}', r'${engineOptions}'],
     );
@@ -205,6 +265,7 @@ void main() {
         deviceHelper: '/h',
         instance: '2',
         platform: 'linux-x64',
+        launcher: const [],
       ).label,
       'Raccoon 2',
     );

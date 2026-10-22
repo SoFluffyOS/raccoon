@@ -105,15 +105,32 @@ void main() {
     expect(RuntimeStore.engineLibraryOf('windows-x64'), 'flutter_engine.dll');
     expect(
       RuntimeStore.engineLibraryOf('darwin'),
-      'FlutterEmbedder.framework/FlutterEmbedder',
+      p.join('FlutterEmbedder.framework', 'FlutterEmbedder'),
     );
+    final engines = p.join('/sdk', 'bin', 'cache', 'artifacts', 'engine');
     expect(
       RuntimeStore.icuDataOfSdk('/sdk', platform: 'linux-x64'),
-      '/sdk/bin/cache/artifacts/engine/linux-x64/icudtl.dat',
+      p.join(engines, 'linux-x64', 'icudtl.dat'),
     );
     expect(
       RuntimeStore.icuDataOfSdk('/sdk', platform: 'darwin'),
-      '/sdk/bin/cache/artifacts/engine/darwin-x64/icudtl.dat',
+      p.join(engines, 'darwin-x64', 'icudtl.dat'),
+    );
+    expect(
+      RuntimeStore.icuDataOfSdk('/sdk', platform: 'windows-x64'),
+      p.join(engines, 'windows-x64', 'icudtl.dat'),
+    );
+  });
+
+  test('finds the home on Windows too, where HOME is seldom set', () {
+    expect(RuntimeStore.homeOf({'HOME': '/h', 'USERPROFILE': 'C:/u'}), '/h');
+    expect(
+      RuntimeStore.homeOf({'USERPROFILE': r'C:\Users\me'}),
+      r'C:\Users\me',
+    );
+    expect(
+      RuntimeStore.forHost({'USERPROFILE': r'C:\Users\me'}).cacheDirectory,
+      p.join(r'C:\Users\me', '.cache', 'raccoon', 'engines'),
     );
   });
 

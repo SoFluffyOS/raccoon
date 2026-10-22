@@ -22,19 +22,21 @@ final class RunnerDiscovery {
       environment: environment,
       temporaryDirectory: temporaryDirectory,
     );
+    final paths = switch (operatingSystem) {
+      'windows' => p.windows,
+      _ => p.posix,
+    };
     return switch (endpoint) {
       UnixSocketEndpoint(:final path) => RunnerDiscovery(
-        p.dirname(path),
+        paths.dirname(path),
         pollInterval: pollIntervalFor(operatingSystem),
-      ),
-      LoopbackTcpEndpoint() => RunnerDiscovery(
-        p.join(temporaryDirectory, 'raccoon'),
       ),
     };
   }
 
-  /// Linux hears about sockets from inotify. macOS reports no file system
-  /// event for a socket's creation or removal, so its directory is polled.
+  /// Linux hears about sockets from inotify and Windows from its directory
+  /// changes. macOS reports no file system event for a socket's creation or
+  /// removal, so its directory is polled.
   static Duration? pollIntervalFor(String operatingSystem) =>
       switch (operatingSystem) {
         'macos' => const Duration(milliseconds: 500),
@@ -94,7 +96,7 @@ final class RunnerDiscovery {
       final found = list();
       final seen = [
         for (final endpoint in found)
-          (path: endpoint.path, changed: _changedAt(endpoint.path)),
+          (path: endpoint.path, stamp: _stampOf(endpoint.path)),
       ];
       if (last case final previous? when _sameRunners(previous, seen)) return;
       last = seen;
@@ -131,22 +133,28 @@ final class RunnerDiscovery {
   }
 
   /// When the socket was created, so a replacement under the same path
-  /// counts as a change; 0 once it is gone.
-  static int _changedAt(String path) {
+  /// counts as a change; null once it is gone. Windows reports its creation
+  /// time as changed, and gives a file made again under a name just freed
+  /// the old one's (file system tunnelling), so the modification time
+  /// counts too.
+  static (int, int)? _stampOf(String path) {
     final stat = FileStat.statSync(path);
     return switch (stat.type) {
-      FileSystemEntityType.notFound => 0,
-      _ => stat.changed.microsecondsSinceEpoch,
+      FileSystemEntityType.notFound => null,
+      _ => (
+        stat.changed.microsecondsSinceEpoch,
+        stat.modified.microsecondsSinceEpoch,
+      ),
     };
   }
 
   static bool _sameRunners(List<_Seen> a, List<_Seen> b) {
     if (a.length != b.length) return false;
     for (var i = 0; i < a.length; i++) {
-      if (a[i].path != b[i].path || a[i].changed != b[i].changed) return false;
+      if (a[i].path != b[i].path || a[i].stamp != b[i].stamp) return false;
     }
     return true;
   }
 }
 
-typedef _Seen = ({String path, int changed});
+typedef _Seen = ({String path, (int, int)? stamp});

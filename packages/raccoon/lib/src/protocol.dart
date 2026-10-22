@@ -5,6 +5,7 @@ abstract final class RaccoonProtocol {
   static const int version = 1;
 
   /// The environment variable the runner sets for every app it hosts. Its
-  /// value is the runner's endpoint, `unix:<path>` or `tcp:<host>:<port>`.
+  /// value is the runner's endpoint, `unix:<path>`, a socket file on every
+  /// host, Windows included.
   static const String endpointVariable = 'RACCOON_ENDPOINT';
 }

@@ -46,7 +46,11 @@ void main() {
   final environment = Platform.environment;
   final binary = _firstExisting([
     environment['RACCOON_RUNNER'] ?? '',
-    p.join(runnerDir, 'build', 'raccoon_runner'),
+    p.join(
+      runnerDir,
+      'build',
+      Platform.isWindows ? 'raccoon_runner.exe' : 'raccoon_runner',
+    ),
   ]);
   final assets = p.join(
     runnerDir,
@@ -131,10 +135,11 @@ void main() {
             .firstWhere((f) => _pixel(f, 400, 300) == _green)
             .timeout(const Duration(seconds: 10));
         expect(_pixel(toggled, 5, 5), _blue);
+        // A Windows socket carries no handles, so frames ride inline there.
         expect(
           client.sharedFrames,
-          greaterThan(0),
-          reason: 'frames should travel through shared buffers',
+          Platform.isWindows ? 0 : greaterThan(0),
+          reason: 'frames should travel through shared buffers where they can',
         );
       } finally {
         client.shutdown();
@@ -455,11 +460,18 @@ void main() {
     'the runner stops when its parent is gone',
     () async {
       // A shell between the test and the runner stands in for the Flutter
-      // tool; killing it leaves the runner without its parent.
+      // tool; killing it leaves the runner without its parent. On Windows
+      // the shell is cmd.exe, which waits for the runner as bash does.
       final temp = Directory.systemTemp.createTempSync('raccoon_test');
-      final wrapper = File(p.join(temp.path, 'parent.sh'))
-        ..writeAsStringSync('#!/bin/bash\n"$binary" "\$@" &\nwait \$!\n');
-      await Process.run('chmod', ['+x', wrapper.path]);
+      final File wrapper;
+      if (Platform.isWindows) {
+        wrapper = File(p.join(temp.path, 'parent.cmd'))
+          ..writeAsStringSync('@"$binary" %*\r\n');
+      } else {
+        wrapper = File(p.join(temp.path, 'parent.sh'))
+          ..writeAsStringSync('#!/bin/bash\n"$binary" "\$@" &\nwait \$!\n');
+        await Process.run('chmod', ['+x', wrapper.path]);
+      }
       final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
       final runner = await RunnerProcess.start(
         RunnerLaunch(
@@ -481,10 +493,7 @@ void main() {
         temp.deleteSync(recursive: true);
       }
     },
-    skip:
-        ready && !Platform.isWindows
-            ? false
-            : 'build the runner and example first',
+    skip: ready ? false : 'build the runner and example first',
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
@@ -645,10 +654,12 @@ void main() {
         temp.deleteSync(recursive: true);
       }
     },
-    skip:
-        ready && Directory(channelsAssets).existsSync()
-            ? false
-            : 'build the runner and example/channels first',
+    skip: switch (ready && Directory(channelsAssets).existsSync()) {
+      false => 'build the runner and example/channels first',
+      // path_provider_windows asks the shell, which no variable moves.
+      true when Platform.isWindows => 'no XDG directories on Windows',
+      true => false,
+    },
     timeout: const Timeout(Duration(minutes: 2)),
   );
 

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ffi' show Abi;
 import 'dart:io';
 import 'dart:typed_data';
@@ -41,11 +42,13 @@ final class RuntimeStore {
   }) : platform = platform ?? hostPlatform,
        _download = download ?? _httpDownload;
 
-  /// `$XDG_CACHE_HOME/raccoon/engines`, or `~/.cache/raccoon/engines`.
+  /// `$XDG_CACHE_HOME/raccoon/engines`, or `~/.cache/raccoon/engines`, as
+  /// the runner's `tool/engine_dir.sh` keeps them. Windows programs rarely
+  /// see a `HOME`; the user's profile is the home Git Bash gives that tool.
   factory RuntimeStore.forHost(Map<String, String> environment) {
     final cacheHome = switch (environment['XDG_CACHE_HOME']) {
       final dir? when dir.isNotEmpty => dir,
-      _ => p.join(environment['HOME'] ?? '', '.cache'),
+      _ => p.join(homeOf(environment), '.cache'),
     };
     return RuntimeStore(
       cacheDirectory: p.join(cacheHome, 'raccoon', 'engines'),
@@ -140,12 +143,24 @@ final class RuntimeStore {
     return p.dirname(p.dirname(resolved));
   }
 
+  /// The user's home: `HOME`, or on Windows, where it is seldom set,
+  /// `USERPROFILE`.
+  static String homeOf(Map<String, String> environment) =>
+      switch (environment['HOME']) {
+        final home? when home.isNotEmpty => home,
+        _ => environment['USERPROFILE'] ?? '',
+      };
+
   /// The SDK root behind the `flutter` on the PATH, or null without one.
+  /// Windows' `where` lists the shell script and `flutter.bat`, both in
+  /// the SDK's `bin`.
   static String? sdkRootOnPath() {
     final which =
-        Process.runSync('which', ['flutter']).stdout.toString().trim();
+        Process.runSync(Platform.isWindows ? 'where' : 'which', [
+          'flutter',
+        ]).stdout.toString().trim();
     if (which.isEmpty) return null;
-    return sdkRootOfFlutter(which);
+    return sdkRootOfFlutter(const LineSplitter().convert(which).first.trim());
   }
 
   /// The ICU data file an SDK ships for [platform]. The SDK keeps one macOS

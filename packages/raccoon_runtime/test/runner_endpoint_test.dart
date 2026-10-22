@@ -33,24 +33,17 @@ void main() {
     expect(endpoint.uri, 'unix:/var/folders/x/T/raccoon/runner.sock');
   });
 
-  test('windows uses loopback TCP with the default port', () {
+  test('windows uses a Unix socket in the temporary directory', () {
     final endpoint = RunnerEndpoint.forHost(
       operatingSystem: 'windows',
-      environment: const {},
-      temporaryDirectory: r'C:\Temp',
+      environment: {'XDG_RUNTIME_DIR': '/run/user/1000'},
+      temporaryDirectory: r'C:\Users\me\AppData\Local\Temp',
     );
 
-    expect(endpoint, isA<LoopbackTcpEndpoint>());
-    expect(endpoint.uri, 'tcp:127.0.0.1:${LoopbackTcpEndpoint.defaultPort}');
-  });
-
-  test('windows honours RACCOON_PORT', () {
-    final endpoint = RunnerEndpoint.forHost(
-      operatingSystem: 'windows',
-      environment: {'RACCOON_PORT': '5000'},
-      temporaryDirectory: r'C:\Temp',
+    expect(endpoint, isA<UnixSocketEndpoint>());
+    expect(
+      endpoint.uri,
+      r'unix:C:\Users\me\AppData\Local\Temp\raccoon\runner.sock',
     );
-
-    expect(endpoint.uri, 'tcp:127.0.0.1:5000');
   });
 }

@@ -13,25 +13,22 @@ final class Inbound {
 }
 
 /// The socket beneath a [RunnerClient]: raw, so descriptors can be received
-/// on Unix sockets, with partial writes queued until the socket drains.
+/// where the host passes them, with partial writes queued until the socket
+/// drains.
 final class RunnerTransport {
   RunnerTransport._(this._socket, this.receivesHandles) {
     _subscription = _socket.listen(_onEvent, onError: _onError);
   }
 
+  /// Windows sockets carry no handles, so frames come inline there.
   static Future<RunnerTransport> connect(RunnerEndpoint endpoint) async {
     final socket = switch (endpoint) {
       UnixSocketEndpoint(:final path) => await RawSocket.connect(
         InternetAddress(path, type: InternetAddressType.unix),
         0,
       ),
-      LoopbackTcpEndpoint(:final port) => await RawSocket.connect(
-        InternetAddress.loopbackIPv4,
-        port,
-      ),
     };
-    final handles = endpoint is UnixSocketEndpoint && !Platform.isWindows;
-    return RunnerTransport._(socket, handles);
+    return RunnerTransport._(socket, !Platform.isWindows);
   }
 
   final RawSocket _socket;
