@@ -1,11 +1,21 @@
 # Builds the runner on each host, bundles the examples, renders a frame, and
 # runs raccoon_runtime's tests, whose integration tests drive the built runner.
-name: CI
+name: Runner CI
 
 on:
   push:
     branches: [main]
+    paths:
+      - 'native/raccoon_runner/**'
+      - 'packages/raccoon/**'
+      - 'packages/raccoon_runtime/**'
+      - '.github/workflows/runner-ci.yml'
   pull_request:
+    paths:
+      - 'native/raccoon_runner/**'
+      - 'packages/raccoon/**'
+      - 'packages/raccoon_runtime/**'
+      - '.github/workflows/runner-ci.yml'
 
 env:
   FLUTTER_VERSION: 3.47.7
@@ -38,20 +48,7 @@ jobs:
       run:
         working-directory: native/raccoon_runner
     steps:
-      # The runtime's integration tests expect the simulator's layout, with
-      # the runner at native/raccoon_runner beside packages/raccoon_runtime
-      # and pub_packages/raccoon.
       - uses: actions/checkout@v5
-        with:
-          path: native/raccoon_runner
-      - uses: actions/checkout@v5
-        with:
-          repository: SoFluffyOS/raccoon
-          path: pub_packages/raccoon
-      - uses: actions/checkout@v5
-        with:
-          repository: SoFluffyOS/raccoon_runtime
-          path: packages/raccoon_runtime
 
       - name: Install CMake and Ninja
         if: runner.os == 'Linux'
@@ -112,20 +109,9 @@ jobs:
             --out build/frame.ppm
           test -s build/frame.ppm
 
-      # raccoon_runtime resolves as a workspace member, so a throwaway root
-      # lists it; the raccoon package is a path dependency outside it.
       - name: Resolve the runtime
-        working-directory: ${{ github.workspace }}
-        run: |
-          cat > pubspec.yaml <<'PUBSPEC'
-          name: raccoon_runner_ci
-          publish_to: none
-          environment:
-            sdk: ^3.10.0
-          workspace:
-            - packages/raccoon_runtime
-          PUBSPEC
-          dart pub get
+        working-directory: packages/raccoon_runtime
+        run: dart pub get
 
       - name: Run the runtime's tests against the runner
         working-directory: packages/raccoon_runtime

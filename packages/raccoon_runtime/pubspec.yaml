@@ -5,7 +5,6 @@ publish_to: "none"
 environment:
   sdk: ^3.6.0
 
-resolution: workspace
 
 dependencies:
   archive: ^4.0.7
@@ -13,7 +12,7 @@ dependencies:
   path: ^1.9.1
   protobuf: ^6.1.0
   raccoon:
-    path: ../../pub_packages/raccoon
+    path: ../raccoon
 
 dev_dependencies:
   lints: ^6.0.0

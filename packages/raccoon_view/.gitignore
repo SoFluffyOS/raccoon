@@ -1,2 +1,4 @@
 .dart_tool/
 build/
+# Resolved on its own; the lockfile is each checkout's.
+pubspec.lock

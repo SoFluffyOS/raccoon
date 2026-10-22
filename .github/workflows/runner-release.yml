@@ -1,12 +1,13 @@
 # Builds the runner on each host and packages it (tool/package.sh). A tag
-# v<VERSION> publishes the archives as a GitHub release, a prerelease when
-# VERSION carries a -pre.N suffix; workflow_dispatch only keeps them as
-# workflow artifacts, to check the packaging.
-name: Release
+# runner-v<VERSION> publishes the archives as a GitHub release, a prerelease
+# when VERSION carries a -pre.N suffix; workflow_dispatch only keeps them as
+# workflow artifacts, to check the packaging. Plain v* tags are the raccoon
+# package's.
+name: Runner release
 
 on:
   push:
-    tags: ['v*']
+    tags: ['runner-v*']
   workflow_dispatch:
 
 permissions:
@@ -30,6 +31,9 @@ jobs:
             os: macos-latest
           - name: macos-x64
             os: macos-15-intel
+    defaults:
+      run:
+        working-directory: native/raccoon_runner
     steps:
       - uses: actions/checkout@v5
 
@@ -37,7 +41,7 @@ jobs:
         if: github.ref_type == 'tag'
         run: |
           VERSION="$(tr -d '[:space:]' < VERSION)"
-          if [ "v$VERSION" != "${{ github.ref_name }}" ]; then
+          if [ "runner-v$VERSION" != "${{ github.ref_name }}" ]; then
             echo "VERSION says $VERSION but the tag is ${{ github.ref_name }}" >&2
             exit 1
           fi
@@ -85,7 +89,7 @@ jobs:
       - uses: actions/upload-artifact@v6
         with:
           name: raccoon_runner-${{ matrix.name }}
-          path: dist/*.tar.gz
+          path: native/raccoon_runner/dist/*.tar.gz
 
   release:
     if: github.ref_type == 'tag'
@@ -103,7 +107,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          VERSION="$(tr -d '[:space:]' < VERSION)"
+          VERSION="$(tr -d '[:space:]' < native/raccoon_runner/VERSION)"
           (cd dist && sha256sum *.tar.gz > SHA256SUMS)
           ls -l dist
           cat > notes.md <<NOTES

@@ -3,7 +3,7 @@
 [![CI](https://github.com/SoFluffyOS/raccoon_runner/actions/workflows/ci.yml/badge.svg)](https://github.com/SoFluffyOS/raccoon_runner/actions/workflows/ci.yml)
 
 The Raccoon runtime's runner: hosts a Flutter app on the C embedder API, for
-Lumide. A git submodule of the Lumide monorepo at `native/raccoon_runner`.
+Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository at `native/raccoon_runner`; Lumide and the simulator take that repository as a git submodule.
 Design notes: `docs/internal_docs/raccoon/`.
 
 ## What it does
@@ -177,7 +177,7 @@ The Raccoon device must be registered first (see above).
 ## Protocol changes
 
 Edit `proto/raccoon/v1/runner.proto`, rebuild (CMake regenerates the C++),
-and run `pub_packages/raccoon/tool/gen_proto.sh` for the Dart side. Bump
+and run `packages/raccoon/tool/gen_proto.sh` for the Dart side. Bump
 `RaccoonProtocol.version` on incompatible changes.
 
 ## Hosts

@@ -1,0 +1,48 @@
+# Analyzes and tests the Dart packages on their own. The runtime's tests run
+# in Runner CI, against the built runner.
+name: Packages CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/**'
+      - '.github/workflows/packages-ci.yml'
+  pull_request:
+    paths:
+      - 'packages/**'
+      - '.github/workflows/packages-ci.yml'
+
+env:
+  FLUTTER_VERSION: 3.47.7
+
+jobs:
+  raccoon:
+    name: raccoon
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/raccoon
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dart-lang/setup-dart@v1
+      - run: dart pub get
+      - run: dart analyze
+      - run: dart test
+
+  raccoon_view:
+    name: raccoon_view
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/raccoon_view
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test

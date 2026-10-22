@@ -5,14 +5,13 @@ publish_to: "none"
 environment:
   sdk: ^3.6.0
 
-resolution: workspace
 
 dependencies:
   fixnum: ^1.1.0
   flutter:
     sdk: flutter
   raccoon:
-    path: ../../pub_packages/raccoon
+    path: ../raccoon
   raccoon_runtime:
     path: ../raccoon_runtime
   url_launcher: ^6.3.0
