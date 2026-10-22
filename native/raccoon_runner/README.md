@@ -71,8 +71,12 @@ Design notes: `docs/internal_docs/raccoon/`.
   (`.dart_tool/package_config.json`, every package with a Linux
   `pluginClass`) in one CMake project with what the desktop template gives
   a plugin, and `run` passes it. Needs cmake, ninja, pkg-config and the
-  GTK development files, as the desktop target does; without them, or
-  when a plugin fails to build, it says so and the app sees no plugin. A
+  GTK development files, as the desktop target does; what built is cached
+  by plugin version, runner version and engine, and a release's archive of
+  the common plugins (`tool/plugins`, built by CI) drops into that cache
+  on the first install, so those cost nothing and a machine without a
+  toolchain still gets them. Without a toolchain for the rest, or when a
+  plugin fails to build, it says so and the app sees no plugin. A
   loaded plugin's channels are answered before a client sees them, GLib's
   main context is pumped from the runner's loop, and a plugin's textures
   draw through the GL renderer. The registrar hands out no view: the

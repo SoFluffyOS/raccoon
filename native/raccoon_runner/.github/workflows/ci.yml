@@ -55,7 +55,7 @@ jobs:
 
       - name: Install CMake and Ninja
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libegl1-mesa-dev libgles2-mesa-dev libgtk-3-dev libepoxy-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libegl1-mesa-dev libgles2-mesa-dev libgtk-3-dev libepoxy-dev libsecret-1-dev libjsoncpp-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - name: Install CMake and Ninja
         if: runner.os == 'macOS'
         run: brew install cmake ninja
@@ -98,6 +98,10 @@ jobs:
           for example in hello spin channels plugins_app; do
             (cd "example/$example" && flutter build bundle --target-platform=${{ matrix.target }})
           done
+
+      - name: Prebuild the common plugins
+        if: runner.os == 'Linux'
+        run: tool/raccoon-device prebuild tool/plugins build/plugins-test.tar.gz && tar tzf build/plugins-test.tar.gz | grep -c '\.so$'
 
       - name: Render a frame of example/hello
         run: |
