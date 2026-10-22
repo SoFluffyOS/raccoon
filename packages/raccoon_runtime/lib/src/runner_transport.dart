@@ -43,6 +43,7 @@ final class RunnerTransport {
   final _pending = BytesBuilder(copy: false);
   late final StreamSubscription<RawSocketEvent> _subscription;
   var _closed = false;
+  Completer<void>? _drained;
 
   Stream<Inbound> get inbound => _inbound.stream;
 
@@ -52,21 +53,34 @@ final class RunnerTransport {
     _flush();
   }
 
-  Future<void> close() async {
+  /// Sends what is still queued first (a Shutdown written right before
+  /// this, above all), waiting up to [drain] for the socket to take it: a
+  /// runner that is gone never will.
+  Future<void> close({Duration drain = const Duration(seconds: 2)}) async {
     if (_closed) return;
     _closed = true;
+    if (_pending.isNotEmpty) {
+      final drained = _drained = Completer<void>();
+      _socket.writeEventsEnabled = true;
+      await drained.future.timeout(drain, onTimeout: () {});
+    }
     await _subscription.cancel();
     await _socket.close();
     await _inbound.close();
   }
 
   void _flush() {
-    if (_pending.isEmpty) return;
-    final bytes = _pending.takeBytes();
-    final written = _socket.write(bytes);
-    if (written < bytes.length) {
-      _pending.add(Uint8List.sublistView(bytes, written));
-      _socket.writeEventsEnabled = true;
+    if (_pending.isNotEmpty) {
+      final bytes = _pending.takeBytes();
+      final written = _socket.write(bytes);
+      if (written < bytes.length) {
+        _pending.add(Uint8List.sublistView(bytes, written));
+        _socket.writeEventsEnabled = true;
+        return;
+      }
+    }
+    if (_drained case final drained? when !drained.isCompleted) {
+      drained.complete();
     }
   }
 

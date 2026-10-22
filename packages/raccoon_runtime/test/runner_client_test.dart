@@ -148,6 +148,25 @@ void main() {
     },
   );
 
+  test('close sends what is still queued, a Shutdown above all', () async {
+    // More than a Unix socket takes at once, so most of it is still queued
+    // when close comes; the Shutdown behind it must reach the runner anyway.
+    final shutdown = runner.received.firstWhere((m) => m.hasShutdown());
+    client
+      ..send(
+        ClientMessage(
+          platformResponse: PlatformResponse(
+            responseId: Int64(1),
+            handled: true,
+            data: Uint8List(4 << 20),
+          ),
+        ),
+      )
+      ..shutdown();
+    await client.close();
+    await shutdown.timeout(const Duration(seconds: 10));
+  });
+
   test('once a frame arrived, the log no longer counts', () async {
     runner
       ..log(_exception)
