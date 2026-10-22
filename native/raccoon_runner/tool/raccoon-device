@@ -2,16 +2,16 @@
 # The commands behind the "raccoon" entry in Flutter's custom_devices.json.
 #
 #   raccoon-device ping
-#   raccoon-device install [--instance N] <localPath> <appName>
-#   raccoon-device uninstall [--instance N] <appName>
-#   raccoon-device run [--instance N] <appName> [engine switches]
+#   raccoon-device install [--instance KEY] <localPath> <appName>
+#   raccoon-device uninstall [--instance KEY] <appName>
+#   raccoon-device run [--instance KEY] [--size WxH@R] <appName> [engine switches]
 #
 # install copies the app bundle the tool built (build/flutter_assets) into the
 # runtime's app store; run starts raccoon_runner serve on it and leaves the
 # engine's log lines on stdout, where the tool reads the VM service URI, and
 # keeps a timestamped copy of the run's output in the app's data directory.
 #
-# --instance N (the "raccoon-N" device) keeps the same project apart from its
+# --instance KEY (the "raccoon-KEY" device: 2, phone, tablet, desktop, a name) keeps the same project apart from its
 # first run: socket, app store and data directory are named <appName>@N, so
 # one project can run at two sizes side by side.
 set -euo pipefail
@@ -77,8 +77,14 @@ stamp() {
 
 verb="${1:-}"; shift || true
 INSTANCE=1
+SIZE=""
 if [ "${1:-}" = "--instance" ]; then
   INSTANCE="$2"; shift 2
+fi
+# --size WxH@R: the logical size and pixel ratio a named device starts at
+# (the runtime passes it for raccoon-phone, raccoon-tablet, raccoon-desktop).
+if [ "${1:-}" = "--size" ]; then
+  SIZE="$2"; shift 2
 fi
 
 
@@ -381,6 +387,12 @@ case "$verb" in
     : > "$log"
     manifest="$APPS/$key/plugins/manifest.json"
     [ -f "$manifest" ] || manifest=""
+    size_args=""
+    if [ -n "$SIZE" ]; then
+      w="${SIZE%%x*}"; rest="${SIZE#*x}"; h="${rest%%@*}"; r="${rest#*@}"
+      [ "$r" = "$rest" ] && r=1
+      size_args="--width $w --height $h --dpr $r"
+    fi
     # FFI plugins' libraries, opened by the Dart side by name.
     if [ -d "$APPS/$key/plugins/lib" ]; then
       export LD_LIBRARY_PATH="$APPS/$key/plugins/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
@@ -394,12 +406,13 @@ case "$verb" in
       --socket "$SOCKETS/$key.sock" \
       --data-dir "$DATA/$key" \
       ${manifest:+--plugins "$manifest"} \
+      $size_args \
       -- $@ \
       > >(tee >(stamp >> "$log")) \
       2> >(tee >(stamp >> "$log") >&2)
     ;;
   *)
-    echo "usage: raccoon-device ping | install [--instance N] <localPath> <appName> | uninstall [--instance N] <appName> | run [--instance N] <appName> [engine switches] | prebuild <project> <archive.tar.gz>" >&2
+    echo "usage: raccoon-device ping | install [--instance KEY] <localPath> <appName> | uninstall [--instance KEY] <appName> | run [--instance KEY] [--size WxH@R] <appName> [engine switches] | prebuild <project> <archive.tar.gz>" >&2
     exit 2
     ;;
 esac
