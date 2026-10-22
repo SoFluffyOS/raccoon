@@ -13,6 +13,15 @@ descriptors on Linux, which Dart cannot hold, and IOSurface IDs on macOS.
 `raccoon_view` has the Linux and macOS sides. A frame the runner cannot put
 in a buffer still comes with pixels.
 
+The devices `raccoon_device setup` registers with the Flutter tool, each a
+custom device the helper keeps apart by an instance key (`RaccoonDevice`):
+`raccoon` (the host's own size), `raccoon-2` (a second run of the same
+project), and the sized ones that start the runner at their logical size
+and pixel ratio, `raccoon-phone` (390×844 @3x), `raccoon-tablet`
+(820×1180 @2x) and `raccoon-desktop` (1280×800 @1x). `flutter run -d
+raccoon-tablet` runs a project on the tablet; a host that shows the app
+opens it at that size.
+
 This package is developed inside the Lumide workspace (`packages/raccoon_runtime`)
 and resolves through it.
 
