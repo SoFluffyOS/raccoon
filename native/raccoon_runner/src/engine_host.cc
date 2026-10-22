@@ -71,6 +71,9 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
     gl.make_resource_current = GlMakeResourceCurrent;
     gl.fbo_with_frame_info_callback = GlFbo;
     gl.present_with_info = GlPresent;
+#if RACCOON_HAS_PLUGINS
+    gl.gl_external_texture_frame_callback = GlExternalTexture;
+#endif
     gl.gl_proc_resolver = GlProc;
     // Ask for the framebuffer every frame: with a pool it is a different
     // buffer each time.
@@ -439,6 +442,14 @@ void EngineHost::OnPlatformMessage(const FlutterPlatformMessage* message,
     host->Respond(message->response_handle, reply.data(), reply.size());
     return;
   }
+#if RACCOON_HAS_PLUGINS
+  // A loaded plugin answers its own channels, before a client sees them.
+  if (host->plugins_ &&
+      host->plugins_->HandleMessage(channel, message->message, message->message_size,
+                                    message->response_handle)) {
+    return;
+  }
+#endif
   if (host->on_platform_message_) {
     host->on_platform_message_(channel, message->message, message->message_size,
                                message->response_handle);
@@ -446,6 +457,55 @@ void EngineHost::OnPlatformMessage(const FlutterPlatformMessage* message,
   }
   host->Respond(message->response_handle, nullptr, 0);
 }
+
+bool EngineHost::LoadPlugins(const std::string& manifest, std::string* error) {
+#if RACCOON_HAS_PLUGINS
+  if (engine_ == nullptr) {
+    *error = "the engine is not running";
+    return false;
+  }
+  if (!plugins_) {
+    PluginHost::Bridge bridge;
+    bridge.send = [this](const std::string& channel, const uint8_t* data, size_t size,
+                         std::function<void(const uint8_t*, size_t)> on_reply) {
+      SendPlatformMessage(channel, data, size, std::move(on_reply));
+    };
+    bridge.respond = [this](const FlutterPlatformMessageResponseHandle* handle,
+                            const uint8_t* data, size_t size) { Respond(handle, data, size); };
+    bridge.register_texture = [this](int64_t id) {
+      return loader_.procs().RegisterExternalTexture(engine_, id) == kSuccess;
+    };
+    bridge.mark_texture_frame_available = [this](int64_t id) {
+      return loader_.procs().MarkExternalTextureFrameAvailable(engine_, id) == kSuccess;
+    };
+    bridge.unregister_texture = [this](int64_t id) {
+      return loader_.procs().UnregisterExternalTexture(engine_, id) == kSuccess;
+    };
+    plugins_ = std::make_unique<PluginHost>(std::move(bridge));
+  }
+  return plugins_->LoadManifest(manifest, error);
+#else
+  (void)manifest;
+  *error = "this runner was built without native plugins";
+  return false;
+#endif
+}
+
+size_t EngineHost::plugins_loaded() const {
+#if RACCOON_HAS_PLUGINS
+  return plugins_ ? plugins_->loaded() : 0;
+#else
+  return 0;
+#endif
+}
+
+#if RACCOON_HAS_PLUGINS
+bool EngineHost::GlExternalTexture(void* user_data, int64_t texture_id, size_t width,
+                                   size_t height, FlutterOpenGLTexture* out) {
+  auto* host = static_cast<EngineHost*>(user_data);
+  return host->plugins_ && host->plugins_->PopulateTexture(texture_id, width, height, out);
+}
+#endif
 
 void EngineHost::Shutdown() {
   if (engine_ == nullptr) return;

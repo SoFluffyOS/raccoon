@@ -52,7 +52,10 @@ void EventLoop::RunOnce(int timeout_ms) {
   std::vector<pollfd> fds;
   fds.push_back({wake_fd_, POLLIN, 0});
   for (const auto& [fd, watch] : watches_) fds.push_back({fd, watch.first, 0});
+  const size_t own = fds.size();
+  if (prepare_) prepare_(fds, timeout_ms);
   const int ready = poll(fds.data(), fds.size(), timeout_ms);
+  if (dispatch_) dispatch_(fds.data() + own, fds.size() - own);
   if (ready <= 0) return;
   if (fds[0].revents & POLLIN) {
     uint64_t pending = 0;
@@ -60,7 +63,7 @@ void EventLoop::RunOnce(int timeout_ms) {
     }
   }
   std::vector<std::pair<Handler, short>> pending;
-  for (size_t i = 1; i < fds.size(); ++i) {
+  for (size_t i = 1; i < own; ++i) {
     if (fds[i].revents == 0) continue;
     const auto watch = watches_.find(fds[i].fd);
     if (watch != watches_.end()) {

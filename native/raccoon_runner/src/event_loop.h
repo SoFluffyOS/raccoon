@@ -1,8 +1,11 @@
 #pragma once
 
+#include <poll.h>
+
 #include <functional>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace raccoon {
 
@@ -25,6 +28,16 @@ class EventLoop {
 
   // One poll iteration. A negative |timeout_ms| waits until an event or Wake.
   void RunOnce(int timeout_ms);
+  // An outside source that joins every poll: |prepare| appends its
+  // descriptors and may shorten |timeout_ms|; |dispatch| sees them back with
+  // their revents after the poll, whether or not anything was ready. Null
+  // for none. For GLib's main context.
+  using Prepare = std::function<void(std::vector<pollfd>& fds, int& timeout_ms)>;
+  using Dispatch = std::function<void(const pollfd* fds, size_t count)>;
+  void SetExternal(Prepare prepare, Dispatch dispatch) {
+    prepare_ = std::move(prepare);
+    dispatch_ = std::move(dispatch);
+  }
 
  private:
   // The read and write ends of the wake descriptor: one eventfd on Linux, the
@@ -32,6 +45,8 @@ class EventLoop {
   int wake_fd_ = -1;
   int wake_write_fd_ = -1;
   std::unordered_map<int, std::pair<short, Handler>> watches_;
+  Prepare prepare_;
+  Dispatch dispatch_;
 };
 
 }  // namespace raccoon

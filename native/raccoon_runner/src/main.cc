@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "engine_host.h"
+#include "glib_pump.h"
 #include "event_loop.h"
 #include "flutter_embedder.h"
 #include "server.h"
@@ -38,6 +39,8 @@ struct Options {
   size_t frames = 1;
   int timeout_ms = 10000;
   bool bgra = raccoon::kSoftwareFrameIsBgra;
+  // A manifest of native plugins to load (see plugins.h), or empty.
+  std::string plugins;
 };
 
 constexpr uint32_t kProtocolVersion = 1;
@@ -53,6 +56,7 @@ void Usage() {
                " --icu FILE --socket PATH\n"
                "       raccoon_runner --version\n"
                "common: [--width N] [--height N] [--dpr X] [--data-dir DIR] [--renderer auto|gl|software]"
+               " [--plugins MANIFEST]"
                " [-- engine switches...]\n");
 }
 
@@ -78,6 +82,7 @@ bool ParseOptions(int argc, char** argv, Options* options) {
     else if (arg == "--height") options->engine.height = std::strtoul(v, nullptr, 10);
     else if (arg == "--dpr") options->engine.pixel_ratio = std::strtod(v, nullptr);
     else if (arg == "--data-dir") options->engine.data_dir = v;
+    else if (arg == "--plugins") options->plugins = v;
     else if (arg == "--renderer") options->engine.renderer = v;
     else if (arg == "--out") options->out = v;
     else if (arg == "--socket") options->socket = v;
@@ -133,6 +138,29 @@ int NextWait(raccoon::EngineHost& host, int cap) {
     if (next >= 0 && next < wait) wait = next;
   }
   return wait;
+}
+
+// Loads the plugins of |manifest|, if any, and keeps GLib pumped for them
+// while the returned pump lives.
+std::unique_ptr<raccoon::GlibPump> LoadPlugins(raccoon::EngineHost& host,
+                                               raccoon::EventLoop& loop,
+                                               const std::string& manifest) {
+  if (manifest.empty()) return nullptr;
+#if RACCOON_HAS_PLUGINS
+  auto pump = std::make_unique<raccoon::GlibPump>(loop);
+  std::string error;
+  if (!host.LoadPlugins(manifest, &error)) {
+    std::fprintf(stderr, "raccoon_runner: plugins: %s\n", error.c_str());
+    return nullptr;
+  }
+  std::fprintf(stderr, "raccoon_runner: %zu plugins loaded\n", host.plugins_loaded());
+  return pump;
+#else
+  (void)host;
+  (void)loop;
+  std::fprintf(stderr, "raccoon_runner: this runner was built without native plugins\n");
+  return nullptr;
+#endif
 }
 
 uint32_t Read32(const uint8_t* at) {
@@ -261,6 +289,7 @@ int Render(const Options& options) {
     std::fprintf(stderr, "raccoon_runner: %s\n", error.c_str());
     return 1;
   }
+  const auto plugins = LoadPlugins(host, loop, options.plugins);
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::milliseconds(options.timeout_ms);
   bool reported_first = false;
@@ -313,6 +342,7 @@ int Serve(const Options& options) {
     std::fprintf(stderr, "raccoon_runner: %s\n", error.c_str());
     return 1;
   }
+  const auto plugins = LoadPlugins(host, loop, options.plugins);
 
   bool stop = false;
   size_t last_sent = 0;

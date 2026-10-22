@@ -81,6 +81,8 @@ add_executable(raccoon_runner
   src/engine_host.cc
   src/engine_loader.cc
   src/event_loop.cc
+  src/glib_pump.cc
+  src/plugins.cc
   src/platform_task_runner.cc
   src/server.cc
   src/shared_buffers.cc
@@ -102,6 +104,55 @@ target_link_libraries(raccoon_runner PRIVATE nlohmann_json::nlohmann_json)
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
   pkg_check_modules(RACCOON_GL IMPORTED_TARGET egl glesv2)
+  # The plugin-facing half of Flutter's Linux embedding, as a library of the
+  # same soname plugin binaries link against (third_party/flutter_linux).
+  pkg_check_modules(RACCOON_FL IMPORTED_TARGET glib-2.0 gobject-2.0 gio-2.0 gmodule-2.0 gtk+-3.0 epoxy)
+  if(RACCOON_FL_FOUND)
+    file(GLOB RACCOON_FL_SOURCES
+         ${CMAKE_SOURCE_DIR}/third_party/flutter_linux/flutter/shell/platform/linux/*.cc)
+    add_library(flutter_linux_gtk SHARED
+      ${RACCOON_FL_SOURCES}
+      third_party/flutter_linux/raccoon/fl_engine.cc
+      third_party/flutter_linux/raccoon/fl_view.cc)
+    set_target_properties(flutter_linux_gtk PROPERTIES
+      OUTPUT_NAME flutter_linux_gtk
+      CXX_VISIBILITY_PRESET default)
+    target_include_directories(flutter_linux_gtk
+      PUBLIC ${CMAKE_SOURCE_DIR}/third_party/flutter_linux
+      PRIVATE ${RACCOON_EMBEDDER_INCLUDE_DIR})
+    target_compile_options(flutter_linux_gtk PRIVATE -w)
+    # The public headers refuse direct inclusion unless the library itself
+    # is being built; the JSON codecs read and write with RapidJSON.
+    target_compile_definitions(flutter_linux_gtk PRIVATE FLUTTER_LINUX_COMPILATION)
+    FetchContent_Declare(rapidjson
+      URL https://github.com/Tencent/rapidjson/archive/refs/tags/v1.1.0.tar.gz
+      URL_HASH SHA256=bf7ced29704a1e696fbccf2a2b4ea068e7774fa37f6d7dd4039d0787f8bed98e)
+    set(RAPIDJSON_BUILD_DOC OFF CACHE BOOL "" FORCE)
+    set(RAPIDJSON_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(RAPIDJSON_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(rapidjson)
+    target_include_directories(flutter_linux_gtk PRIVATE ${rapidjson_SOURCE_DIR}/include)
+    target_link_libraries(flutter_linux_gtk PUBLIC PkgConfig::RACCOON_FL)
+    target_link_libraries(raccoon_runner PRIVATE flutter_linux_gtk)
+    # The runner uses the library's private headers, as the embedding's own
+    # engine would.
+    target_compile_definitions(raccoon_runner PRIVATE RACCOON_HAS_PLUGINS=1 FLUTTER_LINUX_COMPILATION)
+    set_target_properties(raccoon_runner PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
+    # What Flutter's desktop template gives a plugin, so one builds here as
+    # it does there; example/plugins/echo proves it and the tests load it.
+    function(APPLY_STANDARD_SETTINGS TARGET)
+      target_compile_features(${TARGET} PUBLIC cxx_std_14)
+      target_compile_options(${TARGET} PRIVATE -Wall -Werror)
+    endfunction()
+    pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0)
+    add_library(flutter INTERFACE)
+    target_include_directories(flutter INTERFACE
+      ${CMAKE_SOURCE_DIR}/third_party/flutter_linux/flutter/shell/platform/linux/public)
+    target_link_libraries(flutter INTERFACE flutter_linux_gtk PkgConfig::GTK)
+    add_subdirectory(example/plugins/echo/linux example_plugins/echo)
+  else()
+    message(STATUS "GLib, GTK or epoxy headers missing: no native plugins")
+  endif()
 endif()
 if(RACCOON_GL_FOUND)
   target_sources(raccoon_runner PRIVATE src/gl_renderer.cc)

@@ -9,6 +9,9 @@
 
 #include "engine_loader.h"
 #include "flutter_embedder.h"
+#if RACCOON_HAS_PLUGINS
+#include "plugins.h"
+#endif
 #if RACCOON_HAS_GL
 #include "gl_renderer.h"
 #else
@@ -78,6 +81,12 @@ class EngineHost {
   // Answers a platform message; |data| may be null for "not handled".
   void Respond(const FlutterPlatformMessageResponseHandle* handle,
                const uint8_t* data, size_t size);
+
+  // Loads the native plugins of a manifest (see plugins.h); their channels
+  // are answered before a client sees them. After Start. False, with why,
+  // when this runner cannot or the manifest cannot be read.
+  bool LoadPlugins(const std::string& manifest, std::string* error);
+  size_t plugins_loaded() const;
 
   void Resize(size_t width, size_t height, double pixel_ratio);
   void SendPointer(const FlutterPointerEvent& event);
@@ -156,6 +165,11 @@ class EngineHost {
   FLUTTER_API_SYMBOL(FlutterEngine) engine_ = nullptr;
   LogCallback on_log_;
   PlatformMessageCallback on_platform_message_;
+#if RACCOON_HAS_PLUGINS
+  std::unique_ptr<PluginHost> plugins_;
+  static bool GlExternalTexture(void* user_data, int64_t texture_id, size_t width,
+                                size_t height, FlutterOpenGLTexture* out);
+#endif
   std::function<void()> on_wake_;
   static void OnVsync(void* user_data, intptr_t baton);
   mutable std::mutex vsync_mutex_;

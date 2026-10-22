@@ -1,0 +1,12 @@
+name: plugins_app
+description: Calls the raccoon_echo native plugin at startup and prints ECHO:<answer>, for the test that loads plugins into the runner.
+publish_to: "none"
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  raccoon_echo:
+    path: ../plugins/echo
