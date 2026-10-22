@@ -367,6 +367,9 @@ final class RunnerClient
   void _onDone() => _finish();
 
   void _onError(Object error, StackTrace stackTrace) {
+    // A socket can fail after the client already finished (a reset behind
+    // the end); there is no one left to tell.
+    if (_closed.isCompleted) return;
     _messages.addError(error, stackTrace);
     _finish();
   }
@@ -374,6 +377,12 @@ final class RunnerClient
   void _finish() {
     if (_closed.isCompleted) return;
     _closed.complete();
+    // A runner that hangs up before it says hello never will.
+    if (!_hello.isCompleted) {
+      _hello.completeError(
+        const SocketException('the runner hung up before its hello'),
+      );
+    }
     _startupTimer?.cancel();
     for (final buffer in _buffers) {
       buffer.closeSync();

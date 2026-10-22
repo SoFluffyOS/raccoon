@@ -64,6 +64,10 @@ class RunnerServer {
   bool ReadAvailable();
   bool WriteAll(const uint8_t* data, size_t size);
   void Dispatch(const v1::ClientMessage& message);
+  // Keeps a newcomer told the runner is busy until it hangs up, reading and
+  // dropping what it sends (see server.cc); Unlinger lets one go.
+  void Linger(int fd);
+  void Unlinger(int fd);
 
   EventLoop& loop_;
   Handler handler_;
@@ -76,6 +80,9 @@ class RunnerServer {
   std::vector<uint8_t> inbox_;
   // Descriptors a raw client sent, not yet taken by the handler.
   std::vector<int> fds_in_;
+  // Newcomers told the runner is busy, oldest first; a few at most.
+  std::vector<int> lingering_;
+  static constexpr size_t kMaxLingering = 4;
 };
 
 }  // namespace raccoon

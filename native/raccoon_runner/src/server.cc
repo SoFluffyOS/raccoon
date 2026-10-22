@@ -7,6 +7,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 
@@ -84,6 +85,7 @@ RunnerServer::RunnerServer(EventLoop& loop, Handler handler)
 
 RunnerServer::~RunnerServer() {
   CloseClient();
+  while (!lingering_.empty()) Unlinger(lingering_.front());
   if (listen_fd_ >= 0) {
     loop_.Unwatch(listen_fd_);
     close(listen_fd_);
@@ -138,7 +140,7 @@ void RunnerServer::OnListenReadable() {
     if (WriteAllTo(fd, prefix, sizeof(prefix))) {
       WriteAllTo(fd, reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size());
     }
-    close(fd);
+    Linger(fd);
     return;
   }
   client_fd_ = fd;
@@ -146,6 +148,33 @@ void RunnerServer::OnListenReadable() {
   loop_.Watch(client_fd_, POLLIN,
               [this](short revents) { OnClientReadable(revents); });
   if (handler_.on_client_connected) handler_.on_client_connected();
+}
+
+// A newcomer is not closed right after the Busy reply: its hello may still
+// be unread, and closing over unread bytes resets the connection, which on
+// macOS can reach it before the reply does. The write side shuts instead,
+// so it reads the reply and then an end, and whatever it sends is read and
+// dropped until it hangs up.
+void RunnerServer::Linger(int fd) {
+  shutdown(fd, SHUT_WR);
+  if (lingering_.size() >= kMaxLingering) Unlinger(lingering_.front());
+  lingering_.push_back(fd);
+  loop_.Watch(fd, POLLIN, [this, fd](short) {
+    uint8_t buffer[4096];
+    while (true) {
+      const ssize_t got = read(fd, buffer, sizeof(buffer));
+      if (got > 0) continue;
+      if (got < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
+      break;
+    }
+    Unlinger(fd);
+  });
+}
+
+void RunnerServer::Unlinger(int fd) {
+  loop_.Unwatch(fd);
+  close(fd);
+  lingering_.erase(std::find(lingering_.begin(), lingering_.end(), fd));
 }
 
 bool RunnerServer::ReadAvailable() {

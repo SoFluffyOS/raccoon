@@ -148,6 +148,22 @@ void main() {
     },
   );
 
+  test('a runner that hangs up before its hello fails hello', () async {
+    final path = p.join(temp.path, 'silent.sock');
+    final silent = await ServerSocket.bind(
+      InternetAddress(path, type: InternetAddressType.unix),
+      0,
+    );
+    silent.listen((socket) => socket.destroy());
+    final other = await RunnerClient.connect(UnixSocketEndpoint(path));
+    await expectLater(
+      other.hello.timeout(const Duration(seconds: 5)),
+      throwsA(isA<SocketException>()),
+    );
+    await other.close();
+    await silent.close();
+  });
+
   test('close sends what is still queued, a Shutdown above all', () async {
     // More than a Unix socket takes at once (about 200 KB on Linux, 8 KB on
     // macOS), so most of it is still queued when close comes; the Shutdown
