@@ -223,10 +223,10 @@ message TextField {
 // What became of the project's native plugins on this host. Sent after
 // Hello, and again when it changes.
 message Plugins {
-  repeated PluginStatus plugins = 1;
+  repeated PluginReport plugins = 1;
 }
 
-message PluginStatus {
+message PluginReport {
   string name = 1;
   PluginState state = 2;
   // A word of why, for the states that have one: the failure, the log's
