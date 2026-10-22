@@ -30,6 +30,20 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
     // directories, so every hosted app would share one. Pointed into the
     // app's own directory, they stay apart. Set before the engine runs, so
     // the app sees them.
+    // Mesa keeps its shader cache under the cache home too; that one stays
+    // the user's, shared by every app, so first frames do not pay for
+    // shader compiles app by app.
+    if (std::getenv("MESA_SHADER_CACHE_DIR") == nullptr) {
+      std::string cache_home;
+      if (const char* xdg = std::getenv("XDG_CACHE_HOME"); xdg != nullptr && *xdg != '\0') {
+        cache_home = xdg;
+      } else if (const char* home = std::getenv("HOME"); home != nullptr) {
+        cache_home = std::string(home) + "/.cache";
+      }
+      if (!cache_home.empty()) {
+        setenv("MESA_SHADER_CACHE_DIR", (cache_home + "/mesa_shader_cache").c_str(), 1);
+      }
+    }
     setenv("XDG_DATA_HOME", (options.data_dir + "/xdg/data").c_str(), 1);
     setenv("XDG_CACHE_HOME", (options.data_dir + "/xdg/cache").c_str(), 1);
   }
