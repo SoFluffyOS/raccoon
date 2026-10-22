@@ -149,8 +149,10 @@ void main() {
   );
 
   test('close sends what is still queued, a Shutdown above all', () async {
-    // More than a Unix socket takes at once, so most of it is still queued
-    // when close comes; the Shutdown behind it must reach the runner anyway.
+    // More than a Unix socket takes at once (about 200 KB on Linux, 8 KB on
+    // macOS), so most of it is still queued when close comes; the Shutdown
+    // behind it must reach the runner anyway. Not much more: the stand-in
+    // runner reassembles it slowly, and close waits only so long.
     final shutdown = runner.received.firstWhere((m) => m.hasShutdown());
     client
       ..send(
@@ -158,7 +160,7 @@ void main() {
           platformResponse: PlatformResponse(
             responseId: Int64(1),
             handled: true,
-            data: Uint8List(4 << 20),
+            data: Uint8List(1 << 20),
           ),
         ),
       )
