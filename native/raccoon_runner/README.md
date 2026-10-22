@@ -111,7 +111,7 @@ architectures, bundles the examples, renders a frame, and runs
 
 Every tag `v<VERSION>` publishes `raccoon_runner-<version>-<platform>.tar.gz`
 for `linux-x64`, `macos-arm64` and `macos-x64` on the [releases
-page](https://github.com/SoFluffyOS/raccoon_runner/releases), packed by
+page](https://github.com/SoFluffyOS/raccoon/releases), under `runner-v*` tags, packed by
 `tool/package.sh`: the binary, `tool/raccoon-device`, `tool/engine_dir.sh`,
 `VERSION` and `LICENSE`, flat. Unpacked into a folder it works as a runtime
 on its own, and the Raccoon Simulator fetches the archive for its host
