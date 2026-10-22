@@ -75,6 +75,25 @@ void main() {
     expect(file.ids(), isEmpty);
   });
 
+  test('a device of the user\'s own keeps its size and label in the file', () {
+    final file = CustomDevicesFile(p.join(temp.path, 'custom_devices.json'));
+    final ipad = RaccoonDevice.custom(
+      'ipad',
+      size: '1024x1366@2',
+      label: 'iPad',
+    );
+    final config = CustomDeviceConfig.forDevice(ipad, deviceHelper: '/h/rd');
+    expect(config.size, '1024x1366@2');
+    expect(config.toJson()['runDebug'], contains('--size'));
+    file.upsert(config);
+    expect(file.sizeOf('raccoon-ipad'), '1024x1366@2');
+    expect(file.labelOf('raccoon-ipad'), 'iPad');
+    file.upsert(CustomDeviceConfig(deviceHelper: '/h/rd'));
+    expect(file.sizeOf('raccoon'), isNull);
+    expect(file.labelOf('raccoon'), 'Raccoon');
+    expect(file.sizeOf('raccoon-nobody'), isNull);
+  });
+
   test('the helper of an entry is read off its ping command', () {
     final file = CustomDevicesFile(p.join(temp.path, 'custom_devices.json'));
     expect(file.helperOf('raccoon'), isNull);

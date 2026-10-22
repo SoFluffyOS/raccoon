@@ -17,15 +17,17 @@ final class CustomDeviceConfig {
     String? label,
     this.sdkNameAndVersion = 'Raccoon runtime',
     String? platform,
+    String? size,
   }) : id = id ?? (instance == '1' ? 'raccoon' : 'raccoon-$instance'),
+       size = size ?? RaccoonDevice.forKey(instance)?.sizeArgument,
        label =
            label ??
            RaccoonDevice.forKey(instance)?.label ??
            (instance == '1' ? 'Raccoon' : 'Raccoon $instance'),
        platform = platform ?? hostPlatform;
 
-  /// The entry for one of the built-in devices: its id, label and, for
-  /// the sized ones, the size the runner starts at.
+  /// The entry for a device, built in or the user's own: its id, label
+  /// and, for the sized ones, the size the runner starts at.
   CustomDeviceConfig.forDevice(
     RaccoonDevice device, {
     required String deviceHelper,
@@ -36,6 +38,7 @@ final class CustomDeviceConfig {
          id: device.id,
          label: device.label,
          platform: platform,
+         size: device.sizeArgument,
        );
 
   /// The tool's platform name for the host this process runs on.
@@ -68,13 +71,17 @@ final class CustomDeviceConfig {
   /// What the tool is told, see [platformFor].
   final String platform;
 
+  /// The size the runner starts this device at, `390x844@3`; null for the
+  /// host's own size.
+  final String? size;
+
   List<String> get _instanceArgs =>
       instance == '1' ? const [] : ['--instance', instance];
 
-  /// The size a built-in device starts at, for `run`.
-  List<String> get _sizeArgs => switch (RaccoonDevice.forKey(instance)) {
-    RaccoonDevice(sizeArgument: final size?) => ['--size', size],
-    _ => const [],
+  /// The size the device starts at, for `run`.
+  List<String> get _sizeArgs => switch (size) {
+    final size? => ['--size', size],
+    null => const [],
   };
 
   Map<String, Object?> toJson() => {
@@ -167,17 +174,35 @@ final class CustomDevicesFile {
   /// The device helper the entry with [id] runs, read off its ping
   /// command; null without such an entry. The `raccoon` entry's helper is
   /// what every added device points at.
-  String? helperOf(String id) {
+  String? helperOf(String id) => switch (_entry(id)) {
+    {'ping': final List ping} when ping.isNotEmpty => ping.first as String?,
+    _ => null,
+  };
+
+  /// The label of the entry with [id]; null without one.
+  String? labelOf(String id) => switch (_entry(id)) {
+    {'label': final String label} => label,
+    _ => null,
+  };
+
+  /// The size the entry with [id] runs at, read off its run command's
+  /// `--size`; null without one.
+  String? sizeOf(String id) {
+    if (_entry(id) case {'runDebug': final List run}) {
+      final at = run.indexOf('--size');
+      if (at >= 0 && at + 1 < run.length) return run[at + 1] as String?;
+    }
+    return null;
+  }
+
+  Map? _entry(String id) {
     final file = File(path);
     if (!file.existsSync()) return null;
     final decoded = jsonDecode(file.readAsStringSync());
     if (decoded case {_key: final List<Object?> devices}) {
       for (final device in devices) {
-        if (device case {
-          'id': final String deviceId,
-          'ping': final List ping,
-        } when deviceId == id && ping.isNotEmpty) {
-          return ping.first as String?;
+        if (device case {'id': final String deviceId} when deviceId == id) {
+          return device as Map;
         }
       }
     }
