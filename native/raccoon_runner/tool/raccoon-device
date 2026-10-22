@@ -53,16 +53,45 @@ case "$(uname -s)" in
   *) echo "unsupported system $(uname -s)" >&2; exit 1 ;;
 esac
 
-sdk_icu() {
-  local root
+sdk_root() {
   if [ -n "${FLUTTER_ROOT:-}" ] && [ -d "$FLUTTER_ROOT/bin/cache" ]; then
-    root="$FLUTTER_ROOT"
+    echo "$FLUTTER_ROOT"
   else
     local flutter
     flutter="$(readlink -f "$(command -v flutter)")"
-    root="$(cd "$(dirname "$flutter")/.." && pwd)"
+    (cd "$(dirname "$flutter")/.." && pwd)
   fi
-  echo "$root/bin/cache/artifacts/engine/$SDK_ENGINE/icudtl.dat"
+}
+
+sdk_icu() {
+  echo "$(sdk_root)/bin/cache/artifacts/engine/$SDK_ENGINE/icudtl.dat"
+}
+
+# On macOS, an application bundle of the app's own around the runner: a
+# symlink to it in <key>.app/Contents/MacOS beside an Info.plist, so the
+# process has a main bundle and an identifier, dev.raccoon.app.<key>. Some
+# plugins' APIs throw without one (UserNotifications, at registration), and
+# what they keep by identifier stays the app's. Prints the path to run.
+app_bundle() {
+  local key="$1" bundle id
+  bundle="$APPS/$key/$key.app/Contents"
+  id="dev.raccoon.app.$(printf '%s' "$key" | tr -c 'A-Za-z0-9.\n' '-')"
+  mkdir -p "$bundle/MacOS"
+  ln -sfn "$RUNNER" "$bundle/MacOS/raccoon_runner"
+  cat > "$bundle/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>$id</string>
+  <key>CFBundleName</key><string>$key</string>
+  <key>CFBundleExecutable</key><string>raccoon_runner</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSUIElement</key><true/>
+</dict>
+</plist>
+PLIST
+  echo "$bundle/MacOS/raccoon_runner"
 }
 
 # The key an app's socket, store and data are named by: the app name, with
@@ -92,6 +121,10 @@ fi
 
 # The window plugins stay the runner's own: their window is the client's pane.
 VIRTUAL_PLUGINS="desktop_window window_manager window_size screen_retriever"
+# On macOS so does shared_preferences_foundation: the runner keeps each app's
+# preferences in its data directory, where NSUserDefaults would share the
+# runner's one domain among every app.
+VIRTUAL_PLUGINS_MACOS="$VIRTUAL_PLUGINS shared_preferences_foundation"
 
 # The plugin-facing library and its headers: beside the runner in an archive,
 # in build/ and third_party/ in a checkout.
@@ -109,23 +142,31 @@ plugin_headers() {
 }
 
 # Builds a project's native plugins into |out| and writes |out|/manifest.json
-# for the runner's --plugins. The plugins are the resolved packages
-# (.dart_tool/package_config.json) whose pubspec names a Linux pluginClass
-# (registered) or ffiPlugin (its libraries only), as the Flutter tool finds
-# them. What built before is in a cache by plugin version, runner version
-# and engine; what the release prebuilt comes from its archive, fetched
-# once; the rest builds here, each plugin in its own CMake project with what
-# the desktop template gives a plugin, so one that fails sinks nothing else.
-# Every library lands flat in |out|/lib, which run puts on the runner's
-# library path for the FFI ones. A machine without a toolchain still gets
-# the cached and prebuilt ones. When there is nothing it can do, says why
-# and leaves no manifest; the app then sees no plugin.
+# for the runner's --plugins: the Linux half or the macOS half below. When
+# there is nothing it can do, says why and leaves no manifest; the app then
+# sees no plugin.
 build_plugins() {
-  local project="$1" out="$2" lib headers engine version cache
+  local project="$1" out="$2"
   rm -rf "$out"
-  [ "$(uname -s)" = Linux ] || return 0
   [ -f "$project/.dart_tool/package_config.json" ] || return 0
   command -v python3 >/dev/null || { echo "raccoon-device: no python3; native plugins skipped" >&2; return 0; }
+  case "$(uname -s)" in
+    Darwin) build_plugins_macos "$project" "$out" ;;
+    *) build_plugins_linux "$project" "$out" ;;
+  esac
+}
+
+# The Linux half: the resolved packages (.dart_tool/package_config.json)
+# whose pubspec names a Linux pluginClass (registered) or ffiPlugin (its
+# libraries only), as the Flutter tool finds them. What built before is in a
+# cache by plugin version, runner version and engine; what the release
+# prebuilt comes from its archive, fetched once; the rest builds here, each
+# plugin in its own CMake project with what the desktop template gives a
+# plugin, so one that fails sinks nothing else. Every library lands flat in
+# |out|/lib, which run puts on the runner's library path for the FFI ones. A
+# machine without a toolchain still gets the cached and prebuilt ones.
+build_plugins_linux() {
+  local project="$1" out="$2" lib headers engine version cache
   lib="$(plugin_library || true)"
   headers="$(plugin_headers || true)"
   if [ -z "$lib" ] || [ -z "$headers" ]; then
@@ -347,6 +388,272 @@ print('raccoon-device: native plugins, ' + '; '.join(parts), file=sys.stderr)
 PY
 }
 
+# The macOS half: the resolved packages whose pubspec names a macOS
+# pluginClass, their pods built against the SDK's FlutterMacOS.framework.
+# One CocoaPods project for what the cache misses (never integrated into a
+# target, so it needs no Xcode project of the app's or its own), then
+# each plugin's pod target on its own, so one that fails sinks nothing else;
+# its framework and those of the pods it depends on are cached by plugin
+# version, runner version, engine and architecture. Every framework lands
+# flat in |out|/frameworks, where they find each other by @loader_path; the
+# manifest names the SDK's FlutterMacOS for the runner to open first.
+build_plugins_macos() {
+  local project="$1" out="$2" sdk engine version cache
+  sdk="$(sdk_root)"
+  engine="$(basename "$(dirname "$("$ROOT/tool/engine_dir.sh")")")"
+  version="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+  cache="${RACCOON_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/$engine}"
+  python3 - "$project/.dart_tool/package_config.json" "$out" "$VIRTUAL_PLUGINS_MACOS" \
+    "$cache" "$version" "$(uname -m)" "$sdk/bin/cache/artifacts/engine/darwin-x64" <<'PY'
+import hashlib, json, os, re, shutil, subprocess, sys
+from urllib.parse import unquote, urlparse
+
+config, out, virtual, cache, runner_version, arch, engine_dir = sys.argv[1:8]
+virtual = set(virtual.split())
+dart_tool = os.path.dirname(os.path.abspath(config))
+# The framework the pods link against, as the SDK's local podspec vends it.
+flutter_framework = os.path.join(engine_dir, 'FlutterMacOS.framework', 'FlutterMacOS')
+env = dict(os.environ, LANG='en_US.UTF-8', LC_ALL='en_US.UTF-8')
+
+
+def platform_block(pubspec, platform):
+    found = re.search(r'^([ \t]*)%s:[ \t]*\n' % platform, pubspec, re.M)
+    if not found:
+        return ''
+    indent = len(found.group(1))
+    block = []
+    for line in pubspec[found.end():].splitlines():
+        if not line.strip():
+            continue
+        if len(line) - len(line.lstrip()) <= indent:
+            break
+        block.append(line)
+    return '\n'.join(block)
+
+
+def version_key(name, root, sources):
+    # A pub package is its directory name, name-version; a path package is
+    # the shape of its sources, so an edit rebuilds it.
+    if os.sep + '.pub-cache' + os.sep in root + os.sep:
+        return os.path.basename(root.rstrip(os.sep))
+    digest = hashlib.sha256()
+    for dirpath, _, files in sorted(os.walk(sources)):
+        for f in sorted(files):
+            full = os.path.join(dirpath, f)
+            st = os.stat(full)
+            digest.update(('%s %d %d\n' % (os.path.relpath(full, root), st.st_size, int(st.st_mtime))).encode())
+    return '%s-path-%s' % (name, digest.hexdigest()[:16])
+
+
+def can_build():
+    if shutil.which('pod') is None:
+        return 'no CocoaPods (pod)'
+    if subprocess.run(['xcodebuild', '-version'], stdout=subprocess.DEVNULL,
+                      stderr=subprocess.DEVNULL).returncode != 0:
+        return 'no Xcode (xcodebuild)'
+    if not os.path.isfile(os.path.join(engine_dir, 'FlutterMacOS.podspec')):
+        return 'no FlutterMacOS in the SDK (flutter precache --macos)'
+    return None
+
+
+def dependencies(pubspec):
+    found = re.search(r'^dependencies:[ \t]*\n', pubspec, re.M)
+    if not found:
+        return set()
+    names = set()
+    for line in pubspec[found.end():].splitlines():
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        if not line.startswith((' ', '\t')):
+            break
+        named = re.match(r'^  (\w+):', line)
+        if named:
+            names.add(named.group(1))
+    return names
+
+
+def frameworks(directory):
+    return sorted(f for f in os.listdir(directory) if f.endswith('.framework')) if os.path.isdir(directory) else []
+
+
+wanted = []
+status = []  # what never gets as far as a library, for the runner to relay
+packages = []
+for package in json.load(open(config)).get('packages', []):
+    uri = package.get('rootUri', '')
+    root = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, uri))
+    pubspec_path = os.path.join(root, 'pubspec.yaml')
+    if os.path.isfile(pubspec_path):
+        packages.append((package['name'], root, open(pubspec_path).read()))
+# Implementation packages of federated plugins, not the ones to blame for
+# a missing host (as on Linux).
+implementations = set()
+for _, _, pubspec in packages:
+    implementations.update(re.findall(r'default_package:\s*(\w+)', pubspec))
+implementations.update(name for name, _, pubspec in packages
+                       if re.search(r'^\s+implements:', pubspec, re.M))
+# What the app reaches without going through another host's implementation:
+# jni, say, comes only with path_provider_android and is not the app's to
+# miss on macOS.
+by_name = {name: pubspec for name, _, pubspec in packages}
+project = os.path.dirname(dart_tool)
+app = next((name for name, root, _ in packages if os.path.normpath(root) == os.path.normpath(project)), None)
+reached, pending = set(), [app] if app else []
+while pending:
+    current = pending.pop()
+    if current in reached or current not in by_name:
+        continue
+    reached.add(current)
+    if current != app and current in implementations:
+        continue
+    pending.extend(dependencies(by_name[current]))
+for name, root, pubspec in packages:
+    if name in virtual:
+        status.append({'name': name, 'state': 'built_in', 'detail': 'the runner answers it'})
+        continue
+    if not re.search(r'^\s+plugin:\s*$', pubspec, re.M):
+        continue
+    block = platform_block(pubspec, 'macos')
+    cls = re.search(r'pluginClass:\s*(\w+)', block)
+    ffi = re.search(r'ffiPlugin:\s*true', block) is not None
+    if cls is None and not ffi:
+        if (not block and re.search(r'^\s+platforms:\s*$', pubspec, re.M)
+                and not re.search(r'^\s+macos:', pubspec, re.M)
+                and name not in implementations
+                and (app is None or name in reached)):
+            status.append({'name': name, 'state': 'no_host', 'detail': 'no macOS implementation'})
+        continue
+    sources = os.path.join(root, 'darwin' if re.search(r'sharedDarwinSource:\s*true', block) else 'macos')
+    if not os.path.isfile(os.path.join(sources, name + '.podspec')):
+        continue
+    if cls is None:
+        status.append({'name': name, 'state': 'failed', 'detail': 'an FFI plugin; not loaded on macOS yet'})
+        continue
+    wanted.append({'name': name, 'root': root, 'sources': sources, 'class': cls.group(1),
+                   'key': '%s-%s-%s' % (version_key(name, root, sources), runner_version, arch)})
+
+if not wanted and not status:
+    sys.exit(0)
+
+os.makedirs(os.path.join(out, 'frameworks'), exist_ok=True)
+built, failed, empty, from_cache = [], [], [], []
+misses = [p for p in wanted if not frameworks(os.path.join(cache, p['key']))]
+broken = {}  # name: why, for the misses that did not build
+if misses:
+    toolchain = can_build()
+    pods = os.path.join(out, 'build')
+    log_path = os.path.join(pods, 'pod-install.log')
+    if toolchain is None:
+        os.makedirs(pods, exist_ok=True)
+        # Every package by its bare name, as Flutter's own macOS build lays
+        # them out: podspecs find their siblings that way (FlutterFire's read
+        # the SDK version from ../../firebase_core).
+        links = os.path.join(pods, '.symlinks', 'plugins')
+        os.makedirs(links, exist_ok=True)
+        for name, root, _ in packages:
+            link = os.path.join(links, name)
+            if not os.path.lexists(link):
+                os.symlink(root, link)
+        # The deployment target of this machine: the frameworks run nowhere
+        # else, and no pod asks for more.
+        macos = subprocess.run(['sw_vers', '-productVersion'], capture_output=True, text=True).stdout.strip()
+        with open(os.path.join(pods, 'Podfile'), 'w') as f:
+            f.write("platform :osx, '%s.0'\n" % (macos.split('.')[0] or '11'))
+            f.write("install! 'cocoapods', :integrate_targets => false, :warn_for_unused_master_specs_repo => false\n")
+            # Every pod a dynamic framework, static_framework or not
+            # (FlutterFire's are): the runner opens them, nothing links them.
+            f.write("pre_install do |installer|\n"
+                    "  installer.pod_targets.each do |target|\n"
+                    "    def target.build_type\n"
+                    "      Pod::BuildType.dynamic_framework\n"
+                    "    end\n"
+                    "  end\n"
+                    "end\n")
+            # Never integrated, so no Xcode project is read: the target is a
+            # name, and Swift 5 is what Flutter's Runner target would give
+            # the pods that name no Swift version.
+            f.write("use_frameworks!\ntarget 'Host' do\n"
+                    "  current_target_definition.swift_version = '5.0'\n")
+            f.write("  pod 'FlutterMacOS', :path => %s\n" % json.dumps(engine_dir))
+            for plugin in misses:
+                linked = os.path.join('.symlinks', 'plugins', plugin['name'], os.path.basename(plugin['sources']))
+                f.write("  pod %s, :path => %s\n" % (json.dumps(plugin['name']), json.dumps(linked)))
+            f.write("end\n")
+        with open(log_path, 'w') as log:
+            installed = subprocess.run(['pod', 'install'], cwd=pods, env=env,
+                                       stdout=log, stderr=subprocess.STDOUT).returncode == 0
+        if not installed:
+            toolchain = 'pod install failed; see ' + log_path
+    for plugin in misses:
+        name = plugin['name']
+        if toolchain is not None:
+            broken[name] = toolchain
+            continue
+        symroot = os.path.join(pods, 'out', name)
+        build_log = os.path.join(pods, name + '.log')
+        with open(build_log, 'w') as log:
+            ok = subprocess.run(
+                ['xcodebuild', '-project', os.path.join(pods, 'Pods', 'Pods.xcodeproj'),
+                 '-target', name, '-configuration', 'Release',
+                 'ARCHS=' + arch, 'ONLY_ACTIVE_ARCH=YES',
+                 'SYMROOT=' + symroot, 'OBJROOT=' + os.path.join(pods, 'obj', name),
+                 'LD_RUNPATH_SEARCH_PATHS=@loader_path/../../..',
+                 'CODE_SIGNING_ALLOWED=NO', 'build'],
+                env=env, stdout=log, stderr=subprocess.STDOUT).returncode == 0
+        if not ok:
+            broken[name] = 'did not build; see ' + build_log
+            continue
+        cached = os.path.join(cache, plugin['key'])
+        release = os.path.join(symroot, 'Release')
+        made = [(d, f) for d in sorted(os.listdir(release)) if d != 'FlutterMacOS'
+                for f in frameworks(os.path.join(release, d))] if os.path.isdir(release) else []
+        if not any(f == name + '.framework' for _, f in made):
+            empty.append(name)
+            status.append({'name': name, 'state': 'built_nothing', 'detail': 'built and made no framework'})
+            broken[name] = None
+            continue
+        os.makedirs(cached, exist_ok=True)
+        for d, f in made:
+            shutil.copytree(os.path.join(release, d, f), os.path.join(cached, f), symlinks=True,
+                            dirs_exist_ok=True)
+        built.append(name)
+
+entries = []
+for plugin in wanted:
+    name = plugin['name']
+    if name in broken:
+        if broken[name] is not None:
+            failed.append('%s (%s)' % (name, broken[name]))
+            status.append({'name': name, 'state': 'failed', 'detail': broken[name]})
+        continue
+    cached = os.path.join(cache, plugin['key'])
+    if name not in built:
+        from_cache.append(name)
+    for f in frameworks(cached):
+        target = os.path.join(out, 'frameworks', f)
+        if not os.path.exists(target):
+            shutil.copytree(os.path.join(cached, f), target, symlinks=True)
+    entries.append({'name': name,
+                    'library': os.path.join(out, 'frameworks', name + '.framework', name),
+                    'class': plugin['class'], 'module': name})
+
+json.dump({'flutter_framework': flutter_framework, 'plugins': entries, 'status': status},
+          open(os.path.join(out, 'manifest.json'), 'w'), indent=1)
+parts = []
+if built:
+    parts.append('%d built: %s' % (len(built), ', '.join(built)))
+if from_cache:
+    parts.append('%d from the cache: %s' % (len(from_cache), ', '.join(from_cache)))
+if empty:
+    parts.append('%d built nothing: %s' % (len(empty), ', '.join(empty)))
+if failed:
+    parts.append('%d failed: %s' % (len(failed), '; '.join(failed)))
+if not parts:
+    parts.append('none to build')
+print('raccoon-device: native plugins, ' + '; '.join(parts), file=sys.stderr)
+PY
+}
+
 case "$verb" in
   ping)
     test -x "$RUNNER"
@@ -399,6 +706,10 @@ case "$verb" in
     if [ -d "$APPS/$key/plugins/lib" ]; then
       export LD_LIBRARY_PATH="$APPS/$key/plugins/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     fi
+    binary="$RUNNER"
+    if [ -n "$manifest" ] && [ "$(uname -s)" = Darwin ]; then
+      binary="$(app_bundle "$key")"
+    fi
     # The runner is this script's child rather than its replacement, so a
     # runner that dies (a native crash in a plugin, say) says how in the
     # tool's output. The tool stops a run by stopping this script, which
@@ -407,7 +718,7 @@ case "$verb" in
     export RACCOON_PARENT_PID="$PPID"
     # The tool passes its engine switches as one argument; split on spaces.
     # shellcheck disable=SC2068
-    "$RUNNER" serve \
+    "$binary" serve \
       --engine-dir "$("$ROOT/tool/engine_dir.sh")" \
       --assets "$APPS/$key/flutter_assets" \
       --icu "$(sdk_icu)" \

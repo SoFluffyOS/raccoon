@@ -83,6 +83,38 @@ Design notes: `docs/internal_docs/raccoon/`.
   window plugins (`desktop_window`, `window_manager`, `window_size`,
   `screen_retriever`) stay the runner's own, above. `example/plugins/echo`
   is a plugin as the template makes one; `example/plugins_app` calls it.
+- Loads the project's native plugins on macOS too. A plugin framework links
+  against `FlutterMacOS.framework` and uses its channel and codec classes;
+  the runner opens the Flutter SDK's copy at run time, before the plugins,
+  and implements the protocols they are handed (`FlutterBinaryMessenger`,
+  background task queues included, `FlutterPluginRegistrar` with no view,
+  `FlutterTextureRegistry`) over its own engine, from the public headers
+  alone (`third_party/flutter_macos`). The manifest names that framework
+  and each plugin's binary and class (`module.Class` for Swift);
+  `tool/raccoon-device install` builds the plugins the project resolves
+  (every package with a macOS `pluginClass`, in `macos/` or a shared
+  `darwin/`) as CocoaPods does for a macOS app, but without the app's Xcode
+  project: one scratch Pods project for what the cache misses, every pod
+  a dynamic framework, each plugin's target built on its own. Needs Xcode
+  and CocoaPods, as the macOS target does; cached the same way as on Linux.
+  `run` starts the runner of an app with plugins through a bundle of the
+  app's own (`<app>.app`, identifier `dev.raccoon.app.<app>`, a symlink to
+  the runner), because some of Apple's APIs throw without one. While
+  plugins are loaded the runner waits in the main run loop instead of
+  poll(2), so the main queue, timers and AppKit's events run (it starts as
+  an accessory application, no Dock icon); a plugin's textures, BGRA or
+  bi-planar YUV pixel buffers, draw through the Metal renderer. An
+  Objective-C exception from a plugin's registration or handler fails that
+  plugin, not the run; one thrown through Swift code cannot be caught.
+  `shared_preferences_foundation` stays the runner's own, above. On an
+  M1 Pro: `url_launcher` built in 12 s cold, 0.2 s from the cache; the
+  fifteen of `tool/plugins` in 2 min cold, all loaded; `firebase_core`
+  and its pods in 47 s cold, and `Firebase.initializeApp` answers.
+  Loading FlutterMacOS adds about 17 MB of resident memory and no
+  measurable time to the first frame (184 to 188 ms, median of five); the
+  run loop costs nothing at idle. The Objective-C runtime notes, once per
+  run, the classes FlutterMacOS and the engine library both carry. FFI
+  plugins are not loaded on macOS yet.
 - Never leaves the app waiting on a plugin nobody serves. A channel no one
   answers gets an empty reply, which the app sees as
   `MissingPluginException` (Pigeon's `channel-error`), as on a desktop the
@@ -207,8 +239,9 @@ Linux and macOS, from the same sources; the per-host seams are the wake
 descriptor (eventfd or a pipe), socket flags, the shared buffers' backing
 (a memfd, or an unlinked temporary file on macOS, whose POSIX shared memory
 cannot be read with `read()`), the GPU renderer (EGL and dmabufs, or Metal
-and IOSurfaces), the engine library's name and the pixel order. Windows
-follows the same seams.
+and IOSurfaces), the engine library's name, the pixel order, and the native
+plugins' object model and main loop (GObject and GLib, or FlutterMacOS and
+the main run loop). Windows follows the same seams.
 
 ## Issues
 
