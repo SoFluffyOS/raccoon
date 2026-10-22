@@ -26,11 +26,7 @@ constexpr size_t kMaxMessage = 64 * 1024 * 1024;
 constexpr int kSendFlags = MSG_NOSIGNAL;
 // Received descriptors must not leak into the apps the engine may spawn;
 // Linux closes them on exec from recvmsg, elsewhere fcntl does it.
-#ifdef MSG_CMSG_CLOEXEC
 constexpr int kRecvFlags = MSG_CMSG_CLOEXEC;
-#else
-constexpr int kRecvFlags = 0;
-#endif
 
 int OpenListenSocket() {
   return socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
@@ -43,6 +39,7 @@ int AcceptClient(int listen_fd) {
 #else
 
 constexpr int kSendFlags = 0;
+constexpr int kRecvFlags = 0;
 
 bool SetNonBlockingCloseOnExec(int fd) {
   return fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) == 0 &&
