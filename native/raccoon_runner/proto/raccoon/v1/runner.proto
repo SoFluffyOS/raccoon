@@ -52,12 +52,20 @@ enum PointerPhase {
   POINTER_PHASE_DOWN = 4;
   POINTER_PHASE_MOVE = 5;
   POINTER_PHASE_UP = 6;
+  // A trackpad gesture: two-finger scrolling, pinching, rotating. The
+  // framework delivers these as pan-zoom events, not as scroll signals, so
+  // the runner forwards them as such and the app's scrollables treat them
+  // as the drags they are, momentum included.
+  POINTER_PHASE_PAN_ZOOM_START = 7;
+  POINTER_PHASE_PAN_ZOOM_UPDATE = 8;
+  POINTER_PHASE_PAN_ZOOM_END = 9;
 }
 
 enum PointerDevice {
   POINTER_DEVICE_UNSPECIFIED = 0;
   POINTER_DEVICE_MOUSE = 1;
   POINTER_DEVICE_TOUCH = 2;
+  POINTER_DEVICE_TRACKPAD = 3;
 }
 
 message PointerEvent {
@@ -71,6 +79,12 @@ message PointerEvent {
   uint64 timestamp_micros = 7;
   double scroll_delta_x = 8;
   double scroll_delta_y = 9;
+  // Pan-zoom phases only: the pan since the gesture began, in frame pixels,
+  // the scale (1 is none) and the rotation in radians.
+  double pan_x = 10;
+  double pan_y = 11;
+  double scale = 12;
+  double rotation = 13;
 }
 
 enum KeyKind {

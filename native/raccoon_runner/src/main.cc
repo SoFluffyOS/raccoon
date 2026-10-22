@@ -231,6 +231,9 @@ FlutterPointerPhase ToPhase(raccoon::v1::PointerPhase phase) {
     case raccoon::v1::POINTER_PHASE_DOWN: return kDown;
     case raccoon::v1::POINTER_PHASE_MOVE: return kMove;
     case raccoon::v1::POINTER_PHASE_UP: return kUp;
+    case raccoon::v1::POINTER_PHASE_PAN_ZOOM_START: return kPanZoomStart;
+    case raccoon::v1::POINTER_PHASE_PAN_ZOOM_UPDATE: return kPanZoomUpdate;
+    case raccoon::v1::POINTER_PHASE_PAN_ZOOM_END: return kPanZoomEnd;
     default: return kCancel;
   }
 }
@@ -244,10 +247,17 @@ FlutterPointerEvent ToFlutterPointer(const raccoon::v1::PointerEvent& event,
   out.x = event.x();
   out.y = event.y();
   out.device = event.pointer_id();
-  out.device_kind = event.device() == raccoon::v1::POINTER_DEVICE_TOUCH
-                        ? kFlutterPointerDeviceKindTouch
-                        : kFlutterPointerDeviceKindMouse;
+  switch (event.device()) {
+    case raccoon::v1::POINTER_DEVICE_TOUCH: out.device_kind = kFlutterPointerDeviceKindTouch; break;
+    case raccoon::v1::POINTER_DEVICE_TRACKPAD: out.device_kind = kFlutterPointerDeviceKindTrackpad; break;
+    default: out.device_kind = kFlutterPointerDeviceKindMouse; break;
+  }
   out.buttons = event.buttons();
+  // A gesture's pan, scale and rotation; a scale of 0 was never meant.
+  out.pan_x = event.pan_x();
+  out.pan_y = event.pan_y();
+  out.scale = event.scale() == 0 ? 1.0 : event.scale();
+  out.rotation = event.rotation();
   if (event.scroll_delta_x() != 0 || event.scroll_delta_y() != 0) {
     out.signal_kind = kFlutterPointerSignalKindScroll;
     out.scroll_delta_x = event.scroll_delta_x();
