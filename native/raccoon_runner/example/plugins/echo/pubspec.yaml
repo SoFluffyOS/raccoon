@@ -1,5 +1,5 @@
 name: raccoon_echo
-description: A native Linux plugin with one method, echo, answered from a GLib idle callback. The runner's test plugin - loaded, not built in.
+description: A native Linux and macOS plugin with one method, echo, answered from GLib's main loop or the main queue, and a texture. The runner's test plugin - loaded, not built in.
 publish_to: "none"
 version: 0.1.0
 
@@ -15,4 +15,6 @@ flutter:
   plugin:
     platforms:
       linux:
+        pluginClass: RaccoonEchoPlugin
+      macos:
         pluginClass: RaccoonEchoPlugin

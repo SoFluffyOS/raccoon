@@ -1,25 +1,39 @@
 #pragma once
 // Native plugins, loaded: the project's plugin binaries, built for this
 // host, opened into the runner and registered on a registrar of the
-// runner's own. The plugin-facing classes come from third_party/flutter_linux;
-// the engine behind them is this runner, through a bridge of five calls.
+// runner's own. On Linux the plugin-facing classes come from
+// third_party/flutter_linux, with the engine behind them reached through a
+// bridge of five calls. On macOS they come from FlutterMacOS.framework,
+// opened from the Flutter SDK before the plugins, and the runner implements
+// the messenger, registrar and texture registry protocols over the same
+// bridge (third_party/flutter_macos has the headers).
 #if RACCOON_HAS_PLUGINS
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
+#if !defined(__APPLE__)
 #include "flutter/shell/platform/linux/fl_engine_private.h"
 #include "flutter/shell/platform/linux/public/flutter_linux/fl_plugin_registrar.h"
+#endif
 #include "flutter_embedder.h"
 
 namespace raccoon {
 
 struct PluginEntry {
   std::string name;
-  std::string library;  // the shared library's path
-  std::string symbol;   // its <name>_plugin_register_with_registrar
+  // The binary to open: a shared library on Linux, a framework's
+  // executable on macOS.
+  std::string library;
+  // Linux: its <name>_plugin_register_with_registrar.
+  std::string symbol;
+  // macOS: the class the registrant registers, and the Swift module it is
+  // in, if any; the class is looked up as module.Class, then as Class.
+  std::string plugin_class;
+  std::string module;
 };
 
 // What became of a plugin: the manifest's word on the ones that never got
@@ -46,6 +60,11 @@ class PluginHost {
     std::function<bool(int64_t texture_id)> register_texture;
     std::function<bool(int64_t texture_id)> mark_texture_frame_available;
     std::function<bool(int64_t texture_id)> unregister_texture;
+#if defined(__APPLE__)
+    // The id<MTLDevice> plugin textures are drawn with; null without Metal,
+    // when textures are not drawn.
+    const void* metal_device = nullptr;
+#endif
   };
 
   explicit PluginHost(Bridge bridge);
@@ -54,8 +73,9 @@ class PluginHost {
   PluginHost& operator=(const PluginHost&) = delete;
 
   // Loads every plugin of a manifest: {"plugins": [{"name", "library",
-  // "symbol"}]}. Each outcome is logged; false with |error| when the
-  // manifest itself cannot be read.
+  // "symbol"}]} on Linux, {"flutter_framework", "plugins": [{"name",
+  // "library", "class", "module"}]} on macOS. Each outcome is logged; false
+  // with |error| when the manifest itself cannot be read.
   bool LoadManifest(const std::string& path, std::string* error);
   bool Load(const PluginEntry& entry, std::string* error);
   size_t loaded() const { return names_.size(); }
@@ -68,12 +88,30 @@ class PluginHost {
   bool HandleMessage(const std::string& channel, const uint8_t* data, size_t size,
                      const FlutterPlatformMessageResponseHandle* handle);
 
+#if defined(__APPLE__)
+  // A frame of a plugin's texture, on the raster thread: its pixel buffer
+  // as Metal textures, one plane or two.
+  bool PopulateTexture(int64_t texture_id, size_t width, size_t height,
+                       FlutterMetalExternalTexture* out);
+#else
   // A frame of a plugin's texture, on the raster thread with the GL
   // context current.
   bool PopulateTexture(int64_t texture_id, size_t width, size_t height,
                        FlutterOpenGLTexture* out);
+#endif
 
  private:
+  // Opens what every plugin of the manifest needs before any loads: on
+  // macOS, |flutter_framework|. False, with why, when it cannot.
+  bool Prepare(const std::string& flutter_framework, std::string* error);
+
+  Bridge bridge_;
+  std::vector<std::string> names_;
+  std::vector<PluginStatus> statuses_;
+#if defined(__APPLE__)
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+#else
   static void SendPlatformMessage(gpointer user_data, const gchar* channel,
                                   const uint8_t* data, size_t size, FlRaccoonReply reply,
                                   gpointer reply_data);
@@ -84,15 +122,13 @@ class PluginHost {
   static gboolean MarkTextureFrameAvailable(gpointer user_data, int64_t texture_id);
   static gboolean UnregisterExternalTexture(gpointer user_data, int64_t texture_id);
 
-  Bridge bridge_;
   FlRaccoonBridge c_bridge_{};
   FlEngine* engine_ = nullptr;
   FlBinaryMessenger* messenger_ = nullptr;
   FlTextureRegistrar* textures_ = nullptr;
   FlPluginRegistrar* registrar_ = nullptr;
   std::vector<void*> handles_;
-  std::vector<std::string> names_;
-  std::vector<PluginStatus> statuses_;
+#endif
 };
 
 }  // namespace raccoon

@@ -83,6 +83,7 @@ add_executable(raccoon_runner
   src/event_loop.cc
   src/glib_pump.cc
   src/plugins.cc
+  src/plugins_linux.cc
   src/platform_task_runner.cc
   src/server.cc
   src/shared_buffers.cc
@@ -114,6 +115,43 @@ if(APPLE)
   target_link_libraries(raccoon_runner PRIVATE
     "-framework Metal" "-framework IOSurface" "-framework Foundation")
   message(STATUS "Metal renderer: on")
+  # Native plugins: the protocols of FlutterMacOS.framework, implemented here
+  # from its headers alone (third_party/flutter_macos); the framework itself
+  # is opened at run time from the Flutter SDK, before the plugins.
+  target_sources(raccoon_runner PRIVATE src/plugins_mac.mm src/run_loop_pump.mm)
+  set_source_files_properties(src/plugins_mac.mm src/run_loop_pump.mm
+    PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+  target_include_directories(raccoon_runner PRIVATE ${CMAKE_SOURCE_DIR}/third_party/flutter_macos)
+  target_compile_definitions(raccoon_runner PRIVATE RACCOON_HAS_PLUGINS=1)
+  target_link_libraries(raccoon_runner PRIVATE
+    "-framework AppKit" "-framework CoreVideo")
+  message(STATUS "Native plugins: on")
+  # example/plugins/echo as the framework a plugin pod builds, linked against
+  # the SDK's FlutterMacOS as plugins are; the tests load it. Needs the SDK's
+  # macOS artifacts (flutter precache --macos).
+  find_program(RACCOON_FLUTTER flutter)
+  if(RACCOON_FLUTTER)
+    get_filename_component(RACCOON_FLUTTER_REAL ${RACCOON_FLUTTER} REALPATH)
+    get_filename_component(RACCOON_SDK ${RACCOON_FLUTTER_REAL} DIRECTORY)
+    get_filename_component(RACCOON_SDK ${RACCOON_SDK} DIRECTORY)
+    set(RACCOON_FLUTTER_MACOS_DIR
+      ${RACCOON_SDK}/bin/cache/artifacts/engine/darwin-x64/FlutterMacOS.xcframework/macos-arm64_x86_64)
+  endif()
+  if(RACCOON_FLUTTER_MACOS_DIR AND EXISTS ${RACCOON_FLUTTER_MACOS_DIR}/FlutterMacOS.framework)
+    enable_language(OBJC)
+    add_library(raccoon_echo SHARED
+      example/plugins/echo/macos/Classes/RaccoonEchoPlugin.m)
+    set_target_properties(raccoon_echo PROPERTIES
+      FRAMEWORK TRUE
+      INSTALL_NAME_DIR "@rpath"
+      LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/example_plugins/echo)
+    target_compile_options(raccoon_echo PRIVATE -fobjc-arc -F${RACCOON_FLUTTER_MACOS_DIR})
+    target_link_options(raccoon_echo PRIVATE -F${RACCOON_FLUTTER_MACOS_DIR})
+    target_link_libraries(raccoon_echo PRIVATE
+      "-framework FlutterMacOS" "-framework Foundation" "-framework CoreVideo")
+  else()
+    message(STATUS "No FlutterMacOS.framework in the SDK cache: example plugin skipped")
+  endif()
 else()
   find_package(PkgConfig QUIET)
   if(PkgConfig_FOUND)

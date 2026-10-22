@@ -176,6 +176,9 @@ bool EngineHost::ConfigureRenderer(const std::string& wanted,
       config.present_command_queue = metal_->command_queue();
       config.get_next_drawable_callback = MetalNextDrawable;
       config.present_drawable_callback = MetalPresent;
+#if RACCOON_HAS_PLUGINS
+      config.external_texture_frame_callback = MetalExternalTexture;
+#endif
       renderer_ = "metal (" + metal_->description() + ")";
       return true;
     }
@@ -535,6 +538,9 @@ bool EngineHost::LoadPlugins(const std::string& manifest, std::string* error) {
     bridge.unregister_texture = [this](int64_t id) {
       return loader_.procs().UnregisterExternalTexture(engine_, id) == kSuccess;
     };
+#if RACCOON_HAS_METAL
+    bridge.metal_device = metal_ != nullptr ? metal_->device() : nullptr;
+#endif
     plugins_ = std::make_unique<PluginHost>(std::move(bridge));
   }
   return plugins_->LoadManifest(manifest, error);
@@ -560,7 +566,13 @@ size_t EngineHost::plugins_loaded() const {
 #endif
 }
 
-#if RACCOON_HAS_PLUGINS
+#if RACCOON_HAS_PLUGINS && RACCOON_HAS_METAL
+bool EngineHost::MetalExternalTexture(void* user_data, int64_t texture_id, size_t width,
+                                      size_t height, FlutterMetalExternalTexture* out) {
+  auto* host = static_cast<EngineHost*>(user_data);
+  return host->plugins_ && host->plugins_->PopulateTexture(texture_id, width, height, out);
+}
+#elif RACCOON_HAS_PLUGINS
 bool EngineHost::GlExternalTexture(void* user_data, int64_t texture_id, size_t width,
                                    size_t height, FlutterOpenGLTexture* out) {
   auto* host = static_cast<EngineHost*>(user_data);

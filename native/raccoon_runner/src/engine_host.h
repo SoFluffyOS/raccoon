@@ -186,8 +186,13 @@ class EngineHost {
   std::unordered_set<std::string> unanswered_;
 #if RACCOON_HAS_PLUGINS
   std::unique_ptr<PluginHost> plugins_;
+#if RACCOON_HAS_METAL
+  static bool MetalExternalTexture(void* user_data, int64_t texture_id, size_t width,
+                                   size_t height, FlutterMetalExternalTexture* out);
+#else
   static bool GlExternalTexture(void* user_data, int64_t texture_id, size_t width,
                                 size_t height, FlutterOpenGLTexture* out);
+#endif
 #endif
   std::function<void()> on_wake_;
   static void OnVsync(void* user_data, intptr_t baton);

@@ -54,7 +54,8 @@ void EventLoop::RunOnce(int timeout_ms) {
   for (const auto& [fd, watch] : watches_) fds.push_back({fd, watch.first, 0});
   const size_t own = fds.size();
   if (prepare_) prepare_(fds, timeout_ms);
-  const int ready = poll(fds.data(), fds.size(), timeout_ms);
+  const int ready = waiter_ ? waiter_(fds.data(), fds.size(), timeout_ms)
+                           : poll(fds.data(), fds.size(), timeout_ms);
   if (dispatch_) dispatch_(fds.data() + own, fds.size() - own);
   if (ready <= 0) return;
   if (fds[0].revents & POLLIN) {

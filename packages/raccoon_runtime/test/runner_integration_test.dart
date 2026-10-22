@@ -652,16 +652,36 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
-  // example/plugins/echo is a native plugin the runner's build compiles
-  // against its own flutter_linux library; example/plugins_app calls it.
+  // example/plugins/echo is a native plugin the runner's build compiles:
+  // against its own flutter_linux library on Linux, as a framework against
+  // the SDK's FlutterMacOS on macOS. example/plugins_app calls it.
   final pluginLibrary =
       binary == null
           ? ''
-          : p.join(
+          : p.joinAll([
             p.dirname(binary),
             'example_plugins',
             'echo',
-            'libraccoon_echo_plugin.so',
+            ...Platform.isMacOS
+                ? ['raccoon_echo.framework', 'raccoon_echo']
+                : ['libraccoon_echo_plugin.so'],
+          ]);
+  // macOS plugins link FlutterMacOS; the manifest names the SDK's, which
+  // the runner opens first.
+  final flutterFramework =
+      sdk == null || !Platform.isMacOS
+          ? null
+          : p.join(
+            sdk,
+            'bin',
+            'cache',
+            'artifacts',
+            'engine',
+            'darwin-x64',
+            'FlutterMacOS.xcframework',
+            'macos-arm64_x86_64',
+            'FlutterMacOS.framework',
+            'FlutterMacOS',
           );
   final pluginsAppAssets = p.join(
     p.dirname(p.dirname(p.dirname(assets))),
@@ -676,12 +696,9 @@ void main() {
       final manifest = File(p.join(temp.path, 'plugins.json'))
         ..writeAsStringSync(
           jsonEncode({
+            if (flutterFramework != null) 'flutter_framework': flutterFramework,
             'plugins': [
-              {
-                'name': 'raccoon_echo',
-                'library': pluginLibrary,
-                'symbol': 'raccoon_echo_plugin_register_with_registrar',
-              },
+              _pluginEntry('raccoon_echo', pluginLibrary, 'RaccoonEchoPlugin'),
             ],
           }),
         );
@@ -704,7 +721,8 @@ void main() {
             DateTime.now().isBefore(deadline)) {
           await Future<void>.delayed(const Duration(milliseconds: 100));
         }
-        // The plugin answers from a GLib idle callback: the runner pumps GLib.
+        // The plugin answers from GLib's main loop on Linux, the main queue on
+        // macOS: the runner turns the plugins' main loop.
         expect(output, contains('ECHO:echo: hello'));
       } finally {
         final client = await RunnerClient.connect(endpoint);
@@ -733,17 +751,14 @@ void main() {
       final manifest = File(p.join(temp.path, 'plugins.json'))
         ..writeAsStringSync(
           jsonEncode({
+            if (flutterFramework != null) 'flutter_framework': flutterFramework,
             'plugins': [
-              {
-                'name': 'raccoon_echo',
-                'library': pluginLibrary,
-                'symbol': 'raccoon_echo_plugin_register_with_registrar',
-              },
-              {
-                'name': 'nowhere',
-                'library': p.join(temp.path, 'libnowhere_plugin.so'),
-                'symbol': 'nowhere_plugin_register_with_registrar',
-              },
+              _pluginEntry('raccoon_echo', pluginLibrary, 'RaccoonEchoPlugin'),
+              _pluginEntry(
+                'nowhere',
+                p.join(temp.path, 'libnowhere_plugin.so'),
+                'NowherePlugin',
+              ),
             ],
             'status': [
               {
@@ -810,18 +825,16 @@ void main() {
     () async {
       // The echo plugin registers a 64 by 64 pixel-buffer texture, orange;
       // example/plugins_app draws it full screen. The frame a client reads
-      // back is then orange: the texture went through the GL renderer and
-      // the compositor. The software renderer takes no textures.
+      // back is then orange: the texture went through the GPU renderer (GL
+      // on Linux, Metal on macOS) and the compositor. The software renderer
+      // takes no textures.
       final temp = Directory.systemTemp.createTempSync('raccoon_test');
       final manifest = File(p.join(temp.path, 'plugins.json'))
         ..writeAsStringSync(
           jsonEncode({
+            if (flutterFramework != null) 'flutter_framework': flutterFramework,
             'plugins': [
-              {
-                'name': 'raccoon_echo',
-                'library': pluginLibrary,
-                'symbol': 'raccoon_echo_plugin_register_with_registrar',
-              },
+              _pluginEntry('raccoon_echo', pluginLibrary, 'RaccoonEchoPlugin'),
             ],
           }),
         );
@@ -846,11 +859,15 @@ void main() {
             DateTime.now().isBefore(deadline)) {
           await Future<void>.delayed(const Duration(milliseconds: 100));
         }
-        if (runner.renderer != 'gl') {
+        if (runner.renderer != 'gl' && runner.renderer != 'metal') {
           printOnFailure(
             'software renderer, no textures: ${output.join('\n')}',
           );
-          expect(output, contains(startsWith('TEXTURE:error')));
+          // Linux's registrar refuses the texture. FlutterMacOS's has no way
+          // to: the id comes back and nothing draws.
+          if (!Platform.isMacOS) {
+            expect(output, contains(startsWith('TEXTURE:error')));
+          }
           return;
         }
         expect(output, contains(startsWith('TEXTURE:')));
@@ -1324,6 +1341,22 @@ Uint8List _release(int generation, int index) {
   payload.buffer.asUint8List().setAll(0, 'RREL'.codeUnits);
   return MessageFraming.frame(payload.buffer.asUint8List());
 }
+
+/// A manifest entry for a plugin of [name] in [library]: registered by its
+/// `<name>_plugin_register_with_registrar` on Linux, by [pluginClass] on
+/// macOS.
+Map<String, String> _pluginEntry(
+  String name,
+  String library,
+  String pluginClass,
+) => {
+  'name': name,
+  'library': library,
+  if (Platform.isMacOS)
+    'class': pluginClass
+  else
+    'symbol': '${name}_plugin_register_with_registrar',
+};
 
 /// The SDK behind `FLUTTER_ROOT`, else behind the `flutter` on the PATH.
 String? _sdkRoot(Map<String, String> environment) {

@@ -26,6 +26,7 @@
 
 #include "engine_host.h"
 #include "glib_pump.h"
+#include "run_loop_pump.h"
 #include "event_loop.h"
 #include "flutter_embedder.h"
 #include "server.h"
@@ -212,14 +213,20 @@ int NextWait(raccoon::EngineHost& host, int cap) {
   return wait;
 }
 
-// Loads the plugins of |manifest|, if any, and keeps GLib pumped for them
+// What plugins' main loop is: GLib's on Linux, the main run loop on macOS.
+#if defined(__APPLE__)
+using PluginPump = raccoon::RunLoopPump;
+#else
+using PluginPump = raccoon::GlibPump;
+#endif
+
+// Loads the plugins of |manifest|, if any, and keeps their main loop turning
 // while the returned pump lives.
-std::unique_ptr<raccoon::GlibPump> LoadPlugins(raccoon::EngineHost& host,
-                                               raccoon::EventLoop& loop,
-                                               const std::string& manifest) {
+std::unique_ptr<PluginPump> LoadPlugins(raccoon::EngineHost& host, raccoon::EventLoop& loop,
+                                        const std::string& manifest) {
   if (manifest.empty()) return nullptr;
 #if RACCOON_HAS_PLUGINS
-  auto pump = std::make_unique<raccoon::GlibPump>(loop);
+  auto pump = std::make_unique<PluginPump>(loop);
   std::string error;
   if (!host.LoadPlugins(manifest, &error)) {
     std::fprintf(stderr, "raccoon_runner: plugins: %s\n", error.c_str());

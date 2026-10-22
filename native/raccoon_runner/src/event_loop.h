@@ -38,6 +38,12 @@ class EventLoop {
     prepare_ = std::move(prepare);
     dispatch_ = std::move(dispatch);
   }
+  // Waits on |fds| for up to |timeout_ms| (negative: no limit) and fills in
+  // their revents, as poll(2) would, which it replaces; returns how many are
+  // ready. Null for poll itself. For macOS, where the main run loop has to
+  // turn while the loop waits.
+  using Waiter = std::function<int(pollfd* fds, size_t count, int timeout_ms)>;
+  void SetWaiter(Waiter waiter) { waiter_ = std::move(waiter); }
 
  private:
   // The read and write ends of the wake descriptor: one eventfd on Linux, the
@@ -47,6 +53,7 @@ class EventLoop {
   std::unordered_map<int, std::pair<short, Handler>> watches_;
   Prepare prepare_;
   Dispatch dispatch_;
+  Waiter waiter_;
 };
 
 }  // namespace raccoon
