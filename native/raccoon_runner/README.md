@@ -115,6 +115,19 @@ Design notes: `docs/internal_docs/raccoon/`.
   run loop costs nothing at idle. The Objective-C runtime notes, once per
   run, the classes FlutterMacOS and the engine library both carry. FFI
   plugins are not loaded on macOS yet.
+- Builds native assets (packages with build hooks, such as `objective_c`
+  under `path_provider_foundation`) for macOS. The tool builds the bundle
+  for the Linux device it believes Raccoon to be, whose manifest names no
+  code assets for a Mac; `tool/raccoon-device install` runs the tool's
+  macOS bundle target for this machine (`flutter assemble ...
+  debug_macos_bundle_flutter_assets`, no `macos/` directory needed), puts
+  the code assets beside the app and names them by absolute path in the
+  installed `NativeAssetsManifest.json`, under the host's key. Only for
+  projects with hook packages: on an M1 Pro, 9 s the first time for a new
+  project, about a second after. Such an app runs in its own bundle too, so
+  `path_provider` names its directories after it
+  (`~/Library/Application Support/dev.raccoon.app.<app>`). On Linux the
+  hooks are not built yet.
 - Never leaves the app waiting on a plugin nobody serves. A channel no one
   answers gets an empty reply, which the app sees as
   `MissingPluginException` (Pigeon's `channel-error`), as on a desktop the

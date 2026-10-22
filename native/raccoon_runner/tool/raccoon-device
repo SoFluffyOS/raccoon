@@ -71,7 +71,9 @@ sdk_icu() {
 # symlink to it in <key>.app/Contents/MacOS beside an Info.plist, so the
 # process has a main bundle and an identifier, dev.raccoon.app.<key>. Some
 # plugins' APIs throw without one (UserNotifications, at registration), and
-# what they keep by identifier stays the app's. Prints the path to run.
+# what they keep by identifier stays the app's (path_provider's directories
+# are named after it). For an app with native plugins or native assets.
+# Prints the path to run.
 app_bundle() {
   local key="$1" bundle id
   bundle="$APPS/$key/$key.app/Contents"
@@ -654,6 +656,70 @@ print('raccoon-device: native plugins, ' + '; '.join(parts), file=sys.stderr)
 PY
 }
 
+# Code assets of packages with build hooks (native assets: objective_c
+# under path_provider_foundation, say), built for this host. The tool builds
+# the bundle for the Linux device it believes Raccoon to be (#1), so its
+# NativeAssetsManifest.json names none for this Mac. On macOS the tool's own
+# macOS bundle target runs the hooks for this machine without the app's
+# macos/ directory; the code assets land beside the app's bundle, and the
+# installed manifest names them by absolute path under this host's key, so
+# the engine opens them as an app's would. Skipped without hook packages.
+build_native_assets() {
+  local project="$1" app="$2" arch out log
+  [ "$(uname -s)" = Darwin ] || return 0
+  [ -f "$project/.dart_tool/package_config.json" ] || return 0
+  python3 - "$project/.dart_tool/package_config.json" <<'PY' || return 0
+import json, os, sys
+from urllib.parse import unquote, urlparse
+config = sys.argv[1]
+dart_tool = os.path.dirname(os.path.abspath(config))
+for package in json.load(open(config)).get('packages', []):
+    uri = package.get('rootUri', '')
+    root = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, uri))
+    if os.path.isfile(os.path.join(root, 'hook', 'build.dart')):
+        sys.exit(0)
+sys.exit(1)
+PY
+  if [ ! -f "$project/lib/main.dart" ]; then
+    echo "raccoon-device: native assets skipped: no lib/main.dart to build them with" >&2
+    return 0
+  fi
+  case "$(uname -m)" in
+    arm64) arch=arm64 ;;
+    *) arch=x86_64 ;;
+  esac
+  out="$project/build/raccoon/native_assets"
+  log="$app/native_assets.log"
+  mkdir -p "$out"
+  if ! (cd "$project" && "$(sdk_root)/bin/flutter" assemble --no-version-check \
+        -dTargetPlatform=darwin -dDarwinArchs="$arch" -dBuildMode=debug \
+        -dTargetFile=lib/main.dart --output="$out" \
+        debug_macos_bundle_flutter_assets) > "$log" 2>&1; then
+    echo "raccoon-device: native assets did not build; see $log" >&2
+    return 0
+  fi
+  python3 - "$out" "$app" <<'PY'
+import json, os, shutil, sys
+out, app = sys.argv[1:3]
+manifest = json.load(open(os.path.join(out, 'App.framework', 'Resources', 'flutter_assets', 'NativeAssetsManifest.json')))
+built = os.path.join(out, 'native_assets')
+installed = os.path.join(app, 'native_assets')
+shutil.rmtree(installed, ignore_errors=True)
+if os.path.isdir(built):
+    shutil.copytree(built, installed, symlinks=True)
+count = 0
+for assets in manifest.get('native-assets', {}).values():
+    for asset, path in assets.items():
+        # A framework or library the build installed: by absolute path from
+        # where it now is. System and process lookups stay as they are.
+        if len(path) == 2 and path[0] == 'absolute' and not os.path.isabs(path[1]):
+            assets[asset] = ['absolute', os.path.join(installed, path[1])]
+        count += 1
+json.dump(manifest, open(os.path.join(app, 'flutter_assets', 'NativeAssetsManifest.json'), 'w'))
+print('raccoon-device: native assets, %d for this host' % count, file=sys.stderr)
+PY
+}
+
 case "$verb" in
   ping)
     test -x "$RUNNER"
@@ -683,6 +749,7 @@ case "$verb" in
     # The project is two levels above its bundle; its native plugins are
     # built for this host and loaded into the runner.
     build_plugins "$(cd "$local_path/../.." && pwd)" "$APPS/$key/plugins"
+    build_native_assets "$(cd "$local_path/../.." && pwd)" "$APPS/$key"
     ;;
   uninstall)
     rm -rf "$APPS/$(app_key "$1")"
@@ -707,7 +774,7 @@ case "$verb" in
       export LD_LIBRARY_PATH="$APPS/$key/plugins/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     fi
     binary="$RUNNER"
-    if [ -n "$manifest" ] && [ "$(uname -s)" = Darwin ]; then
+    if [ "$(uname -s)" = Darwin ] && { [ -n "$manifest" ] || [ -d "$APPS/$key/native_assets" ]; }; then
       binary="$(app_bundle "$key")"
     fi
     # The runner is this script's child rather than its replacement, so a
