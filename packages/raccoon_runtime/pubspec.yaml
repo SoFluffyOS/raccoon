@@ -3,7 +3,7 @@ description: Host side of the Raccoon runtime for Lumide. Runtime store, runner 
 publish_to: "none"
 
 environment:
-  sdk: ^3.10.0
+  sdk: ^3.6.0
 
 resolution: workspace
 
