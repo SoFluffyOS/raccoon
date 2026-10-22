@@ -1,6 +1,6 @@
 ## 0.5.0
 
-- `GpuBuffers`: a ring of exported GPU buffers (DRM dmabufs) the engine draws into; their descriptors are served on the runner's GPU socket.
+- `GpuBuffers`: a ring of exported GPU buffers the engine draws into (DRM dmabufs on Linux, IOSurfaces on macOS); what imports them, descriptors or surface IDs, is served on the runner's GPU socket.
 - `Frame.in_gpu_buffer` and `gpu_generation`: a frame as a buffer index, no pixels.
 - `ClientHello.gpu_buffers`: the client imports them. `ReleaseBuffer.generation`.
 
