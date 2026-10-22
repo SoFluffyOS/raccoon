@@ -9,6 +9,7 @@
 #include <sys/prctl.h>
 #endif
 
+#include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -16,6 +17,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "engine_host.h"
@@ -42,6 +44,12 @@ struct Options {
   // A manifest of native plugins to load (see plugins.h), or empty.
   std::string plugins;
 };
+
+// How long the client may take to answer a platform message before the app
+// gets "no plugin" instead: a reply that never comes must not hang it.
+constexpr auto kReplyTimeout = std::chrono::seconds(5);
+const std::string kNoReplyWhy =
+    "the client did not answer in " + std::to_string(kReplyTimeout.count()) + " s";
 
 constexpr uint32_t kProtocolVersion = 1;
 constexpr raccoon::v1::PixelFormat kPixelFormat =
@@ -406,15 +414,21 @@ int Serve(const Options& options) {
     field->set_obscure(state.obscure);
     server_ptr->Send(message);
   };
-  // Platform messages waiting for the client's answer, by response id.
-  std::unordered_map<uint64_t, const FlutterPlatformMessageResponseHandle*> pending;
+  // Platform messages waiting for the client's answer, by response id,
+  // with when the app gets "no plugin" instead.
+  struct Pending {
+    const FlutterPlatformMessageResponseHandle* handle;
+    std::string channel;
+    std::chrono::steady_clock::time_point deadline;
+  };
+  std::unordered_map<uint64_t, Pending> pending;
   uint64_t next_response_id = 1;
 
   host.SetPlatformMessageCallback(
       [&](const std::string& channel, const uint8_t* data, size_t size,
           const FlutterPlatformMessageResponseHandle* handle) {
         if (server_ptr == nullptr || !server_ptr->has_client()) {
-          host.Respond(handle, nullptr, 0);
+          host.RespondNoPlugin(channel, handle, "no client");
           return;
         }
         raccoon::v1::RunnerMessage message;
@@ -423,14 +437,31 @@ int Serve(const Options& options) {
         out->set_data(data, size);
         if (handle != nullptr) {
           const uint64_t id = next_response_id++;
-          pending[id] = handle;
+          pending[id] = {handle, channel, std::chrono::steady_clock::now() + kReplyTimeout};
           out->set_response_id(id);
         }
         if (!server_ptr->Send(message) && handle != nullptr) {
           pending.erase(out->response_id());
-          host.Respond(handle, nullptr, 0);
+          host.RespondNoPlugin(channel, handle, "no client");
         }
       });
+  // Answers what the client left too long; how long the loop may sleep
+  // before the next one is due, at most |cap|.
+  auto ExpireReplies = [&](int cap) {
+    const auto now = std::chrono::steady_clock::now();
+    int wait = cap;
+    for (auto it = pending.begin(); it != pending.end();) {
+      if (it->second.deadline <= now) {
+        host.RespondNoPlugin(it->second.channel, it->second.handle, kNoReplyWhy.c_str());
+        it = pending.erase(it);
+        continue;
+      }
+      const long left = MillisBetween(now, it->second.deadline) + 1;
+      if (left < wait) wait = static_cast<int>(left);
+      ++it;
+    }
+    return wait;
+  };
 
   raccoon::RunnerServer::Handler handler;
   handler.on_resize = [&host](const raccoon::v1::Resize& resize) {
@@ -499,14 +530,14 @@ int Serve(const Options& options) {
   handler.on_platform_response = [&](const raccoon::v1::PlatformResponse& response) {
     const auto found = pending.find(response.response_id());
     if (found == pending.end()) return;
-    const FlutterPlatformMessageResponseHandle* handle = found->second;
+    const Pending waiting = std::move(found->second);
     pending.erase(found);
     if (response.handled()) {
-      host.Respond(handle,
+      host.Respond(waiting.handle,
                    reinterpret_cast<const uint8_t*>(response.data().data()),
                    response.data().size());
     } else {
-      host.Respond(handle, nullptr, 0);
+      host.RespondNoPlugin(waiting.channel, waiting.handle, "the client has no handler");
     }
   };
   handler.on_client_connected = [&] {
@@ -521,7 +552,9 @@ int Serve(const Options& options) {
   handler.on_client_disconnected = [&] {
     host.text_input().SetComposer(false);
     // Nobody will answer these now; let the app see "no plugin".
-    for (const auto& [id, handle] : pending) host.Respond(handle, nullptr, 0);
+    for (const auto& [id, waiting] : pending) {
+      host.RespondNoPlugin(waiting.channel, waiting.handle, "the client went away");
+    }
     pending.clear();
     host.frame().SetSharedPool(nullptr);
     pool.reset();
@@ -681,7 +714,7 @@ int Serve(const Options& options) {
                    static_cast<int>(parent));
       stop = true;
     }
-    loop.RunOnce(NextWait(host, 1000));
+    loop.RunOnce(NextWait(host, ExpireReplies(1000)));
   }
 
   if (server.has_client()) {

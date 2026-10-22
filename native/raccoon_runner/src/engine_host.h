@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "engine_loader.h"
@@ -72,6 +73,16 @@ class EngineHost {
   // Answers a platform message; |data| may be null for "not handled".
   void Respond(const FlutterPlatformMessageResponseHandle* handle,
                const uint8_t* data, size_t size);
+  // Answers with nothing, which the app sees as no plugin
+  // (MissingPluginException, or Pigeon's channel-error), and says so on
+  // stderr the first time |channel| goes unanswered for |why|:
+  // "raccoon_runner: nothing answered CHANNEL (WHY); the app sees no
+  // plugin". Hosts and the tool's output name the channel from that line.
+  // A message that expects no reply (|handle| null) is let go quietly, and
+  // so are the engine's own flutter/ channels.
+  void RespondNoPlugin(const std::string& channel,
+                       const FlutterPlatformMessageResponseHandle* handle,
+                       const char* why);
 
   // Loads the native plugins of a manifest (see plugins.h); their channels
   // are answered before a client sees them. After Start. False, with why,
@@ -171,6 +182,8 @@ class EngineHost {
   FLUTTER_API_SYMBOL(FlutterEngine) engine_ = nullptr;
   LogCallback on_log_;
   PlatformMessageCallback on_platform_message_;
+  // What RespondNoPlugin has logged, why and channel, so each is said once.
+  std::unordered_set<std::string> unanswered_;
 #if RACCOON_HAS_PLUGINS
   std::unique_ptr<PluginHost> plugins_;
   static bool GlExternalTexture(void* user_data, int64_t texture_id, size_t width,

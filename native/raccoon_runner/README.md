@@ -83,6 +83,15 @@ Design notes: `docs/internal_docs/raccoon/`.
   window plugins (`desktop_window`, `window_manager`, `window_size`,
   `screen_retriever`) stay the runner's own, above. `example/plugins/echo`
   is a plugin as the template makes one; `example/plugins_app` calls it.
+- Never leaves the app waiting on a plugin nobody serves. A channel no one
+  answers gets an empty reply, which the app sees as
+  `MissingPluginException` (Pigeon's `channel-error`), as on a desktop the
+  plugin does not support; the first time a channel goes unanswered, for
+  each reason, stderr says `raccoon_runner: nothing answered CHANNEL
+  (WHY); the app sees no plugin`. The engine's own `flutter/` channels are
+  left out: a null reply there is normal. A message the client takes and
+  does not answer within 5 seconds gets the same empty reply. No plugin is
+  faked: a made-up success would break Pigeon plugins worse.
 - `render`: writes one frame to a PPM file, for tests and a quick look.
 - `tool/raccoon-device`: ping, install, uninstall and run for the Flutter
   tool's custom device, so a stock `flutter run -d raccoon` works.

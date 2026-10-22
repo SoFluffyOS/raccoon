@@ -1,6 +1,7 @@
 #include "engine_host.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <nlohmann/json.hpp>
 #include <unistd.h>
@@ -464,6 +465,20 @@ void EngineHost::Respond(const FlutterPlatformMessageResponseHandle* handle,
   loader_.procs().SendPlatformMessageResponse(engine_, handle, data, size);
 }
 
+void EngineHost::RespondNoPlugin(const std::string& channel,
+                                 const FlutterPlatformMessageResponseHandle* handle,
+                                 const char* why) {
+  if (handle == nullptr) return;
+  Respond(handle, nullptr, 0);
+  // The engine's own channels (flutter/keyboard, flutter/platform, ...) are
+  // the embedder's to answer, and the framework takes a null reply there
+  // as "this host does not do that": nothing failed, nothing to say.
+  if (channel.rfind("flutter/", 0) == 0) return;
+  if (!unanswered_.insert(std::string(why) + '\n' + channel).second) return;
+  std::fprintf(stderr, "raccoon_runner: nothing answered %s (%s); the app sees no plugin\n",
+               channel.c_str(), why);
+}
+
 void EngineHost::OnPlatformMessage(const FlutterPlatformMessage* message,
                                    void* user_data) {
   auto* host = static_cast<EngineHost*>(user_data);
@@ -494,7 +509,7 @@ void EngineHost::OnPlatformMessage(const FlutterPlatformMessage* message,
                                message->response_handle);
     return;
   }
-  host->Respond(message->response_handle, nullptr, 0);
+  host->RespondNoPlugin(channel, message->response_handle, "no handler");
 }
 
 bool EngineHost::LoadPlugins(const std::string& manifest, std::string* error) {
