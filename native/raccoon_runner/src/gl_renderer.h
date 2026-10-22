@@ -84,6 +84,9 @@ class GlRenderer {
   }
   // The current set, false when the pool is off or not yet built.
   bool pool_set(GpuBufferSet* out) const;
+  // Whether the next frame has a pool buffer to go into: true as well when
+  // there is no pool, or none built yet.
+  bool HasFreeBuffer() const;
   // The client is done with the buffer; a stale generation is ignored.
   // |fence_fd|, when not -1, is signalled once the client's last use of the
   // buffer is done; the renderer owns it from here.

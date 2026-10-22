@@ -245,6 +245,15 @@ bool GlRenderer::pool_set(GpuBufferSet* out) const {
   return true;
 }
 
+bool GlRenderer::HasFreeBuffer() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!pool_wanted_ || pool_.empty()) return true;
+  for (const Buffer& buffer : pool_) {
+    if (!buffer.busy) return true;
+  }
+  return false;
+}
+
 void GlRenderer::Release(uint32_t generation, int index, int fence_fd) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (generation != generation_ || index < 0 ||

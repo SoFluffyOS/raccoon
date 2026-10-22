@@ -1,5 +1,6 @@
 #include "engine_host.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <nlohmann/json.hpp>
 #include <unistd.h>
@@ -108,6 +109,7 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   args.log_tag = "raccoon";
   args.custom_task_runners = &runners_;
   args.platform_message_callback = OnPlatformMessage;
+  args.vsync_callback = OnVsync;
 
   started_ = std::chrono::steady_clock::now();
   const FlutterEngineResult result =
@@ -217,6 +219,59 @@ void EngineHost::ReleaseGpuBuffer(uint32_t generation, int index, int fence_fd) 
   (void)index;
 #endif
   if (fence_fd >= 0) close(fence_fd);
+}
+
+namespace {
+constexpr uint64_t kFrameNanos = 16666667;  // 60 Hz
+// How long a frame waits for a ring buffer before going by readback.
+constexpr uint64_t kRingHoldNanos = 100000000;
+}  // namespace
+
+void EngineHost::OnVsync(void* user_data, intptr_t baton) {
+  auto* host = static_cast<EngineHost*>(user_data);
+  {
+    std::lock_guard<std::mutex> lock(host->vsync_mutex_);
+    host->vsync_pending_ = true;
+    host->vsync_baton_ = baton;
+    host->vsync_asked_nanos_ = host->loader_.procs().GetCurrentTime();
+  }
+  if (host->on_wake_) host->on_wake_();
+}
+
+void EngineHost::ServiceVsync() {
+  intptr_t baton = 0;
+  uint64_t start = 0;
+  {
+    std::lock_guard<std::mutex> lock(vsync_mutex_);
+    if (!vsync_pending_ || engine_ == nullptr) return;
+    const uint64_t now = loader_.procs().GetCurrentTime();
+    if (now < next_frame_nanos_) return;
+    bool free = true;
+#if RACCOON_HAS_GL
+    if (gl_) free = gl_->HasFreeBuffer();
+#endif
+    if (!free && now - vsync_asked_nanos_ < kRingHoldNanos) return;
+    vsync_pending_ = false;
+    baton = vsync_baton_;
+    start = now;
+    next_frame_nanos_ = now + kFrameNanos;
+  }
+  loader_.procs().OnVsync(engine_, baton, start, start + kFrameNanos);
+}
+
+int EngineHost::MillisUntilVsync() const {
+  std::lock_guard<std::mutex> lock(vsync_mutex_);
+  if (!vsync_pending_ || engine_ == nullptr) return -1;
+  const uint64_t now = loader_.procs().GetCurrentTime();
+  uint64_t due = next_frame_nanos_;
+  bool free = true;
+#if RACCOON_HAS_GL
+  if (gl_) free = gl_->HasFreeBuffer();
+#endif
+  // A release wakes the loop sooner; this is only the cap.
+  if (!free) due = std::max(due, vsync_asked_nanos_ + kRingHoldNanos);
+  if (due <= now) return 0;
+  return static_cast<int>((due - now + 999999) / 1000000);
 }
 
 void EngineHost::ReleaseAllGpuBuffers() {

@@ -93,6 +93,13 @@ class EngineHost {
 
   // Microseconds on the engine's clock.
   uint64_t NowMicros() const { return loader_.procs().GetCurrentTime() / 1000; }
+  // The engine asks for each frame; this answers when the frame is due, at
+  // 60 Hz, and with a GPU ring only once a buffer is free, up to a cap.
+  // From the loop thread, every iteration.
+  void ServiceVsync();
+  // Milliseconds until ServiceVsync has something to do: -1 when the engine
+  // has not asked, 0 when it is due.
+  int MillisUntilVsync() const;
 
   // The VM service URI once the engine announced it, else empty.
   std::string vm_service_uri() const;
@@ -150,6 +157,13 @@ class EngineHost {
   LogCallback on_log_;
   PlatformMessageCallback on_platform_message_;
   std::function<void()> on_wake_;
+  static void OnVsync(void* user_data, intptr_t baton);
+  mutable std::mutex vsync_mutex_;
+  bool vsync_pending_ = false;
+  intptr_t vsync_baton_ = 0;
+  // When the engine asked, and when the next frame is due (0: now).
+  uint64_t vsync_asked_nanos_ = 0;
+  uint64_t next_frame_nanos_ = 0;
   std::chrono::steady_clock::time_point started_;
   std::string assets_;
   std::string icu_;

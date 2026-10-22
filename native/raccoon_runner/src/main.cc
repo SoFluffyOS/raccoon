@@ -125,6 +125,16 @@ std::string GpuSocketPath(const std::string& socket) {
   return socket + ".gpu";
 }
 
+// How long the loop may sleep: until the next platform task or frame, at
+// most |cap| milliseconds.
+int NextWait(raccoon::EngineHost& host, int cap) {
+  int wait = cap;
+  for (int next : {host.platform().MillisUntilNextTask(), host.MillisUntilVsync()}) {
+    if (next >= 0 && next < wait) wait = next;
+  }
+  return wait;
+}
+
 uint32_t Read32(const uint8_t* at) {
   return static_cast<uint32_t>(at[0]) | (static_cast<uint32_t>(at[1]) << 8) |
          (static_cast<uint32_t>(at[2]) << 16) | (static_cast<uint32_t>(at[3]) << 24);
@@ -257,6 +267,7 @@ int Render(const Options& options) {
   while (host.frame().FrameCount() < options.frames &&
          std::chrono::steady_clock::now() < deadline) {
     host.platform().RunDueTasks();
+    host.ServiceVsync();
     if (!reported_first && host.frame().FrameCount() > 0) {
       reported_first = true;
       std::fprintf(stderr, "raccoon_runner: first frame after %ld ms\n",
@@ -266,9 +277,8 @@ int Render(const Options& options) {
     const long remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
                                deadline - std::chrono::steady_clock::now())
                                .count();
-    const int next_task = host.platform().MillisUntilNextTask();
     const int cap = static_cast<int>(remaining < 0 ? 0 : remaining);
-    loop.RunOnce(next_task < 0 || next_task > cap ? cap : next_task);
+    loop.RunOnce(NextWait(host, cap));
   }
   std::fprintf(stderr, "raccoon_runner: %zu frames presented, %zux%zu\n",
                host.frame().FrameCount(), host.frame().width(),
@@ -500,6 +510,7 @@ int Serve(const Options& options) {
 
   while (!stop && g_stop == 0) {
     host.platform().RunDueTasks();
+    host.ServiceVsync();
     if (server.has_client()) {
       if (!vm_sent) {
         const std::string uri = host.vm_service_uri();
@@ -606,8 +617,7 @@ int Serve(const Options& options) {
                    static_cast<int>(parent));
       stop = true;
     }
-    const int next_task = host.platform().MillisUntilNextTask();
-    loop.RunOnce(next_task < 0 || next_task > 1000 ? 1000 : next_task);
+    loop.RunOnce(NextWait(host, 1000));
   }
 
   if (server.has_client()) {
