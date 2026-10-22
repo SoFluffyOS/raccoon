@@ -60,6 +60,25 @@ Design notes: `docs/internal_docs/raccoon/`.
   `RACCOON_TRACE=1` traces every frame's buffer. On Linux, built when `egl`
   and `glesv2` are found by pkg-config (`libegl1-mesa-dev
   libgles2-mesa-dev` on Debian).
+- Loads the project's native plugins on Linux, instead of answering their
+  channels itself. A plugin binary links against `libflutter_linux_gtk.so`;
+  the runner ships one of its own with the plugin-facing half of Flutter's
+  Linux embedding vendored (`third_party/flutter_linux`: `FlValue`, the
+  codecs and channels, the messenger, registrar and texture interfaces),
+  and behind it the engine is this runner. `--plugins MANIFEST` names the
+  libraries and their register symbols; `tool/raccoon-device install`
+  writes that manifest after building the plugins the project resolves
+  (`.dart_tool/package_config.json`, every package with a Linux
+  `pluginClass`) in one CMake project with what the desktop template gives
+  a plugin, and `run` passes it. Needs cmake, ninja, pkg-config and the
+  GTK development files, as the desktop target does; without them, or
+  when a plugin fails to build, it says so and the app sees no plugin. A
+  loaded plugin's channels are answered before a client sees them, GLib's
+  main context is pumped from the runner's loop, and a plugin's textures
+  draw through the GL renderer. The registrar hands out no view: the
+  window plugins (`desktop_window`, `window_manager`, `window_size`,
+  `screen_retriever`) stay the runner's own, above. `example/plugins/echo`
+  is a plugin as the template makes one; `example/plugins_app` calls it.
 - `render`: writes one frame to a PPM file, for tests and a quick look.
 - `tool/raccoon-device`: ping, install, uninstall and run for the Flutter
   tool's custom device, so a stock `flutter run -d raccoon` works.
