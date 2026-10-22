@@ -29,6 +29,10 @@ Design notes: `docs/internal_docs/raccoon/`.
   - `shared_preferences_foundation`, which a Mac host's Dart VM picks (it
     reports macOS), kept in `--data-dir` when given (`tool/raccoon-device`
     passes one per app), in memory otherwise.
+  On Linux the app's Dart VM picks the Dart-only `path_provider_linux` and
+  `shared_preferences_linux`, which name their directories after the
+  executable: with `--data-dir` the runner points `XDG_DATA_HOME` and
+  `XDG_CACHE_HOME` into it, so apps do not share one.
   `example/channels` checks the answers.
 - Delivers keys the way the framework expects: the key data, then the
   legacy `flutter/keyevent` message it waits for before dispatching. Without
