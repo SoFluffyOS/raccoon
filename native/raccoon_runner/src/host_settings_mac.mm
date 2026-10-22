@@ -13,10 +13,11 @@ HostSettings ReadHostSettings() {
       HostLocale locale = ParseLocale(tag.UTF8String);
       if (!locale.language.empty()) settings.locales.push_back(locale);
     }
-    // Set to "Dark" while the system is dark, "Auto" included; absent when
-    // light. No application is needed to read it.
+    // Set to "Dark" while the system is dark, "Auto" included, and absent
+    // when light; no application is needed to read it. A message to nil
+    // answers 0, which is NSOrderedSame: the key has to be there.
     NSString* style = [[NSUserDefaults standardUserDefaults] stringForKey:@"AppleInterfaceStyle"];
-    settings.dark = [style caseInsensitiveCompare:@"Dark"] == NSOrderedSame;
+    settings.dark = style != nil && [style caseInsensitiveCompare:@"Dark"] == NSOrderedSame;
     // The hour cycle of the user's locale, their 24-hour switch included.
     NSString* hours = [NSDateFormatter dateFormatFromTemplate:@"j"
                                                       options:0
