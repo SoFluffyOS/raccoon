@@ -139,7 +139,7 @@ void main() {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        expect(await _exitCode(runner), 0);
         temp.deleteSync(recursive: true);
       }
     },
@@ -197,7 +197,7 @@ void main() {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        expect(await _exitCode(runner), 0);
         temp.deleteSync(recursive: true);
       }
     },
@@ -251,7 +251,7 @@ void main() {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        expect(await _exitCode(runner), 0);
         temp.deleteSync(recursive: true);
       }
     },
@@ -311,7 +311,7 @@ void main() {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        expect(await _exitCode(runner), 0);
         temp.deleteSync(recursive: true);
       }
     },
@@ -389,7 +389,7 @@ void main() {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        expect(await _exitCode(runner), 0);
         temp.deleteSync(recursive: true);
       }
     },
@@ -443,7 +443,7 @@ void main() {
       } finally {
         first.shutdown();
         await first.close();
-        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        expect(await _exitCode(runner), 0);
         temp.deleteSync(recursive: true);
       }
     },
@@ -586,7 +586,7 @@ void main() {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        expect(await _exitCode(runner), 0);
         temp.deleteSync(recursive: true);
       }
     },
@@ -641,7 +641,7 @@ void main() {
         final client = await RunnerClient.connect(endpoint);
         client.shutdown();
         await client.close();
-        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        expect(await _exitCode(runner), 0);
         temp.deleteSync(recursive: true);
       }
     },
@@ -728,7 +728,7 @@ void main() {
         final client = await RunnerClient.connect(endpoint);
         client.shutdown();
         await client.close();
-        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        expect(await _exitCode(runner), 0);
         temp.deleteSync(recursive: true);
       }
     },
@@ -777,7 +777,7 @@ void main() {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        expect(await _exitCode(runner), 0);
         temp.deleteSync(recursive: true);
       }
     },
@@ -858,7 +858,7 @@ void main() {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        expect(await _exitCode(runner), 0);
         temp.deleteSync(recursive: true);
       }
     },
@@ -931,7 +931,7 @@ void main() {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        expect(await _exitCode(runner), 0);
         temp.deleteSync(recursive: true);
       }
     },
@@ -1142,7 +1142,7 @@ void main() {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        expect(await _exitCode(runner), 0);
         temp.deleteSync(recursive: true);
       }
     },
@@ -1229,7 +1229,7 @@ void main() {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        expect(await _exitCode(runner), 0);
         temp.deleteSync(recursive: true);
       }
     },
@@ -1278,7 +1278,7 @@ void main() {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        expect(await _exitCode(runner), 0);
         temp.deleteSync(recursive: true);
       }
     },
@@ -1369,7 +1369,7 @@ void main() {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        expect(await _exitCode(runner), 0);
         temp.deleteSync(recursive: true);
       }
     },
@@ -1391,6 +1391,33 @@ Uint8List _release(int generation, int index) {
         ..setUint32(12, 0, Endian.little);
   payload.buffer.asUint8List().setAll(0, 'RREL'.codeUnits);
   return MessageFraming.frame(payload.buffer.asUint8List());
+}
+
+/// The runner's exit code, waiting up to 10 s. One still running by then has
+/// its threads sampled into the failure (macOS's `sample`) and is killed, so
+/// a hang on CI says where it was.
+Future<int?> _exitCode(RunnerProcess runner) async {
+  try {
+    return await runner.exitCode.timeout(const Duration(seconds: 10));
+  } on TimeoutException {
+    if (Platform.isMacOS) {
+      final report = p.join(
+        Directory.systemTemp.path,
+        'runner-${runner.pid}.sample',
+      );
+      final sampled = await Process.run('sample', [
+        '${runner.pid}',
+        '2',
+        '-file',
+        report,
+      ]);
+      printOnFailure(
+        'the runner did not exit; its threads:\n${sampled.stdout}',
+      );
+    }
+    runner.kill();
+    return null;
+  }
 }
 
 /// A manifest entry for a plugin of [name] in [library]: registered by its
