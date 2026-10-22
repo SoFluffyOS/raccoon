@@ -397,7 +397,8 @@ PY
 # target, so it needs no Xcode project of the app's or its own), then
 # each plugin's pod target on its own, so one that fails sinks nothing else;
 # its framework and those of the pods it depends on are cached by plugin
-# version, runner version, engine and architecture. Every framework lands
+# version, runner version, engine and architecture, and what the release
+# prebuilt comes from its archive, fetched once. Every framework lands
 # flat in |out|/frameworks, where they find each other by @loader_path; the
 # manifest names the SDK's FlutterMacOS for the runner to open first.
 build_plugins_macos() {
@@ -407,11 +408,12 @@ build_plugins_macos() {
   version="$(tr -d '[:space:]' < "$ROOT/VERSION")"
   cache="${RACCOON_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/$engine}"
   python3 - "$project/.dart_tool/package_config.json" "$out" "$VIRTUAL_PLUGINS_MACOS" \
-    "$cache" "$version" "$(uname -m)" "$sdk/bin/cache/artifacts/engine/darwin-x64" <<'PY'
-import hashlib, json, os, re, shutil, subprocess, sys
+    "$cache" "$version" "$(uname -m)" "$sdk/bin/cache/artifacts/engine/darwin-x64" \
+    "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-$engine-macos-$(uname -m).tar.gz}" <<'PY'
+import hashlib, json, os, re, shutil, subprocess, sys, tarfile, urllib.request
 from urllib.parse import unquote, urlparse
 
-config, out, virtual, cache, runner_version, arch, engine_dir = sys.argv[1:8]
+config, out, virtual, cache, runner_version, arch, engine_dir, prebuilt_url = sys.argv[1:9]
 virtual = set(virtual.split())
 dart_tool = os.path.dirname(os.path.abspath(config))
 # The framework the pods link against, as the SDK's local podspec vends it.
@@ -475,8 +477,38 @@ def dependencies(pubspec):
     return names
 
 
+def fetch_prebuilt():
+    """The release's prebuilt plugins into the cache, once per runner version
+    and engine; a marker remembers a miss so it is not asked again."""
+    if os.environ.get('RACCOON_NO_PREBUILT'):
+        return
+    marker = os.path.join(cache, 'prebuilt-%s-macos.done' % runner_version)
+    if os.path.exists(marker):
+        return
+    os.makedirs(cache, exist_ok=True)
+    try:
+        archive = os.path.join(cache, 'prebuilt-%s.tar.gz' % runner_version)
+        urllib.request.urlretrieve(prebuilt_url, archive)
+        with tarfile.open(archive) as tar:
+            # Frameworks, with their symlinks; nothing that would land or
+            # point outside the cache.
+            if hasattr(tarfile, 'data_filter'):
+                tar.extractall(cache, filter='data')
+            else:
+                members = [m for m in tar.getmembers()
+                           if not m.name.startswith('/') and '..' not in m.name.split('/')
+                           and not (m.issym() and (m.linkname.startswith('/') or '..' in m.linkname.split('/')[:-1]))]
+                tar.extractall(cache, members=members)
+        os.remove(archive)
+        print('raccoon-device: prebuilt plugins fetched for runner %s' % runner_version, file=sys.stderr)
+    except Exception:
+        pass  # no archive for this version, or no network: build here instead
+    open(marker, 'w').close()
+
+
 def frameworks(directory):
-    return sorted(f for f in os.listdir(directory) if f.endswith('.framework')) if os.path.isdir(directory) else []
+    return sorted(f for f in os.listdir(directory)
+                  if f.endswith('.framework') and not f.startswith('._')) if os.path.isdir(directory) else []
 
 
 wanted = []
@@ -540,6 +572,9 @@ if not wanted and not status:
 os.makedirs(os.path.join(out, 'frameworks'), exist_ok=True)
 built, failed, empty, from_cache = [], [], [], []
 misses = [p for p in wanted if not frameworks(os.path.join(cache, p['key']))]
+if misses:
+    fetch_prebuilt()
+    misses = [p for p in wanted if not frameworks(os.path.join(cache, p['key']))]
 broken = {}  # name: why, for the misses that did not build
 if misses:
     toolchain = can_build()
@@ -736,8 +771,10 @@ case "$verb" in
     RACCOON_PLUGIN_CACHE="$stage/cache" RACCOON_NO_PREBUILT=1 build_plugins "$(cd "$project" && pwd)" "$stage/out"
     mkdir -p "$(dirname "$archive")"
     if [ -d "$stage/cache" ]; then
-      tar -C "$stage/cache" -czf "$archive" .
-      echo "raccoon-device: $(find "$stage/cache" -name '*.so' | wc -l) libraries in $archive"
+      # No AppleDouble ._ files for extended attributes: macOS's tar adds
+      # them, and they are no frameworks.
+      COPYFILE_DISABLE=1 tar -C "$stage/cache" -czf "$archive" .
+      echo "raccoon-device: $(find "$stage/cache" \( -name '*.so' -o -name '*.framework' \) -prune | wc -l | tr -d ' ') libraries in $archive"
     else
       echo "raccoon-device: nothing prebuilt" >&2
     fi

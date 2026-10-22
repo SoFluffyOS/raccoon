@@ -78,13 +78,21 @@ jobs:
 
       - name: Package
         run: tool/package.sh dist
-      # The common plugins, built against this archive's library, in the
-      # cache's layout: an install fetches it once and copies.
+      # FlutterMacOS, which the macOS plugin pods build against.
+      - name: Precache the macOS artifacts
+        if: runner.os == 'macOS'
+        run: flutter precache --macos
+      # The common plugins, built against this archive's library (Linux) or
+      # the SDK's FlutterMacOS (macOS), in the cache's layout: an install
+      # fetches it once and copies.
       - name: Prebuild the common plugins
-        if: runner.os == 'Linux'
         run: |
           ENGINE="$(basename "$(dirname "$(tool/engine_dir.sh)")")"
-          tool/raccoon-device prebuild tool/plugins "dist/plugins-$ENGINE-linux-$(uname -m).tar.gz"
+          case "$(uname -s)" in
+            Darwin) HOST=macos ;;
+            *) HOST=linux ;;
+          esac
+          tool/raccoon-device prebuild tool/plugins "dist/plugins-$ENGINE-$HOST-$(uname -m).tar.gz"
 
       - uses: actions/upload-artifact@v6
         with:

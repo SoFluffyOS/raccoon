@@ -96,7 +96,10 @@ Design notes: `docs/internal_docs/raccoon/`.
   `darwin/`) as CocoaPods does for a macOS app, but without the app's Xcode
   project: one scratch Pods project for what the cache misses, every pod
   a dynamic framework, each plugin's target built on its own. Needs Xcode
-  and CocoaPods, as the macOS target does; cached the same way as on Linux.
+  and CocoaPods, as the macOS target does; cached the same way as on Linux,
+  and a release's archive of the common plugins (both Mac architectures)
+  drops into that cache on the first install: the fifteen of `tool/plugins`
+  in under a second instead of 2 min.
   `run` starts the runner of an app with plugins through a bundle of the
   app's own (`<app>.app`, identifier `dev.raccoon.app.<app>`, a symlink to
   the runner), because some of Apple's APIs throw without one. While
