@@ -95,13 +95,13 @@ final class RaccoonBoardFrame {
       );
 
   Map<String, Object?> toJson() => {
-    'name': name,
-    'x': position.dx,
-    'y': position.dy,
-    'width': size.width,
-    'height': size.height,
-    'pixelRatio': pixelRatio,
-  };
+        'name': name,
+        'x': position.dx,
+        'y': position.dy,
+        'width': size.width,
+        'height': size.height,
+        'pixelRatio': pixelRatio,
+      };
 }
 
 /// Where every device sits on the board and how big it is. A host keeps it
@@ -335,15 +335,15 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
               minHeight: 2 * RaccoonBoard.reach,
               maxHeight: 2 * RaccoonBoard.reach,
               child: Transform(
-                transform: Matrix4.identity()
-                  ..translateByDouble(_pan.dx, _pan.dy, 0, 1)
-                  ..scaleByDouble(_zoom, _zoom, 1, 1)
-                  ..translateByDouble(
-                    -RaccoonBoard.reach,
-                    -RaccoonBoard.reach,
-                    0,
-                    1,
-                  ),
+                // Built from the old constructors, so it runs on the oldest
+                // Flutter the package allows.
+                transform: Matrix4.translationValues(_pan.dx, _pan.dy, 0) *
+                    Matrix4.diagonal3Values(_zoom, _zoom, 1) *
+                    Matrix4.translationValues(
+                      -RaccoonBoard.reach,
+                      -RaccoonBoard.reach,
+                      0,
+                    ),
                 child: Stack(
                   children: [
                     for (final session in widget.sessions)

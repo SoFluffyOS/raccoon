@@ -3,7 +3,7 @@ description: Flutter widgets that show a Raccoon-hosted app inside Lumide.
 publish_to: "none"
 
 environment:
-  sdk: ^3.10.0
+  sdk: ^3.6.0
 
 resolution: workspace
 
