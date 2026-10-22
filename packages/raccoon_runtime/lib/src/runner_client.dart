@@ -8,6 +8,7 @@ import 'package:raccoon_runtime/src/message_framing.dart';
 import 'package:raccoon_runtime/src/runner_connection.dart';
 import 'package:raccoon_runtime/src/runner_endpoint.dart';
 import 'package:raccoon_runtime/src/runner_transport.dart';
+import 'package:raccoon_runtime/src/startup_failure.dart';
 
 /// Serves one platform channel for the hosted app, the way a desktop
 /// embedder's plugin would. Returns the reply bytes, or null for "no plugin",
@@ -22,6 +23,7 @@ final class RunnerClient
     this._transport, {
     required this.composes,
     required this.gpuBuffers,
+    required this.startupGrace,
   }) {
     _subscription = _transport.inbound.listen(
       _onInbound,
@@ -47,15 +49,29 @@ final class RunnerClient
   /// [composes] the client promises to mirror the app's active text field in
   /// its own input method and to send what it produces; the runner then
   /// leaves typing characters to it.
+  ///
+  /// [startupGrace] is how long a failure in the app's log may go without a
+  /// frame before [startupFailure] reports it.
   static Future<RunnerClient> connect(
     RunnerEndpoint endpoint, {
     bool composes = false,
     bool gpuBuffers = false,
+    Duration startupGrace = defaultStartupGrace,
   }) async => RunnerClient._(
     await RunnerTransport.connect(endpoint),
     composes: composes,
     gpuBuffers: gpuBuffers,
+    startupGrace: startupGrace,
   );
+
+  /// See [startupGrace].
+  static const defaultStartupGrace = Duration(seconds: 1);
+
+  /// How long the app's log may tell of a failure before its first frame,
+  /// an exception nothing caught or a channel nothing answered, with no
+  /// frame following, before [startupFailure] says the app stopped. An app
+  /// that catches the error and goes on draws well within it.
+  final Duration startupGrace;
 
   /// Whether this client asked for GPU buffers: frames then arrive as buffer
   /// indices ([Frame.inGpuBuffer]) with no pixels, and the buffers' file
@@ -175,6 +191,30 @@ final class RunnerClient
         .map((message) => message.textField);
   }
 
+  final _startupLog = <String>[];
+  StartupFailure? _startupFailure;
+  Timer? _startupTimer;
+  final _startupChanges = StreamController<StartupFailure?>.broadcast();
+
+  /// The most lines of the app's log kept from before its first frame.
+  static const startupLogLines = 500;
+
+  /// The app's log lines from before its first frame, as the runner relays
+  /// them (its stderr among them); empty once a frame arrived.
+  List<String> get startupLog => List.unmodifiable(_startupLog);
+
+  /// Why the app stopped before its first frame: its log tells of a
+  /// failure and no frame followed within [startupGrace]. Null otherwise,
+  /// and for good once a frame arrived: from then on the app's own error
+  /// handling rules.
+  StartupFailure? get startupFailure => _startupFailure;
+
+  /// The current [startupFailure] first, then every change.
+  Stream<StartupFailure?> get startupFailures async* {
+    yield _startupFailure;
+    yield* _startupChanges.stream;
+  }
+
   /// Asks the runner to stop.
   void shutdown() => send(ClientMessage(shutdown: Shutdown()));
 
@@ -214,16 +254,59 @@ final class RunnerClient
         final frame = _resolveFrame(message.frame);
         if (frame == null) continue;
         message.frame = frame;
+        if (_latestFrame == null) _startupOver();
         _latestFrame = frame;
       }
       if (message.hasVmService()) _vmServiceUri = message.vmService.uri;
       if (message.hasTextField()) _latestTextField = message.textField;
-      if (message.hasPlugins()) _latestPlugins = message.plugins;
+      if (message.hasPlugins()) {
+        _latestPlugins = message.plugins;
+        if (_latestFrame == null) _readStartup();
+      }
+      if (message.hasLog() && _latestFrame == null) {
+        _startupLog.add(message.log.message);
+        final overflow = _startupLog.length - startupLogLines;
+        if (overflow > 0) _startupLog.removeRange(0, overflow);
+        _readStartup();
+      }
       if (message.hasPlatformMessage()) {
         unawaited(_servePlatformMessage(message.platformMessage));
       }
       _messages.add(message);
     }
+  }
+
+  /// Reads the log again. A failure already reported is brought up to date
+  /// at once (the plugin report may come after the lines); a new one waits
+  /// out [startupGrace].
+  void _readStartup() {
+    final found = StartupFailure.fromLog(_startupLog, plugins: _latestPlugins);
+    if (found == null) return;
+    if (_startupFailure != null) {
+      _reportStartup(found);
+      return;
+    }
+    _startupTimer?.cancel();
+    _startupTimer = Timer(startupGrace, () {
+      if (_latestFrame != null || _closed.isCompleted) return;
+      _reportStartup(
+        StartupFailure.fromLog(_startupLog, plugins: _latestPlugins),
+      );
+    });
+  }
+
+  void _reportStartup(StartupFailure? failure) {
+    if (failure == _startupFailure) return;
+    _startupFailure = failure;
+    _startupChanges.add(failure);
+  }
+
+  /// The first frame: whatever the log said, the app is drawing.
+  void _startupOver() {
+    _startupTimer?.cancel();
+    _startupTimer = null;
+    _startupLog.clear();
+    _reportStartup(null);
   }
 
   Future<void> _servePlatformMessage(PlatformMessage message) async {
@@ -291,11 +374,13 @@ final class RunnerClient
   void _finish() {
     if (_closed.isCompleted) return;
     _closed.complete();
+    _startupTimer?.cancel();
     for (final buffer in _buffers) {
       buffer.closeSync();
     }
     _buffers = [];
     unawaited(_messages.close());
+    unawaited(_startupChanges.close());
   }
 }
 

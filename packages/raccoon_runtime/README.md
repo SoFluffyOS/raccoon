@@ -13,6 +13,14 @@ descriptors on Linux, which Dart cannot hold, and IOSurface IDs on macOS.
 `raccoon_view` has the Linux and macOS sides. A frame the runner cannot put
 in a buffer still comes with pixels.
 
+An app that stops before its first frame, such as one whose `main()` awaits
+a plugin with no implementation on this host, shows up as
+`RunnerClient.startupFailure`: the exception it died of and the channels
+nothing answered, read from the log the runner relays, with the plugin
+each channel belongs to when the plugin report says it cannot work here.
+It waits a moment for a frame (`startupGrace`), and once a frame arrives it
+stays null: from then on the app's own error handling rules.
+
 The devices `raccoon_device setup` registers with the Flutter tool, each a
 custom device the helper keeps apart by an instance key (`RaccoonDevice`):
 `raccoon` (the host's own size), `raccoon-2` (a second run of the same

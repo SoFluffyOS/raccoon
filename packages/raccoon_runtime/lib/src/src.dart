@@ -8,3 +8,4 @@ export 'package:raccoon_runtime/src/runner_endpoint.dart';
 export 'package:raccoon_runtime/src/runner_process.dart';
 export 'package:raccoon_runtime/src/runner_transport.dart';
 export 'package:raccoon_runtime/src/runtime_store.dart';
+export 'package:raccoon_runtime/src/startup_failure.dart';
