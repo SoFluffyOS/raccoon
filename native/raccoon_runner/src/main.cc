@@ -19,6 +19,7 @@
 #include <sys/prctl.h>
 #endif
 
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -143,23 +144,45 @@ void OnSignal(int) {
 
 uint32_t ThisProcessId() { return GetCurrentProcessId(); }
 
-// Windows has no getppid; a parent is found once, in a snapshot of the
-// process table. 0 when |pid| is not there.
-uint32_t ParentProcessId(uint32_t pid) {
+// The runner's ancestors whose end ends the run, nearest first: its parent,
+// and on through Git Bash's processes to the first that is not one. Windows
+// has no getppid, so they are found once, in a snapshot of the process
+// table. The device helper runs in Git Bash, where the tool starts a
+// launcher, the launcher the shell, and a forked copy of the shell waits
+// on the runner; the tool stops a run by killing the launcher, which none
+// of the others notice, and the shell has no pid of the tool to pass on.
+std::vector<uint32_t> AncestorsToWatch() {
+  struct Entry {
+    uint32_t parent;
+    std::string exe;
+  };
+  std::unordered_map<uint32_t, Entry> table;
   const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-  if (snapshot == INVALID_HANDLE_VALUE) return 0;
+  if (snapshot == INVALID_HANDLE_VALUE) return {};
   PROCESSENTRY32 entry{};
   entry.dwSize = sizeof(entry);
-  uint32_t parent = 0;
   for (BOOL more = Process32First(snapshot, &entry); more;
        more = Process32Next(snapshot, &entry)) {
-    if (entry.th32ProcessID == pid) {
-      parent = entry.th32ParentProcessID;
+    std::string exe = entry.szExeFile;
+    for (char& c : exe) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    table[entry.th32ProcessID] = {entry.th32ParentProcessID, exe};
+  }
+  CloseHandle(snapshot);
+  std::vector<uint32_t> ancestors;
+  uint32_t pid = GetCurrentProcessId();
+  // A bound, in case a reused pid makes a loop of the table.
+  for (int depth = 0; depth < 16; ++depth) {
+    const auto found = table.find(pid);
+    if (found == table.end() || found->second.parent == 0) break;
+    pid = found->second.parent;
+    ancestors.push_back(pid);
+    const auto parent = table.find(pid);
+    if (parent == table.end() ||
+        (parent->second.exe != "bash.exe" && parent->second.exe != "sh.exe")) {
       break;
     }
   }
-  CloseHandle(snapshot);
-  return parent;
+  return ancestors;
 }
 
 // Says when a process has exited. Its handle is opened up front, so a pid
@@ -663,20 +686,21 @@ int Serve(const Options& options) {
   handler.on_shutdown = [&stop] { stop = true; };
   // The Flutter tool started this runner; when it is gone, so is the run.
   // Through the device helper, the helper is the parent and
-  // RACCOON_PARENT_PID names the tool. On Windows the helper runs in Git
-  // Bash, which knows neither the tool's pid nor starts the runner as its
-  // own child (a forked copy of the shell waits on it instead, and outlives
-  // a helper the tool kills), so there it names the helper itself and its
-  // parent is the tool.
+  // RACCOON_PARENT_PID names the tool. On Windows the runner watches its
+  // ancestors through Git Bash instead (see AncestorsToWatch), and the
+  // variable too where it names a process.
   const char* tool_env = std::getenv("RACCOON_PARENT_PID");
 #if defined(_WIN32)
-  const uint32_t named = tool_env == nullptr ? 0 : static_cast<uint32_t>(std::atoi(tool_env));
-  const ProcessWatch parent(ParentProcessId(ThisProcessId()));
-  const ProcessWatch helper(named);
-  const ProcessWatch tool(named > 1 ? ParentProcessId(named) : 0);
+  std::vector<std::unique_ptr<ProcessWatch>> watches;
+  for (const uint32_t pid : AncestorsToWatch()) {
+    watches.push_back(std::make_unique<ProcessWatch>(pid));
+  }
+  if (tool_env != nullptr) {
+    watches.push_back(std::make_unique<ProcessWatch>(static_cast<uint32_t>(std::atoi(tool_env))));
+  }
   // The pid that is gone, or 0.
-  auto GonePid = [&]() -> int {
-    for (const ProcessWatch* watch : {&parent, &helper, &tool}) {
+  auto GonePid = [&watches]() -> int {
+    for (const auto& watch : watches) {
       if (watch->Exited()) return static_cast<int>(watch->pid());
     }
     return 0;
