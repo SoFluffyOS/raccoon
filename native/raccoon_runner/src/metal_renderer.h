@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "gpu_renderer.h"
 
@@ -48,6 +49,12 @@ class MetalRenderer : public GpuRenderer {
 
   const std::string& description() const override;
   bool EnablePool(size_t count, std::string* error) override;
+  // From now on the ring's surfaces are not global: the host takes them by
+  // Mach port. The ring in use is rebuilt at the next frame.
+  void ShareByPort();
+  // Send rights to the surfaces of ring |generation|, in index order, for
+  // the caller to pass on; false when that ring is gone.
+  bool SurfacePorts(uint32_t generation, std::vector<uint32_t>* ports) const;
   void DisablePool() override;
   void SetGpuFrameCallback(GpuFrameCallback callback) override;
   bool pool_set(GpuBufferSet* out) const override;

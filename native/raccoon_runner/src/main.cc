@@ -27,6 +27,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -41,6 +42,9 @@
 #include "flutter_embedder.h"
 #include "server.h"
 #include "shared_buffers.h"
+#if RACCOON_HAS_METAL
+#include "surface_port_server.h"
+#endif
 #include "stderr_capture.h"
 
 namespace {
@@ -347,6 +351,12 @@ uint32_t Read32(const uint8_t* at) {
 // client sends 'RREL', generation, index, fenced (1 when a fence rides
 // along, signalled when its last use of the buffer is done) to give a
 // buffer back.
+//
+// macOS: a client that takes surfaces by Mach port sends 'RPRT'. The runner
+// answers 'RSVC', the length of a Mach service name, the name, then a
+// 16-byte token, and builds the next ring without global surfaces; the
+// client asks that service for each set's surfaces (surface_port_server.h).
+// A client that never sends 'RPRT' keeps looking surfaces up by ID.
 std::vector<uint8_t> GpuSocketPayload(const raccoon::GpuBufferSet& set) {
   std::vector<uint8_t> out;
   auto put32 = [&out](uint32_t value) {
@@ -795,6 +805,10 @@ int Serve(const Options& options) {
   // The GPU socket: a native client takes the buffers' descriptors here,
   // which Dart cannot. Named without .sock, so discovery does not list it.
   const std::string gpu_socket = GpuSocketPath(options.socket);
+#if RACCOON_HAS_METAL
+  // Set once the GPU socket's server exists, below.
+  std::function<void()> SharePorts;
+#endif
   raccoon::RunnerServer::Handler gpu_handler;
   gpu_handler.on_client_connected = [&] { gpu_fds_sent = 0; };
   gpu_handler.on_client_disconnected = [&] {
@@ -803,6 +817,12 @@ int Serve(const Options& options) {
     host.ReleaseAllGpuBuffers();
   };
   gpu_handler.on_raw = [&](const uint8_t* payload, size_t size, std::vector<int>& fds) {
+#if RACCOON_HAS_METAL
+    if (size >= 4 && std::memcmp(payload, "RPRT", 4) == 0) {
+      SharePorts();
+      return;
+    }
+#endif
     if (size >= 16 && std::memcmp(payload, "RREL", 4) == 0) {
       int fence = -1;
       if (Read32(payload + 12) != 0 && !fds.empty()) {
@@ -818,6 +838,31 @@ int Serve(const Options& options) {
     fds.clear();
   };
   raccoon::RunnerServer gpu_server(loop, gpu_handler);
+#if RACCOON_HAS_METAL
+  // Surfaces by Mach port, for a client that asks: the service starts at the
+  // first ask and stays; each ask gets its name and token.
+  raccoon::SurfacePortServer ports;
+  SharePorts = [&] {
+    std::string why;
+    const bool started = ports.Start(
+        [&host](uint32_t generation, std::vector<uint32_t>* out) {
+          return host.GpuBufferPorts(generation, out);
+        },
+        &why);
+    if (!started || !host.ShareGpuBuffersByPort()) {
+      std::fprintf(stderr, "raccoon_runner: no surfaces by port (%s); by ID as before\n",
+                   started ? "no Metal renderer" : why.c_str());
+      return;
+    }
+    std::vector<uint8_t> answer = {'R', 'S', 'V', 'C'};
+    const uint32_t length = static_cast<uint32_t>(ports.name().size());
+    for (int i = 0; i < 4; ++i) answer.push_back(static_cast<uint8_t>(length >> (8 * i)));
+    answer.insert(answer.end(), ports.name().begin(), ports.name().end());
+    answer.insert(answer.end(), ports.token(),
+                  ports.token() + raccoon::SurfacePortServer::kTokenSize);
+    gpu_server.SendBytesWithFds(answer, {});
+  };
+#endif
   if (!gpu_server.Listen(gpu_socket, &error)) {
     std::fprintf(stderr, "raccoon_runner: %s\n", error.c_str());
     return 1;

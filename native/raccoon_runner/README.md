@@ -59,8 +59,13 @@ Design notes: `docs/internal_docs/raccoon/`.
   ring is described over a second socket, the main one's path with `.gpu`
   in place of `.sock` (its layout is in `main.cc`). On Linux the
   descriptors ride along, and a native fence goes ahead of every frame
-  where EGL has them; on macOS the message names the surfaces by ID, and a
-  frame leaves once the GPU has drawn it. A buffer goes back on either
+  where EGL has them. On macOS a client that asks ('RPRT') gets the name of
+  a Mach service of the runner's own and a token, and takes each ring's
+  surfaces from it by port; from then on the rings are not global, so no
+  other process can open them by ID. A client that never asks gets global
+  surfaces named by ID, as before. A frame leaves once the GPU has drawn it:
+  a cross-process fence would save 0.6-0.8 ms at the median (measured, #60),
+  and Metal shares none without XPC. A buffer goes back on either
   socket, with a fence of its own on the second where there are fences. The
   raccoon_view plugin does this on Linux and macOS. `--renderer
   auto|gl|metal|software`, or `RACCOON_RENDERER` in the environment: `auto`

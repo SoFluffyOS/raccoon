@@ -129,7 +129,11 @@ endif()
 # pkg-config finds them, and the plugin library beside it.
 if(APPLE)
   enable_language(OBJCXX)
-  target_sources(raccoon_runner PRIVATE src/metal_renderer.mm)
+  target_sources(raccoon_runner PRIVATE src/metal_renderer.mm src/surface_port_server.cc)
+  # A GPU socket client that takes the ring's surfaces by Mach port; the
+  # runtime's tests run it against the runner.
+  add_executable(raccoon_gpu_port_check test/gpu_port_check.mm)
+  target_link_libraries(raccoon_gpu_port_check PRIVATE "-framework IOSurface" "-framework CoreFoundation")
   set_target_properties(raccoon_runner PROPERTIES
     OBJCXX_STANDARD 17 OBJCXX_STANDARD_REQUIRED ON)
   set_source_files_properties(src/metal_renderer.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")

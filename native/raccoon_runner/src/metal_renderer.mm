@@ -25,19 +25,22 @@ constexpr uint32_t kFourccBgra = 0x42475241;  // 'BGRA'
 // named i + 1.
 constexpr int64_t kReadbackTexture = 0;
 
-IOSurfaceRef CreateSurface(size_t width, size_t height) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-  // Global: any process looks the surface up by its ID, so the host needs
-  // no port from the runner. Deprecated since 10.11, honoured still.
-  NSDictionary* properties = @{
+IOSurfaceRef CreateSurface(size_t width, size_t height, bool global) {
+  NSMutableDictionary* properties = [@{
     (id)kIOSurfaceWidth : @(width),
     (id)kIOSurfaceHeight : @(height),
     (id)kIOSurfaceBytesPerElement : @4,
     (id)kIOSurfacePixelFormat : @(kFourccBgra),
-    (id)kIOSurfaceIsGlobal : @YES,
-  };
+  } mutableCopy];
+  if (global) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    // Global: any process looks the surface up by its ID. For a host that
+    // does not take surfaces by Mach port; deprecated since 10.11, honoured
+    // still, and readable by any process that guesses the ID.
+    properties[(id)kIOSurfaceIsGlobal] = @YES;
 #pragma clang diagnostic pop
+  }
   return IOSurfaceCreate((__bridge CFDictionaryRef)properties);
 }
 
@@ -64,6 +67,10 @@ struct MetalRenderer::Impl {
   std::vector<uint8_t> frame;
 
   mutable std::mutex mutex;
+  // Global surfaces until the host takes them by Mach port (ShareByPort);
+  // then the next ring is built without, at once.
+  bool global_surfaces = true;
+  bool rebuild = false;
   bool pool_wanted = false;
   size_t pool_count = 0;
   std::vector<Buffer> pool;
@@ -129,7 +136,7 @@ bool MetalRenderer::Impl::BuildPool(size_t width, size_t height) {
   std::vector<Buffer> buffers;
   for (size_t i = 0; i < pool_count; ++i) {
     Buffer buffer;
-    buffer.surface = CreateSurface(width, height);
+    buffer.surface = CreateSurface(width, height, global_surfaces);
     if (buffer.surface == nullptr) break;
     MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
         texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
@@ -227,6 +234,25 @@ bool MetalRenderer::EnablePool(size_t count, std::string* error) {
   return true;
 }
 
+void MetalRenderer::ShareByPort() {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  if (!impl_->global_surfaces) return;
+  impl_->global_surfaces = false;
+  impl_->rebuild = !impl_->pool.empty();
+}
+
+bool MetalRenderer::SurfacePorts(uint32_t generation, std::vector<uint32_t>* ports) const {
+  const Impl& m = *impl_;
+  std::lock_guard<std::mutex> lock(m.mutex);
+  if (m.pool.empty() || generation != m.generation) return false;
+  ports->clear();
+  for (const Impl::Buffer& buffer : m.pool) {
+    // A send right of the caller's to own and pass on.
+    ports->push_back(IOSurfaceCreateMachPort(buffer.surface));
+  }
+  return true;
+}
+
 void MetalRenderer::DisablePool() {
   std::lock_guard<std::mutex> lock(impl_->mutex);
   impl_->pool_wanted = false;
@@ -300,7 +326,8 @@ bool MetalRenderer::NextDrawable(size_t width, size_t height, int64_t* texture_i
   m.current = -1;
   if (!m.pool_wanted && !m.pool.empty()) m.DestroyPool();
   if (m.pool_wanted) {
-    if (m.pool.empty() || m.pool_width != width || m.pool_height != height) {
+    if (m.pool.empty() || m.pool_width != width || m.pool_height != height || m.rebuild) {
+      m.rebuild = false;
       if (!m.BuildPool(width, height)) {
         m.pool_wanted = false;
         std::fprintf(stderr,

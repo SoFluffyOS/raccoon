@@ -300,6 +300,19 @@ bool EngineHost::EnableGpuBuffers(size_t count, std::string* error) {
   return false;
 }
 
+#if RACCOON_HAS_METAL
+bool EngineHost::ShareGpuBuffersByPort() {
+  if (metal_ == nullptr) return false;
+  metal_->ShareByPort();
+  if (engine_ != nullptr) loader_.procs().ScheduleFrame(engine_);
+  return true;
+}
+
+bool EngineHost::GpuBufferPorts(uint32_t generation, std::vector<uint32_t>* ports) const {
+  return metal_ != nullptr && metal_->SurfacePorts(generation, ports);
+}
+#endif
+
 void EngineHost::DisableGpuBuffers() {
   if (gpu_) gpu_->DisablePool();
 }

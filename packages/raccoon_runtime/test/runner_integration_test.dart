@@ -1045,6 +1045,66 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  // Built beside the runner on macOS: a GPU socket client that takes the
+  // ring's surfaces by Mach port and checks them.
+  final portCheck =
+      binary == null ? '' : p.join(p.dirname(binary), 'raccoon_gpu_port_check');
+  test(
+    'on macOS the GPU socket hands out surfaces by Mach port, not global IDs',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final spinAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'spin',
+        'build',
+        'flutter_assets',
+      );
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: spinAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint, gpuBuffers: true);
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        final set = await client.gpuBufferSets.first.timeout(
+          const Duration(seconds: 10),
+        );
+        // Buffers go back as frames come, so the ring keeps turning.
+        Frame? previous;
+        final frames = client.frames.listen((frame) {
+          final last = previous;
+          if (last != null && last.inGpuBuffer) {
+            client.releaseGpuBuffer(last.gpuGeneration, last.bufferIndex);
+          }
+          previous = frame;
+        });
+        final check = await Process.run(portCheck, [set.socket]);
+        await frames.cancel();
+        printOnFailure('${check.stdout}${check.stderr}');
+        expect(check.exitCode, 0);
+        expect('${check.stdout}', contains('PORTS ok'));
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        !Platform.isMacOS
+            ? 'Mach ports are macOS'
+            : ready && File(portCheck).existsSync()
+            ? false
+            : 'build the runner and its port check first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   test(
     'a client that imports GPU buffers gets frames as buffer indices and their descriptors on the GPU socket',
     () async {
