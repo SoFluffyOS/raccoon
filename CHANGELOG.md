@@ -1,3 +1,7 @@
+## 0.6.0
+
+- `Plugins`: what became of the project's native plugins on the runner's host, one `PluginStatus` per plugin: loaded, failed, built nothing, no implementation for this host, or answered by the runner itself. Sent after `RunnerHello`.
+
 ## 0.5.0
 
 - `GpuBuffers`: a ring of exported GPU buffers the engine draws into (DRM dmabufs on Linux, IOSurfaces on macOS); what imports them, descriptors or surface IDs, is served on the runner's GPU socket.

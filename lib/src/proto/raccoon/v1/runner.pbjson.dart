@@ -82,6 +82,26 @@ final $typed_data.Uint8List pixelFormatDescriptor = $convert.base64Decode(
     'CgtQaXhlbEZvcm1hdBIcChhQSVhFTF9GT1JNQVRfVU5TUEVDSUZJRUQQABIZChVQSVhFTF9GT1'
     'JNQVRfQkdSQTg4ODgQARIZChVQSVhFTF9GT1JNQVRfUkdCQTg4ODgQAg==');
 
+@$core.Deprecated('Use pluginStateDescriptor instead')
+const PluginState$json = {
+  '1': 'PluginState',
+  '2': [
+    {'1': 'PLUGIN_STATE_UNSPECIFIED', '2': 0},
+    {'1': 'PLUGIN_STATE_LOADED', '2': 1},
+    {'1': 'PLUGIN_STATE_FAILED', '2': 2},
+    {'1': 'PLUGIN_STATE_BUILT_NOTHING', '2': 3},
+    {'1': 'PLUGIN_STATE_NO_HOST', '2': 4},
+    {'1': 'PLUGIN_STATE_BUILT_IN', '2': 5},
+  ],
+};
+
+/// Descriptor for `PluginState`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List pluginStateDescriptor = $convert.base64Decode(
+    'CgtQbHVnaW5TdGF0ZRIcChhQTFVHSU5fU1RBVEVfVU5TUEVDSUZJRUQQABIXChNQTFVHSU5fU1'
+    'RBVEVfTE9BREVEEAESFwoTUExVR0lOX1NUQVRFX0ZBSUxFRBACEh4KGlBMVUdJTl9TVEFURV9C'
+    'VUlMVF9OT1RISU5HEAMSGAoUUExVR0lOX1NUQVRFX05PX0hPU1QQBBIZChVQTFVHSU5fU1RBVE'
+    'VfQlVJTFRfSU4QBQ==');
+
 @$core.Deprecated('Use clientHelloDescriptor instead')
 const ClientHello$json = {
   '1': 'ClientHello',
@@ -500,6 +520,48 @@ final $typed_data.Uint8List textFieldDescriptor = $convert.base64Decode(
     'CW11bHRpbGluZRgHIAEoCFIJbXVsdGlsaW5lEiEKDGlucHV0X2FjdGlvbhgIIAEoCVILaW5wdX'
     'RBY3Rpb24SGAoHb2JzY3VyZRgJIAEoCFIHb2JzY3VyZQ==');
 
+@$core.Deprecated('Use pluginsDescriptor instead')
+const Plugins$json = {
+  '1': 'Plugins',
+  '2': [
+    {
+      '1': 'plugins',
+      '3': 1,
+      '4': 3,
+      '5': 11,
+      '6': '.raccoon.v1.PluginStatus',
+      '10': 'plugins'
+    },
+  ],
+};
+
+/// Descriptor for `Plugins`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List pluginsDescriptor = $convert.base64Decode(
+    'CgdQbHVnaW5zEjIKB3BsdWdpbnMYASADKAsyGC5yYWNjb29uLnYxLlBsdWdpblN0YXR1c1IHcG'
+    'x1Z2lucw==');
+
+@$core.Deprecated('Use pluginStatusDescriptor instead')
+const PluginStatus$json = {
+  '1': 'PluginStatus',
+  '2': [
+    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+    {
+      '1': 'state',
+      '3': 2,
+      '4': 1,
+      '5': 14,
+      '6': '.raccoon.v1.PluginState',
+      '10': 'state'
+    },
+    {'1': 'detail', '3': 3, '4': 1, '5': 9, '10': 'detail'},
+  ],
+};
+
+/// Descriptor for `PluginStatus`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List pluginStatusDescriptor = $convert.base64Decode(
+    'CgxQbHVnaW5TdGF0dXMSEgoEbmFtZRgBIAEoCVIEbmFtZRItCgVzdGF0ZRgCIAEoDjIXLnJhY2'
+    'Nvb24udjEuUGx1Z2luU3RhdGVSBXN0YXRlEhYKBmRldGFpbBgDIAEoCVIGZGV0YWls');
+
 @$core.Deprecated('Use busyDescriptor instead')
 const Busy$json = {
   '1': 'Busy',
@@ -606,6 +668,15 @@ const RunnerMessage$json = {
       '9': 0,
       '10': 'gpuBuffers'
     },
+    {
+      '1': 'plugins',
+      '3': 11,
+      '4': 1,
+      '5': 11,
+      '6': '.raccoon.v1.Plugins',
+      '9': 0,
+      '10': 'plugins'
+    },
   ],
   '8': [
     {'1': 'message'},
@@ -623,5 +694,5 @@ final $typed_data.Uint8List runnerMessageDescriptor = $convert.base64Decode(
     'ZF9idWZmZXJzGAcgASgLMhkucmFjY29vbi52MS5TaGFyZWRCdWZmZXJzSABSDXNoYXJlZEJ1Zm'
     'ZlcnMSJgoEYnVzeRgIIAEoCzIQLnJhY2Nvb24udjEuQnVzeUgAUgRidXN5EjYKCnRleHRfZmll'
     'bGQYCSABKAsyFS5yYWNjb29uLnYxLlRleHRGaWVsZEgAUgl0ZXh0RmllbGQSOQoLZ3B1X2J1Zm'
-    'ZlcnMYCiABKAsyFi5yYWNjb29uLnYxLkdwdUJ1ZmZlcnNIAFIKZ3B1QnVmZmVyc0IJCgdtZXNz'
-    'YWdl');
+    'ZlcnMYCiABKAsyFi5yYWNjb29uLnYxLkdwdUJ1ZmZlcnNIAFIKZ3B1QnVmZmVycxIvCgdwbHVn'
+    'aW5zGAsgASgLMhMucmFjY29vbi52MS5QbHVnaW5zSABSB3BsdWdpbnNCCQoHbWVzc2FnZQ==');

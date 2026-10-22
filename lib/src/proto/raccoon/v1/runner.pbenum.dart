@@ -117,5 +117,46 @@ class PixelFormat extends $pb.ProtobufEnum {
   const PixelFormat._(super.value, super.name);
 }
 
+class PluginState extends $pb.ProtobufEnum {
+  static const PluginState PLUGIN_STATE_UNSPECIFIED =
+      PluginState._(0, _omitEnumNames ? '' : 'PLUGIN_STATE_UNSPECIFIED');
+
+  /// Loaded into the runner and registered: its channels are answered.
+  static const PluginState PLUGIN_STATE_LOADED =
+      PluginState._(1, _omitEnumNames ? '' : 'PLUGIN_STATE_LOADED');
+
+  /// Did not build, or did not load; detail says.
+  static const PluginState PLUGIN_STATE_FAILED =
+      PluginState._(2, _omitEnumNames ? '' : 'PLUGIN_STATE_FAILED');
+
+  /// Built and made no library: an FFI plugin without its toolchain.
+  static const PluginState PLUGIN_STATE_BUILT_NOTHING =
+      PluginState._(3, _omitEnumNames ? '' : 'PLUGIN_STATE_BUILT_NOTHING');
+
+  /// Declares no implementation for this host: its calls will fail.
+  static const PluginState PLUGIN_STATE_NO_HOST =
+      PluginState._(4, _omitEnumNames ? '' : 'PLUGIN_STATE_NO_HOST');
+
+  /// The runner answers its channels itself (the window plugins).
+  static const PluginState PLUGIN_STATE_BUILT_IN =
+      PluginState._(5, _omitEnumNames ? '' : 'PLUGIN_STATE_BUILT_IN');
+
+  static const $core.List<PluginState> values = <PluginState>[
+    PLUGIN_STATE_UNSPECIFIED,
+    PLUGIN_STATE_LOADED,
+    PLUGIN_STATE_FAILED,
+    PLUGIN_STATE_BUILT_NOTHING,
+    PLUGIN_STATE_NO_HOST,
+    PLUGIN_STATE_BUILT_IN,
+  ];
+
+  static final $core.List<PluginState?> _byValue =
+      $pb.ProtobufEnum.$_initByValueList(values, 5);
+  static PluginState? valueOf($core.int value) =>
+      value < 0 || value >= _byValue.length ? null : _byValue[value];
+
+  const PluginState._(super.value, super.name);
+}
+
 const $core.bool _omitEnumNames =
     $core.bool.fromEnvironment('protobuf.omit_enum_names');

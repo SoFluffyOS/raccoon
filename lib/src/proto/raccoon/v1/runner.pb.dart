@@ -1927,6 +1927,142 @@ class TextField extends $pb.GeneratedMessage {
   void clearObscure() => $_clearField(9);
 }
 
+/// What became of the project's native plugins on this host. Sent after
+/// Hello, and again when it changes.
+class Plugins extends $pb.GeneratedMessage {
+  factory Plugins({
+    $core.Iterable<PluginStatus>? plugins,
+  }) {
+    final result = Plugins._();
+    if (plugins != null) result.plugins.addAll(plugins);
+    return result;
+  }
+
+  Plugins._();
+
+  factory Plugins.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      Plugins()..mergeFromBuffer(data, registry);
+  factory Plugins.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      Plugins()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'Plugins',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
+      createEmptyInstance: Plugins.$_createMessage)
+    ..pPM<PluginStatus>(1, _omitFieldNames ? '' : 'plugins',
+        subBuilder: PluginStatus.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Plugins clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Plugins copyWith(void Function(Plugins) updates) =>
+      super.copyWith((message) => updates(message as Plugins)) as Plugins;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Plugins() / Plugins.new instead')
+  static Plugins create() => Plugins._();
+  static $pb.GeneratedMessage $_createMessage() => Plugins._();
+  @$core.override
+  Plugins createEmptyInstance() => Plugins._();
+  @$core.pragma('dart2js:noInline')
+  static Plugins getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Plugins>(Plugins.$_createMessage);
+  static Plugins? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $pb.PbList<PluginStatus> get plugins => $_getList(0);
+}
+
+class PluginStatus extends $pb.GeneratedMessage {
+  factory PluginStatus({
+    $core.String? name,
+    PluginState? state,
+    $core.String? detail,
+  }) {
+    final result = PluginStatus._();
+    if (name != null) result.name = name;
+    if (state != null) result.state = state;
+    if (detail != null) result.detail = detail;
+    return result;
+  }
+
+  PluginStatus._();
+
+  factory PluginStatus.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      PluginStatus()..mergeFromBuffer(data, registry);
+  factory PluginStatus.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      PluginStatus()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'PluginStatus',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
+      createEmptyInstance: PluginStatus.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..aE<PluginState>(2, _omitFieldNames ? '' : 'state',
+        enumValues: PluginState.values)
+    ..aOS(3, _omitFieldNames ? '' : 'detail')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  PluginStatus clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  PluginStatus copyWith(void Function(PluginStatus) updates) =>
+      super.copyWith((message) => updates(message as PluginStatus))
+          as PluginStatus;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use PluginStatus() / PluginStatus.new instead')
+  static PluginStatus create() => PluginStatus._();
+  static $pb.GeneratedMessage $_createMessage() => PluginStatus._();
+  @$core.override
+  PluginStatus createEmptyInstance() => PluginStatus._();
+  @$core.pragma('dart2js:noInline')
+  static PluginStatus getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<PluginStatus>(
+          PluginStatus.$_createMessage);
+  static PluginStatus? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  PluginState get state => $_getN(1);
+  @$pb.TagNumber(2)
+  set state(PluginState value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasState() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearState() => $_clearField(2);
+
+  /// A word of why, for the states that have one: the failure, the log's
+  /// path, the host it would need.
+  @$pb.TagNumber(3)
+  $core.String get detail => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set detail($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasDetail() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearDetail() => $_clearField(3);
+}
+
 /// The runner has a client already; the connection closes after this.
 class Busy extends $pb.GeneratedMessage {
   factory Busy({
@@ -1994,6 +2130,7 @@ enum RunnerMessage_Message {
   busy,
   textField,
   gpuBuffers,
+  plugins,
   notSet
 }
 
@@ -2009,6 +2146,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
     Busy? busy,
     TextField? textField,
     GpuBuffers? gpuBuffers,
+    Plugins? plugins,
   }) {
     final result = RunnerMessage._();
     if (hello != null) result.hello = hello;
@@ -2021,6 +2159,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
     if (busy != null) result.busy = busy;
     if (textField != null) result.textField = textField;
     if (gpuBuffers != null) result.gpuBuffers = gpuBuffers;
+    if (plugins != null) result.plugins = plugins;
     return result;
   }
 
@@ -2045,13 +2184,14 @@ class RunnerMessage extends $pb.GeneratedMessage {
     8: RunnerMessage_Message.busy,
     9: RunnerMessage_Message.textField,
     10: RunnerMessage_Message.gpuBuffers,
+    11: RunnerMessage_Message.plugins,
     0: RunnerMessage_Message.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'RunnerMessage',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
       createEmptyInstance: RunnerMessage.$_createMessage)
-    ..oo(0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    ..oo(0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
     ..aOM<RunnerHello>(1, _omitFieldNames ? '' : 'hello',
         subBuilder: RunnerHello.$_createMessage)
     ..aOM<Frame>(2, _omitFieldNames ? '' : 'frame',
@@ -2072,6 +2212,8 @@ class RunnerMessage extends $pb.GeneratedMessage {
         subBuilder: TextField.$_createMessage)
     ..aOM<GpuBuffers>(10, _omitFieldNames ? '' : 'gpuBuffers',
         subBuilder: GpuBuffers.$_createMessage)
+    ..aOM<Plugins>(11, _omitFieldNames ? '' : 'plugins',
+        subBuilder: Plugins.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2106,6 +2248,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(8)
   @$pb.TagNumber(9)
   @$pb.TagNumber(10)
+  @$pb.TagNumber(11)
   RunnerMessage_Message whichMessage() =>
       _RunnerMessage_MessageByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(1)
@@ -2118,6 +2261,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(8)
   @$pb.TagNumber(9)
   @$pb.TagNumber(10)
+  @$pb.TagNumber(11)
   void clearMessage() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -2229,6 +2373,17 @@ class RunnerMessage extends $pb.GeneratedMessage {
   void clearGpuBuffers() => $_clearField(10);
   @$pb.TagNumber(10)
   GpuBuffers ensureGpuBuffers() => $_ensure(9);
+
+  @$pb.TagNumber(11)
+  Plugins get plugins => $_getN(10);
+  @$pb.TagNumber(11)
+  set plugins(Plugins value) => $_setField(11, value);
+  @$pb.TagNumber(11)
+  $core.bool hasPlugins() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearPlugins() => $_clearField(11);
+  @$pb.TagNumber(11)
+  Plugins ensurePlugins() => $_ensure(10);
 }
 
 const $core.bool _omitFieldNames =
