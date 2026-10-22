@@ -1,5 +1,6 @@
 #include "engine_host.h"
 
+#include <cstdlib>
 #include <nlohmann/json.hpp>
 #include <unistd.h>
 
@@ -23,6 +24,13 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   assets_ = options.assets;
   if (!options.data_dir.empty()) {
     user_defaults_.SetStorePath(options.data_dir + "/shared_preferences.bin");
+    // On Linux, path_provider and shared_preferences are Dart only: they
+    // name their directories after the executable under the XDG base
+    // directories, so every hosted app would share one. Pointed into the
+    // app's own directory, they stay apart. Set before the engine runs, so
+    // the app sees them.
+    setenv("XDG_DATA_HOME", (options.data_dir + "/xdg/data").c_str(), 1);
+    setenv("XDG_CACHE_HOME", (options.data_dir + "/xdg/cache").c_str(), 1);
   }
   icu_ = options.icu;
 

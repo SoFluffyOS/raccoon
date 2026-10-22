@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -7,9 +9,13 @@ import 'package:flutter/widgets.dart';
 /// setMinWindowSize and loads its settings in its bootstrap). Shows a green
 /// box when every call was answered as expected and a red one otherwise. The
 /// result does not depend on a client. Expects the runner's default 800x600
-/// view at a pixel ratio of 1 and no data directory.
+/// view at a pixel ratio of 1 and an empty data directory, if any. Prints
+/// XDG_DATA_HOME: and what the app sees, for the data directory test.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Where the Dart-only Linux plugins would put the app's files: the runner
+  // points this into the app's data directory when it has one.
+  print('XDG_DATA_HOME:${Platform.environment['XDG_DATA_HOME'] ?? ''}');
   final failures = <String>[];
   Future<void> check(String name, Future<bool> Function() call) async {
     try {
