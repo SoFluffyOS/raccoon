@@ -138,6 +138,8 @@ class EngineHost {
   std::chrono::steady_clock::time_point started() const { return started_; }
 
  private:
+  // The host's locales and settings, for the app (see host_settings.h).
+  void SendHostSettings();
   static bool OnPresent(void* user_data, const void* allocation,
                         size_t row_bytes, size_t height);
   // Picks the renderer |wanted| names and fills |renderer| for the engine.

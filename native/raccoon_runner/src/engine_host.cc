@@ -10,6 +10,8 @@
 #include <unistd.h>
 #endif
 
+#include "host_settings.h"
+
 namespace raccoon {
 
 namespace {
@@ -120,8 +122,36 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   procs.NotifyDisplayUpdate(engine_, kFlutterEngineDisplaysUpdateTypeStartup,
                             &display, 1);
   Resize(options.width, options.height, options.pixel_ratio);
+  SendHostSettings();
   if (on_log_) on_log_("raccoon_runner", "raccoon_runner: renderer " + renderer_);
   return true;
+}
+
+void EngineHost::SendHostSettings() {
+  // What a desktop embedding tells its app at start: without it the app
+  // sees no locales and a light, 12-hour host.
+  const HostSettings settings = ReadHostSettings();
+  std::vector<FlutterLocale> locales;
+  for (const HostLocale& locale : settings.locales) {
+    FlutterLocale entry{};
+    entry.struct_size = sizeof(FlutterLocale);
+    entry.language_code = locale.language.c_str();
+    entry.country_code = locale.country.empty() ? nullptr : locale.country.c_str();
+    entry.script_code = locale.script.empty() ? nullptr : locale.script.c_str();
+    locales.push_back(entry);
+  }
+  std::vector<const FlutterLocale*> pointers;
+  for (const FlutterLocale& locale : locales) pointers.push_back(&locale);
+  if (!pointers.empty()) {
+    loader_.procs().UpdateLocales(engine_, pointers.data(), pointers.size());
+  }
+  const std::string json = nlohmann::json{
+      {"textScaleFactor", 1.0},
+      {"alwaysUse24HourFormat", settings.always_24_hour},
+      {"platformBrightness", settings.dark ? "dark" : "light"},
+  }.dump();
+  SendPlatformMessage("flutter/settings", reinterpret_cast<const uint8_t*>(json.data()),
+                      json.size());
 }
 
 void EngineHost::Resize(size_t width, size_t height, double pixel_ratio) {

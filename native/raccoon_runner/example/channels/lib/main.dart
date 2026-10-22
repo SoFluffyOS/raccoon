@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -10,7 +11,8 @@ import 'package:flutter/widgets.dart';
 /// box when every call was answered as expected and a red one otherwise. The
 /// result does not depend on a client. Expects the runner's default 800x600
 /// view at a pixel ratio of 1 and an empty data directory, if any. Prints
-/// XDG_DATA_HOME: and what the app sees, for the data directory test.
+/// XDG_DATA_HOME: and what the app sees, for the data directory test, then
+/// LOCALES: and BRIGHTNESS:, the host's as the runner told the engine.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Where the Dart-only Linux plugins would put the app's files: the runner
@@ -144,6 +146,11 @@ Future<void> main() async {
   });
 
   if (failures.isNotEmpty) debugPrint('runner channels failed: $failures');
+  // The host's locales and appearance, as the runner told the engine; read
+  // after the calls above, as an app's first build would.
+  final dispatcher = PlatformDispatcher.instance;
+  print('LOCALES:${dispatcher.locales.join(',')}');
+  print('BRIGHTNESS:${dispatcher.platformBrightness.name}');
   runApp(ChannelsApp(ok: failures.isEmpty));
 }
 

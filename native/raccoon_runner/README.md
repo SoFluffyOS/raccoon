@@ -35,6 +35,11 @@ Design notes: `docs/internal_docs/raccoon/`.
   executable: with `--data-dir` the runner points `XDG_DATA_HOME` and
   `XDG_CACHE_HOME` into it, so apps do not share one.
   `example/channels` checks the answers.
+- Tells the app the host's locales and appearance after the engine starts,
+  as a desktop embedding does: on macOS the preferred languages, light or
+  dark, and the locale's 12- or 24-hour clock; on Linux the locales of
+  `LANGUAGE`, `LC_ALL`, `LC_MESSAGES` and `LANG`. Without it an app saw no
+  locales and a light host.
 - Delivers keys the way the framework expects: the key data, then the
   legacy `flutter/keyevent` message it waits for before dispatching. Without
   the second, no key ever reaches the app.

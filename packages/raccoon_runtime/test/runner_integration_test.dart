@@ -615,6 +615,72 @@ void main() {
   );
 
   test(
+    'the app sees the host\'s locales and appearance',
+    () async {
+      // A desktop embedding tells its app the host's preferred languages
+      // and whether it is dark; the runner does the same after the engine
+      // starts. On Linux the locales come from the environment, set here;
+      // on macOS from the user's settings, read here the same way.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: channelsAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+        startProcess:
+            (executable, arguments) => Process.start(
+              executable,
+              arguments,
+              environment: {'LANGUAGE': 'fr_CA:en'},
+            ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      try {
+        final deadline = DateTime.now().add(const Duration(seconds: 15));
+        while (!output.any((line) => line.startsWith('BRIGHTNESS:')) &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        final locales = output.firstWhere(
+          (line) => line.startsWith('LOCALES:'),
+          orElse: () => 'LOCALES: none printed',
+        );
+        if (Platform.isMacOS) {
+          expect(locales, isNot('LOCALES:'));
+          final style = await Process.run('defaults', [
+            'read',
+            '-g',
+            'AppleInterfaceStyle',
+          ]);
+          final dark = '${style.stdout}'.trim().toLowerCase() == 'dark';
+          expect(output, contains('BRIGHTNESS:${dark ? 'dark' : 'light'}'));
+        } else {
+          expect(locales, 'LOCALES:fr_CA,en');
+          expect(output, contains('BRIGHTNESS:light'));
+        }
+      } finally {
+        final client = await RunnerClient.connect(endpoint);
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        Platform.isWindows
+            ? 'the host\'s settings are read on macOS and Linux'
+            : ready && Directory(channelsAssets).existsSync()
+            ? false
+            : 'build the runner and example/channels first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'a data directory keeps the app\'s files apart from other apps\'',
     () async {
       // On Linux, path_provider and shared_preferences are Dart only and put

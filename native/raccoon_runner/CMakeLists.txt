@@ -90,6 +90,7 @@ add_executable(raccoon_runner
   src/engine_host.cc
   src/engine_loader.cc
   src/event_loop.cc
+  src/host_settings.cc
   src/glib_pump.cc
   src/plugins.cc
   src/plugins_linux.cc
@@ -139,8 +140,9 @@ if(APPLE)
   # Native plugins: the protocols of FlutterMacOS.framework, implemented here
   # from its headers alone (third_party/flutter_macos); the framework itself
   # is opened at run time from the Flutter SDK, before the plugins.
-  target_sources(raccoon_runner PRIVATE src/plugins_mac.mm src/run_loop_pump.mm)
-  set_source_files_properties(src/plugins_mac.mm src/run_loop_pump.mm
+  target_sources(raccoon_runner PRIVATE src/plugins_mac.mm src/run_loop_pump.mm
+    src/host_settings_mac.mm)
+  set_source_files_properties(src/plugins_mac.mm src/run_loop_pump.mm src/host_settings_mac.mm
     PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
   target_include_directories(raccoon_runner PRIVATE ${CMAKE_SOURCE_DIR}/third_party/flutter_macos)
   target_compile_definitions(raccoon_runner PRIVATE RACCOON_HAS_PLUGINS=1)
