@@ -10,14 +10,15 @@ Design notes: `docs/internal_docs/raccoon/`.
 
 - Loads the prebuilt debug embedder for the active SDK's engine revision at
   run time (`tool/engine_dir.sh` downloads it: `libflutter_engine.so` on
-  Linux, `FlutterEmbedder.framework` on macOS), so one runner binary serves
-  several runtimes.
+  Linux, `FlutterEmbedder.framework` on macOS, `flutter_engine.dll` on
+  Windows), so one runner binary serves several runtimes.
 - Runs an app bundle (`build/flutter_assets`, no native build needed) with the
   software renderer on a pumped platform task runner.
 - `serve`: speaks runner protocol v1 (`proto/raccoon/v1/runner.proto`) over a
-  Unix socket: length-prefixed protobuf; frames out as pixels in the host's
-  native order (BGRA on Linux, RGBA on macOS), through shared buffers when the
-  client takes them; resize, pointer and key events in; the app's platform
+  Unix socket (Windows has them too): length-prefixed protobuf; frames out as
+  pixels in the host's native order (BGRA on Linux and Windows, RGBA on
+  macOS), through shared buffers when the client takes them, inline on
+  Windows; resize, pointer and key events in; the app's platform
   channel messages out and the client's answers back; the VM service URI;
   shutdown.
 - Answers some plugins' channels itself, in both commands and with or
@@ -168,7 +169,9 @@ Design notes: `docs/internal_docs/raccoon/`.
 ## Build
 
 Linux needs a C++17 compiler, CMake and Ninja; macOS the Xcode command-line
-tools plus `brew install cmake ninja`.
+tools plus `brew install cmake ninja`; Windows Visual Studio's C++ workload
+(MSVC, with its own CMake and Ninja) and Git Bash, from which the commands
+below run once the MSVC environment is loaded (`vcvars64.bat`).
 
 ```sh
 tool/protoc.sh                       # user-local protoc 21.12, once
@@ -176,14 +179,16 @@ cmake -S . -B build -G Ninja -DRACCOON_ENGINE_DIR="$(tool/engine_dir.sh)"
 ninja -C build                       # first build also compiles protobuf-lite
 ```
 
-CI (`.github/workflows/ci.yml`) does the same on Linux x64 and both Mac
-architectures, bundles the examples, renders a frame, and runs
-`raccoon_runtime`'s tests, whose integration tests drive the built runner.
+CI (`.github/workflows/runner-ci.yml`) does the same on Linux x64, both Mac
+architectures and Windows x64, bundles the examples, renders a frame, and
+runs `raccoon_runtime`'s tests, whose integration tests drive the built
+runner.
 
 ## Prebuilt binaries
 
 Every tag `v<VERSION>` publishes `raccoon_runner-<version>-<platform>.tar.gz`
-for `linux-x64`, `macos-arm64` and `macos-x64` on the [releases
+for `linux-x64`, `macos-arm64`, `macos-x64` and `windows-x64` (with
+`raccoon_runner.exe`; its helper runs in Git Bash) on the [releases
 page](https://github.com/SoFluffyOS/raccoon/releases), under `runner-v*` tags, packed by
 `tool/package.sh`: the binary, `tool/raccoon-device`, `tool/engine_dir.sh`,
 `VERSION` and `LICENSE`, flat. Unpacked into a folder it works as a runtime
@@ -223,7 +228,8 @@ build/raccoon_runner serve \
 ```
 
 On macOS the ICU data is under `engine/darwin-x64` and the sockets live in
-`$TMPDIR/raccoon`, which is where `tool/raccoon-device` puts them.
+`$TMPDIR/raccoon`, which is where `tool/raccoon-device` puts them; on
+Windows under `engine/windows-x64` and in `%TEMP%\raccoon`.
 
 Register the custom device and run any project on it:
 
@@ -255,13 +261,26 @@ and run `packages/raccoon/tool/gen_proto.sh` for the Dart side. Bump
 
 ## Hosts
 
-Linux and macOS, from the same sources; the per-host seams are the wake
-descriptor (eventfd or a pipe), socket flags, the shared buffers' backing
-(a memfd, or an unlinked temporary file on macOS, whose POSIX shared memory
-cannot be read with `read()`), the GPU renderer (EGL and dmabufs, or Metal
-and IOSurfaces), the engine library's name, the pixel order, and the native
-plugins' object model and main loop (GObject and GLib, or FlutterMacOS and
-the main run loop). Windows follows the same seams.
+Linux, macOS and Windows, from the same sources; the per-host seams are the
+wake descriptor (eventfd, a pipe, or a pair of sockets for Windows'
+`WSAPoll`), socket flags, the shared buffers' backing (a memfd, or an
+unlinked temporary file on macOS, whose POSIX shared memory cannot be read
+with `read()`; none on Windows, where no handle crosses a socket), the GPU
+renderer (EGL and dmabufs, or Metal and IOSurfaces), the engine library's
+name, the pixel order, how the runner notices its parent is gone, and the
+native plugins' object model and main loop (GObject and GLib, or
+FlutterMacOS and the main run loop).
+
+Windows has the software renderer and inline frames; GPU frames
+([#25](https://github.com/SoFluffyOS/raccoon/issues/25)) and native plugins
+([#36](https://github.com/SoFluffyOS/raccoon/issues/36)) come later. The
+custom device starts the helper with Git for Windows' `bash.exe`, and the
+runner stops when any process from its parent up through Git Bash to the
+tool ends. Measured on a Ryzen 9 7945HX: `flutter run -d raccoon` in
+example/hello reaches the VM service 4.4 s after Launching, hot reload
+takes 71 ms; example/spin draws at 58 fps in a 1200x800 pane (runner 29%,
+client 47% of a core) and 56 fps at 2400x1600 (99%, 130%), where copying
+inline frames is the cost.
 
 ## Issues
 

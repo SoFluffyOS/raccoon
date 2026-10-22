@@ -30,6 +30,14 @@ and pixel ratio, `raccoon-phone` (390×844 @3x), `raccoon-tablet`
 raccoon-tablet` runs a project on the tablet; a host that shows the app
 opens it at that size.
 
+The same holds on Linux, macOS and Windows. On every host the runner is
+reached through a Unix socket in the host's socket folder, which
+`RunnerDiscovery` watches: `$XDG_RUNTIME_DIR/raccoon` on Linux,
+`$TMPDIR/raccoon` on macOS, `%TEMP%\raccoon` on Windows, where dart:io
+speaks AF_UNIX too but no handles cross, so frames come inline. There the
+Flutter tool keeps its devices in `%APPDATA%\.flutter_custom_devices.json`,
+and each command starts the helper with Git for Windows' `bash.exe`.
+
 This package is developed inside the Lumide workspace (`packages/raccoon_runtime`)
 and resolves through it.
 
