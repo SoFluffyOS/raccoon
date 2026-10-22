@@ -102,7 +102,9 @@ final class RunnerProcess {
   final _stderr = StreamController<String>.broadcast();
 
   static const _listeningPrefix = 'raccoon_runner: listening on ';
+  static const _rendererPrefix = 'raccoon_runner: renderer ';
   static const _vmServicePrefix = 'The Dart VM service is listening on ';
+  String? _renderer;
 
   /// The engine's stdout lines.
   Stream<String> get stdout => _stdout.stream;
@@ -113,6 +115,10 @@ final class RunnerProcess {
   /// The Dart VM service URI, once the engine printed it.
   Future<String> get vmServiceUri => _vmService.future;
 
+  /// What rasterizes: `software`, `gl` or `metal`, once the runner said;
+  /// it says before it listens, so this is known after [start].
+  String? get renderer => _renderer;
+
   int get pid => _process.pid;
 
   Future<int> get exitCode => _process.exitCode;
@@ -122,6 +128,9 @@ final class RunnerProcess {
   void _onStdoutLine(String line) {
     if (line.startsWith(_listeningPrefix) && !_listening.isCompleted) {
       _listening.complete();
+    }
+    if (line.startsWith(_rendererPrefix)) {
+      _renderer = line.substring(_rendererPrefix.length).split(' ').first;
     }
     if (line.startsWith(_vmServicePrefix) && !_vmService.isCompleted) {
       _vmService.complete(line.substring(_vmServicePrefix.length).trim());

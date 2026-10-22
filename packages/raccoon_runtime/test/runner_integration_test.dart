@@ -719,6 +719,77 @@ void main() {
   );
 
   test(
+    'a plugin\'s texture draws through the renderer',
+    () async {
+      // The echo plugin registers a 64 by 64 pixel-buffer texture, orange;
+      // example/plugins_app draws it full screen. The frame a client reads
+      // back is then orange: the texture went through the GL renderer and
+      // the compositor. The software renderer takes no textures.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final manifest = File(p.join(temp.path, 'plugins.json'))
+        ..writeAsStringSync(
+          jsonEncode({
+            'plugins': [
+              {
+                'name': 'raccoon_echo',
+                'library': pluginLibrary,
+                'symbol': 'raccoon_echo_plugin_register_with_registrar',
+              },
+            ],
+          }),
+        );
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: pluginsAppAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          plugins: manifest.path,
+        ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        final deadline = DateTime.now().add(const Duration(seconds: 15));
+        while (!output.any((line) => line.startsWith('TEXTURE:')) &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        if (runner.renderer != 'gl') {
+          printOnFailure(
+            'software renderer, no textures: ${output.join('\n')}',
+          );
+          expect(output, contains(startsWith('TEXTURE:error')));
+          return;
+        }
+        expect(output, contains(startsWith('TEXTURE:')));
+        final orange = await client.frames
+            .firstWhere(
+              (f) => _pixel(f, 400, 300) == (r: 0xFF, g: 0x8C, b: 0x00),
+            )
+            .timeout(const Duration(seconds: 15));
+        expect(_pixel(orange, 5, 5), (r: 0xFF, g: 0x8C, b: 0x00));
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready &&
+            File(pluginLibrary).existsSync() &&
+            Directory(pluginsAppAssets).existsSync()
+        ? false
+        : 'build the runner with plugins and example/plugins_app first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'a client that imports GPU buffers gets frames as buffer indices and their descriptors on the GPU socket',
     () async {
       // The spin example animates, so frames keep coming.
