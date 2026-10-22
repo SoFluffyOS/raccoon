@@ -347,7 +347,12 @@ void EngineHost::ServiceVsync() {
     vsync_pending_ = false;
     baton = vsync_baton_;
     start = now;
-    next_frame_nanos_ = now + kFrameNanos;
+    // Frames keep to a 60 Hz grid: the next is due one interval after this
+    // one was, not after the loop woke for it, so a late wake-up costs one
+    // frame and is not carried into every frame after. After a pause longer
+    // than a frame (an idle app) the grid starts again from now.
+    const uint64_t due = now - next_frame_nanos_ > kFrameNanos ? now : next_frame_nanos_;
+    next_frame_nanos_ = due + kFrameNanos;
   }
   loader_.procs().OnVsync(engine_, baton, start, start + kFrameNanos);
 }
