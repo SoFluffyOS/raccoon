@@ -30,4 +30,10 @@ class GlibPump {
 };
 
 }  // namespace raccoon
+#else
+namespace raccoon {
+// Without plugins there is nothing to pump; the type stays so main names
+// it either way.
+class GlibPump {};
+}  // namespace raccoon
 #endif  // RACCOON_HAS_PLUGINS
