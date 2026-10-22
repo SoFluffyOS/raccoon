@@ -2,3 +2,4 @@
 library;
 
 export 'package:raccoon_runtime/src/src.dart';
+export 'src/raccoon_device.dart';

@@ -75,7 +75,7 @@ void main() {
   });
 
   test('a second instance is raccoon-2 with --instance in its commands', () {
-    final config = CustomDeviceConfig(deviceHelper: '/h', instance: 2);
+    final config = CustomDeviceConfig(deviceHelper: '/h', instance: '2');
     expect(config.id, 'raccoon-2');
     expect(config.label, 'Raccoon 2');
     final json = config.toJson();
@@ -114,9 +114,65 @@ void main() {
 
   test('app names carry their instance', () {
     expect(RunnerDiscovery.projectOf('wonders'), 'wonders');
-    expect(RunnerDiscovery.instanceOf('wonders'), 1);
+    expect(RunnerDiscovery.instanceOf('wonders'), '1');
     expect(RunnerDiscovery.projectOf('wonders@2'), 'wonders');
-    expect(RunnerDiscovery.instanceOf('wonders@2'), 2);
-    expect(RunnerDiscovery.instanceOf('odd@x'), 1);
+    expect(RunnerDiscovery.instanceOf('wonders@2'), '2');
+    expect(RunnerDiscovery.instanceOf('odd@x'), 'x');
+    expect(RunnerDiscovery.instanceOf('wonders@tablet'), 'tablet');
+  });
+
+  test('a built-in device registers with its id, label and size', () {
+    final config = CustomDeviceConfig.forDevice(
+      RaccoonDevice.tablet,
+      deviceHelper: '/h',
+      platform: 'linux-x64',
+    );
+    expect(config.id, 'raccoon-tablet');
+    expect(config.label, 'Raccoon Tablet');
+    final json = config.toJson();
+    expect(json['install'], [
+      '/h',
+      'install',
+      '--instance',
+      'tablet',
+      r'${localPath}',
+      r'${appName}',
+    ]);
+    expect(json['runDebug'], [
+      '/h',
+      'run',
+      '--instance',
+      'tablet',
+      '--size',
+      '820x1180@2',
+      r'${appName}',
+      r'${engineOptions}',
+    ]);
+    // The first device and a second run have no size of their own.
+    expect(
+      CustomDeviceConfig.forDevice(
+        RaccoonDevice.host,
+        deviceHelper: '/h',
+        platform: 'linux-x64',
+      ).toJson()['runDebug'],
+      ['/h', 'run', r'${appName}', r'${engineOptions}'],
+    );
+    expect(
+      CustomDeviceConfig(
+        deviceHelper: '/h',
+        instance: '2',
+        platform: 'linux-x64',
+      ).label,
+      'Raccoon 2',
+    );
+    expect(RaccoonDevice.forKey('phone')?.sizeArgument, '390x844@3');
+    expect(RaccoonDevice.forKey('nope'), isNull);
+    expect(RaccoonDevice.all.map((d) => d.id), [
+      'raccoon',
+      'raccoon-2',
+      'raccoon-phone',
+      'raccoon-tablet',
+      'raccoon-desktop',
+    ]);
   });
 }

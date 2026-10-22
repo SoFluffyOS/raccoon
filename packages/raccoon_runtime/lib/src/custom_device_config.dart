@@ -4,20 +4,39 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'package:raccoon_runtime/src/raccoon_device.dart';
+
 /// The "raccoon" entry for the Flutter tool's custom devices, so a stock
 /// `flutter run -d raccoon` builds the bundle, installs it with the device
 /// helper and starts the runner.
 final class CustomDeviceConfig {
   CustomDeviceConfig({
     required this.deviceHelper,
-    this.instance = 1,
+    this.instance = '1',
     String? id,
     String? label,
     this.sdkNameAndVersion = 'Raccoon runtime',
     String? platform,
-  }) : id = id ?? (instance == 1 ? 'raccoon' : 'raccoon-$instance'),
-       label = label ?? (instance == 1 ? 'Raccoon' : 'Raccoon $instance'),
+  }) : id = id ?? (instance == '1' ? 'raccoon' : 'raccoon-$instance'),
+       label =
+           label ??
+           RaccoonDevice.forKey(instance)?.label ??
+           (instance == '1' ? 'Raccoon' : 'Raccoon $instance'),
        platform = platform ?? hostPlatform;
+
+  /// The entry for one of the built-in devices: its id, label and, for
+  /// the sized ones, the size the runner starts at.
+  CustomDeviceConfig.forDevice(
+    RaccoonDevice device, {
+    required String deviceHelper,
+    String? platform,
+  }) : this(
+         deviceHelper: deviceHelper,
+         instance: device.key,
+         id: device.id,
+         label: device.label,
+         platform: platform,
+       );
 
   /// The tool's platform name for the host this process runs on.
   static final String hostPlatform = platformFor(Abi.current());
@@ -39,7 +58,9 @@ final class CustomDeviceConfig {
   /// Which run of a project this device hosts. 1 is `raccoon`; `raccoon-N`
   /// keeps a second run of the same project apart from the first, with its
   /// own socket, app store and data directory (the helper's `--instance`).
-  final int instance;
+  /// The instance key the helper keeps this device's runs under: `1` for
+  /// the first device, `2`, `phone`, `tablet`, `desktop`, or a name.
+  final String instance;
   final String id;
   final String label;
   final String sdkNameAndVersion;
@@ -48,7 +69,13 @@ final class CustomDeviceConfig {
   final String platform;
 
   List<String> get _instanceArgs =>
-      instance == 1 ? const [] : ['--instance', '$instance'];
+      instance == '1' ? const [] : ['--instance', instance];
+
+  /// The size a built-in device starts at, for `run`.
+  List<String> get _sizeArgs => switch (RaccoonDevice.forKey(instance)) {
+    RaccoonDevice(sizeArgument: final size?) => ['--size', size],
+    _ => const [],
+  };
 
   Map<String, Object?> toJson() => {
     'id': id,
@@ -71,6 +98,7 @@ final class CustomDeviceConfig {
       deviceHelper,
       'run',
       ..._instanceArgs,
+      ..._sizeArgs,
       r'${appName}',
       r'${engineOptions}',
     ],

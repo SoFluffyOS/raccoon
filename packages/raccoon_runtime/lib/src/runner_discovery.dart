@@ -60,9 +60,9 @@ final class RunnerDiscovery {
 
   /// Which run of its project an app name is: 1 for `wonders`, 2 for
   /// `wonders@2`.
-  static int instanceOf(String appName) => switch (appName.split('@')) {
-    [_, final instance] => int.tryParse(instance) ?? 1,
-    _ => 1,
+  static String instanceOf(String appName) => switch (appName.split('@')) {
+    [_, final instance] when instance.isNotEmpty => instance,
+    _ => '1',
   };
 
   /// Every runner socket present right now, sorted by path.
