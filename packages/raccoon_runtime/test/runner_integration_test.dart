@@ -815,15 +815,16 @@ void main() {
           greaterThan(1),
         );
 
-        // The GPU socket serves the same description with one descriptor per
-        // buffer riding along.
+        // The GPU socket serves the same description: on Linux with one
+        // descriptor per buffer riding along, on macOS with the surfaces'
+        // IDs after the pairs and nothing riding along.
         gpuSocket = await RawSocket.connect(
           InternetAddress(set.socket, type: InternetAddressType.unix),
           0,
         );
         final handles = <ResourceHandle>[];
         final bytes = <int>[];
-        final gotFds = Completer<void>();
+        final described = Completer<void>();
         gpuSocket.listen((event) {
           if (event != RawSocketEvent.read) return;
           final message = gpuSocket.readMessage();
@@ -832,11 +833,19 @@ void main() {
           for (final control in message.controlMessages) {
             handles.addAll(control.extractHandles());
           }
-          if (handles.length >= 3 && !gotFds.isCompleted) gotFds.complete();
+          final whole = MessageUnframer()
+              .add(Uint8List.fromList(bytes))
+              .any((m) => String.fromCharCodes(m.sublist(0, 4)) == 'RGPU');
+          if (whole &&
+              (Platform.isMacOS || handles.length >= 4) &&
+              !described.isCompleted) {
+            described.complete();
+          }
         });
-        await gotFds.future.timeout(const Duration(seconds: 10));
-        final described = MessageUnframer();
-        final messages = described.add(Uint8List.fromList(bytes)).toList();
+        await described.future.timeout(const Duration(seconds: 10));
+        final messages = MessageUnframer()
+            .add(Uint8List.fromList(bytes))
+            .toList();
         expect(messages, isNotEmpty);
         // A fixed layout, so a native client needs no protobuf.
         final data = ByteData.sublistView(messages.first);
@@ -846,16 +855,30 @@ void main() {
         expect(data.getUint32(12, Endian.little), set.width);
         expect(data.getUint32(16, Endian.little), set.height);
         expect(data.getUint32(20, Endian.little), set.fourcc);
-        expect(messages.first.length, 32 + 4 * 8);
-        expect(handles.length, greaterThanOrEqualTo(4));
+        if (Platform.isMacOS) {
+          expect(messages.first.length, 32 + 4 * 8 + 4 * 4);
+          final ids = [
+            for (var i = 0; i < 4; i++)
+              data.getUint32(32 + 4 * 8 + i * 4, Endian.little),
+          ];
+          expect(ids.toSet(), hasLength(4));
+          expect(ids, everyElement(isNot(0)));
+          expect(handles, isEmpty);
+        } else {
+          expect(messages.first.length, 32 + 4 * 8);
+          expect(handles.length, greaterThanOrEqualTo(4));
+        }
 
         // Where EGL has native fences, each frame's fence comes ahead of it:
-        // 'RFEN', generation, index, one descriptor riding along.
+        // 'RFEN', generation, index, one descriptor riding along. Metal
+        // names a frame once it is drawn instead, so there are none.
         List<Uint8List> fences() => MessageUnframer()
             .add(Uint8List.fromList(bytes))
             .where((m) => String.fromCharCodes(m.sublist(0, 4)) == 'RFEN')
             .toList();
-        final deadline = DateTime.now().add(const Duration(seconds: 3));
+        final deadline = DateTime.now().add(
+          Platform.isMacOS ? Duration.zero : const Duration(seconds: 3),
+        );
         while (fences().isEmpty && DateTime.now().isBefore(deadline)) {
           await Future<void>.delayed(const Duration(milliseconds: 50));
         }
