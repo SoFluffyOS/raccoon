@@ -24,6 +24,13 @@ constexpr size_t kMaxMessage = 64 * 1024 * 1024;
 #if defined(__linux__)
 
 constexpr int kSendFlags = MSG_NOSIGNAL;
+// Received descriptors must not leak into the apps the engine may spawn;
+// Linux closes them on exec from recvmsg, elsewhere fcntl does it.
+#ifdef MSG_CMSG_CLOEXEC
+constexpr int kRecvFlags = MSG_CMSG_CLOEXEC;
+#else
+constexpr int kRecvFlags = 0;
+#endif
 
 int OpenListenSocket() {
   return socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
@@ -158,14 +165,18 @@ bool RunnerServer::ReadAvailable() {
       header.msg_iovlen = 1;
       header.msg_control = control;
       header.msg_controllen = sizeof(control);
-      got = recvmsg(client_fd_, &header, MSG_CMSG_CLOEXEC);
+      got = recvmsg(client_fd_, &header, kRecvFlags);
       if (got > 0) {
         for (cmsghdr* cmsg = CMSG_FIRSTHDR(&header); cmsg != nullptr;
              cmsg = CMSG_NXTHDR(&header, cmsg)) {
           if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS) continue;
           const size_t count = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
           const int* fds = reinterpret_cast<const int*>(CMSG_DATA(cmsg));
-          fds_in_.insert(fds_in_.end(), fds, fds + count);
+          for (size_t i = 0; i < count; ++i) {
+            // Where recvmsg cannot close them on exec, do it by hand.
+            if (kRecvFlags == 0) fcntl(fds[i], F_SETFD, FD_CLOEXEC);
+            fds_in_.push_back(fds[i]);
+          }
         }
       }
     } else {
