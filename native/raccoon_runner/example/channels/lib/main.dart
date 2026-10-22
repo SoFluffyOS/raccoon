@@ -12,7 +12,7 @@ import 'package:flutter/widgets.dart';
 /// result does not depend on a client. Expects the runner's default 800x600
 /// view at a pixel ratio of 1 and an empty data directory, if any. Prints
 /// XDG_DATA_HOME: and what the app sees, for the data directory test, then
-/// LOCALES: and BRIGHTNESS:, the host's as the runner told the engine.
+/// LOCALES:, BRIGHTNESS: and LIFECYCLE:, as the runner told the engine.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Where the Dart-only Linux plugins would put the app's files: the runner
@@ -151,6 +151,7 @@ Future<void> main() async {
   final dispatcher = PlatformDispatcher.instance;
   print('LOCALES:${dispatcher.locales.join(',')}');
   print('BRIGHTNESS:${dispatcher.platformBrightness.name}');
+  print('LIFECYCLE:${WidgetsBinding.instance.lifecycleState?.name}');
   runApp(ChannelsApp(ok: failures.isEmpty));
 }
 

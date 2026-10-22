@@ -123,6 +123,11 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
                             &display, 1);
   Resize(options.width, options.height, options.pixel_ratio);
   SendHostSettings();
+  // The app is shown, as far as the runner knows: desktop embeddings say
+  // so once the engine runs, and without it the app's lifecycle stays null.
+  static constexpr char kResumed[] = "AppLifecycleState.resumed";
+  SendPlatformMessage("flutter/lifecycle", reinterpret_cast<const uint8_t*>(kResumed),
+                      sizeof(kResumed) - 1);
   if (on_log_) on_log_("raccoon_runner", "raccoon_runner: renderer " + renderer_);
   return true;
 }

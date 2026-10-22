@@ -39,7 +39,9 @@ Design notes: `docs/internal_docs/raccoon/`.
   as a desktop embedding does: on macOS the preferred languages, light or
   dark, and the locale's 12- or 24-hour clock; on Linux the locales of
   `LANGUAGE`, `LC_ALL`, `LC_MESSAGES` and `LANG`. Without it an app saw no
-  locales and a light host.
+  locales and a light host. It also says the app is resumed
+  (`flutter/lifecycle`), as desktop embeddings do once the engine runs;
+  before, `lifecycleState` stayed null.
 - Delivers keys the way the framework expects: the key data, then the
   legacy `flutter/keyevent` message it waits for before dispatching. Without
   the second, no key ever reaches the app.

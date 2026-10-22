@@ -615,7 +615,7 @@ void main() {
   );
 
   test(
-    'the app sees the host\'s locales and appearance',
+    'the app sees the host\'s locales and appearance, and is resumed',
     () async {
       // A desktop embedding tells its app the host's preferred languages
       // and whether it is dark; the runner does the same after the engine
@@ -642,10 +642,12 @@ void main() {
       runner.stdout.listen(output.add);
       try {
         final deadline = DateTime.now().add(const Duration(seconds: 15));
-        while (!output.any((line) => line.startsWith('BRIGHTNESS:')) &&
+        while (!output.any((line) => line.startsWith('LIFECYCLE:')) &&
             DateTime.now().isBefore(deadline)) {
           await Future<void>.delayed(const Duration(milliseconds: 100));
         }
+        // Resumed, as a desktop embedding says once the engine runs.
+        expect(output, contains('LIFECYCLE:resumed'));
         final locales = output.firstWhere(
           (line) => line.startsWith('LOCALES:'),
           orElse: () => 'LOCALES: none printed',
