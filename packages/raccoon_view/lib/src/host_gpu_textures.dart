@@ -3,13 +3,20 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 /// The host's native side for GPU buffers: a Flutter texture fed from the
-/// runner's GPU socket. See `linux/raccoon_view_plugin.cc`.
+/// runner's GPU socket. See `linux/raccoon_view_plugin.cc` and
+/// `macos/raccoon_view/Sources/raccoon_view/RaccoonViewPlugin.mm`.
 abstract interface class HostGpuTextures {
   /// The implementation for this host, null where there is none.
-  static HostGpuTextures? forHost() => switch (Platform.isLinux) {
-    true => const MethodChannelGpuTextures(),
-    false => null,
+  static HostGpuTextures? forHost() => switch (Platform.operatingSystem) {
+    // GL textures start at the bottom left; Metal's at the top.
+    'linux' => const MethodChannelGpuTextures(bottomUp: true),
+    'macos' => const MethodChannelGpuTextures(bottomUp: false),
+    _ => null,
   };
+
+  /// Whether the texture's first row is the frame's last, as a GL texture's
+  /// is: the view then draws it the other way up.
+  bool get bottomUp;
 
   /// Registers a texture; returns its id for a [Texture] widget.
   Future<int> create();
@@ -27,9 +34,12 @@ abstract interface class HostGpuTextures {
 
 /// [HostGpuTextures] over the plugin's method channel.
 final class MethodChannelGpuTextures implements HostGpuTextures {
-  const MethodChannelGpuTextures();
+  const MethodChannelGpuTextures({required this.bottomUp});
 
   static const channel = MethodChannel('raccoon_view/gpu');
+
+  @override
+  final bool bottomUp;
 
   @override
   Future<int> create() async => await channel.invokeMethod<int>('create') ?? -1;

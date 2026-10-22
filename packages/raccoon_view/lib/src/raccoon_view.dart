@@ -302,11 +302,11 @@ class _RaccoonViewState extends State<RaccoonView> {
                 alignment: Alignment.topLeft,
                 fit: StackFit.expand,
                 children: [
-                  switch ((_gpuLive, _textureId)) {
-                    // GL textures start at the bottom left; the frame is
-                    // drawn the other way up.
-                    (true, final id?) => Transform.flip(
-                      flipY: true,
+                  switch ((_gpuLive, _textureId, _gpu)) {
+                    // A texture that starts at the bottom left (GL's do)
+                    // is drawn the other way up.
+                    (true, final id?, final gpu?) => Transform.flip(
+                      flipY: gpu.bottomUp,
                       child: Texture(textureId: id),
                     ),
                     _ => RaccoonFrameView(frame: _image, fit: BoxFit.fill),

@@ -22,6 +22,8 @@ flutter:
     platforms:
       linux:
         pluginClass: RaccoonViewPlugin
+      macos:
+        pluginClass: RaccoonViewPlugin
 
 dev_dependencies:
   flutter_test:

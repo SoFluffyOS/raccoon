@@ -39,10 +39,14 @@ class _GpuConnection implements RunnerConnection, GpuBufferConnection {
 }
 
 class _FakeTextures implements HostGpuTextures {
-  _FakeTextures({this.releases = false});
+  _FakeTextures({this.releases = false, this.bottomUp = true});
 
   /// Whether this host gives buffers back to the runner itself.
   final bool releases;
+
+  @override
+  final bool bottomUp;
+
   final calls = <String>[];
 
   @override
@@ -64,6 +68,15 @@ class _FakeTextures implements HostGpuTextures {
   @override
   Future<void> dispose(int textureId) async => calls.add('dispose $textureId');
 }
+
+/// The transform the texture is drawn through.
+Matrix4 _flipOf(WidgetTester tester) => tester
+    .widget<Transform>(
+      find
+          .ancestor(of: find.byType(Texture), matching: find.byType(Transform))
+          .first,
+    )
+    .transform;
 
 void main() {
   testWidgets(
@@ -102,6 +115,8 @@ void main() {
       expect(connection.released, isEmpty);
       expect(find.byType(Texture), findsOneWidget);
       expect(tester.widget<Texture>(find.byType(Texture)).textureId, 7);
+      // A GL texture starts at the bottom: drawn the other way up.
+      expect(_flipOf(tester), Matrix4.diagonal3Values(1, -1, 1));
 
       connection.frameController.add(
         rc.Frame(
@@ -167,6 +182,40 @@ void main() {
     await tester.pump();
     expect(find.byType(Texture), findsOneWidget);
     expect(find.byType(RaccoonFrameView), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a texture that starts at the top is drawn as it is', (
+    tester,
+  ) async {
+    final connection = _GpuConnection();
+    final textures = _FakeTextures(releases: true, bottomUp: false);
+    await tester.pumpWidget(
+      RaccoonView(connection: connection, gpuTextures: textures),
+    );
+    connection.sets.add(
+      rc.GpuBuffers(
+        generation: 1,
+        count: 3,
+        width: 8,
+        height: 8,
+        socket: '/run/r.gpu',
+      ),
+    );
+    await tester.pump();
+    connection.frameController.add(
+      rc.Frame(
+        sequence: Int64(1),
+        inGpuBuffer: true,
+        bufferIndex: 0,
+        gpuGeneration: 1,
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(Texture), findsOneWidget);
+    expect(_flipOf(tester), Matrix4.identity());
 
     await tester.pumpWidget(const SizedBox());
   });
