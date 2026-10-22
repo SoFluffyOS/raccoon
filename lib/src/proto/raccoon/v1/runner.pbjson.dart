@@ -529,7 +529,7 @@ const Plugins$json = {
       '3': 1,
       '4': 3,
       '5': 11,
-      '6': '.raccoon.v1.PluginStatus',
+      '6': '.raccoon.v1.PluginReport',
       '10': 'plugins'
     },
   ],
@@ -537,12 +537,12 @@ const Plugins$json = {
 
 /// Descriptor for `Plugins`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List pluginsDescriptor = $convert.base64Decode(
-    'CgdQbHVnaW5zEjIKB3BsdWdpbnMYASADKAsyGC5yYWNjb29uLnYxLlBsdWdpblN0YXR1c1IHcG'
+    'CgdQbHVnaW5zEjIKB3BsdWdpbnMYASADKAsyGC5yYWNjb29uLnYxLlBsdWdpblJlcG9ydFIHcG'
     'x1Z2lucw==');
 
-@$core.Deprecated('Use pluginStatusDescriptor instead')
-const PluginStatus$json = {
-  '1': 'PluginStatus',
+@$core.Deprecated('Use pluginReportDescriptor instead')
+const PluginReport$json = {
+  '1': 'PluginReport',
   '2': [
     {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
     {
@@ -557,9 +557,9 @@ const PluginStatus$json = {
   ],
 };
 
-/// Descriptor for `PluginStatus`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List pluginStatusDescriptor = $convert.base64Decode(
-    'CgxQbHVnaW5TdGF0dXMSEgoEbmFtZRgBIAEoCVIEbmFtZRItCgVzdGF0ZRgCIAEoDjIXLnJhY2'
+/// Descriptor for `PluginReport`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List pluginReportDescriptor = $convert.base64Decode(
+    'CgxQbHVnaW5SZXBvcnQSEgoEbmFtZRgBIAEoCVIEbmFtZRItCgVzdGF0ZRgCIAEoDjIXLnJhY2'
     'Nvb24udjEuUGx1Z2luU3RhdGVSBXN0YXRlEhYKBmRldGFpbBgDIAEoCVIGZGV0YWls');
 
 @$core.Deprecated('Use busyDescriptor instead')

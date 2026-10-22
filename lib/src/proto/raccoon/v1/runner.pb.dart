@@ -1931,7 +1931,7 @@ class TextField extends $pb.GeneratedMessage {
 /// Hello, and again when it changes.
 class Plugins extends $pb.GeneratedMessage {
   factory Plugins({
-    $core.Iterable<PluginStatus>? plugins,
+    $core.Iterable<PluginReport>? plugins,
   }) {
     final result = Plugins._();
     if (plugins != null) result.plugins.addAll(plugins);
@@ -1951,8 +1951,8 @@ class Plugins extends $pb.GeneratedMessage {
       _omitMessageNames ? '' : 'Plugins',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
       createEmptyInstance: Plugins.$_createMessage)
-    ..pPM<PluginStatus>(1, _omitFieldNames ? '' : 'plugins',
-        subBuilder: PluginStatus.$_createMessage)
+    ..pPM<PluginReport>(1, _omitFieldNames ? '' : 'plugins',
+        subBuilder: PluginReport.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1976,35 +1976,35 @@ class Plugins extends $pb.GeneratedMessage {
   static Plugins? _defaultInstance;
 
   @$pb.TagNumber(1)
-  $pb.PbList<PluginStatus> get plugins => $_getList(0);
+  $pb.PbList<PluginReport> get plugins => $_getList(0);
 }
 
-class PluginStatus extends $pb.GeneratedMessage {
-  factory PluginStatus({
+class PluginReport extends $pb.GeneratedMessage {
+  factory PluginReport({
     $core.String? name,
     PluginState? state,
     $core.String? detail,
   }) {
-    final result = PluginStatus._();
+    final result = PluginReport._();
     if (name != null) result.name = name;
     if (state != null) result.state = state;
     if (detail != null) result.detail = detail;
     return result;
   }
 
-  PluginStatus._();
+  PluginReport._();
 
-  factory PluginStatus.fromBuffer($core.List<$core.int> data,
+  factory PluginReport.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      PluginStatus()..mergeFromBuffer(data, registry);
-  factory PluginStatus.fromJson($core.String json,
+      PluginReport()..mergeFromBuffer(data, registry);
+  factory PluginReport.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      PluginStatus()..mergeFromJson(json, registry);
+      PluginReport()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
-      _omitMessageNames ? '' : 'PluginStatus',
+      _omitMessageNames ? '' : 'PluginReport',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
-      createEmptyInstance: PluginStatus.$_createMessage)
+      createEmptyInstance: PluginReport.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
     ..aE<PluginState>(2, _omitFieldNames ? '' : 'state',
         enumValues: PluginState.values)
@@ -2012,26 +2012,26 @@ class PluginStatus extends $pb.GeneratedMessage {
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  PluginStatus clone() => deepCopy();
+  PluginReport clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  PluginStatus copyWith(void Function(PluginStatus) updates) =>
-      super.copyWith((message) => updates(message as PluginStatus))
-          as PluginStatus;
+  PluginReport copyWith(void Function(PluginReport) updates) =>
+      super.copyWith((message) => updates(message as PluginReport))
+          as PluginReport;
 
   @$core.override
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
-  @$core.Deprecated('Use PluginStatus() / PluginStatus.new instead')
-  static PluginStatus create() => PluginStatus._();
-  static $pb.GeneratedMessage $_createMessage() => PluginStatus._();
+  @$core.Deprecated('Use PluginReport() / PluginReport.new instead')
+  static PluginReport create() => PluginReport._();
+  static $pb.GeneratedMessage $_createMessage() => PluginReport._();
   @$core.override
-  PluginStatus createEmptyInstance() => PluginStatus._();
+  PluginReport createEmptyInstance() => PluginReport._();
   @$core.pragma('dart2js:noInline')
-  static PluginStatus getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<PluginStatus>(
-          PluginStatus.$_createMessage);
-  static PluginStatus? _defaultInstance;
+  static PluginReport getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<PluginReport>(
+          PluginReport.$_createMessage);
+  static PluginReport? _defaultInstance;
 
   @$pb.TagNumber(1)
   $core.String get name => $_getSZ(0);

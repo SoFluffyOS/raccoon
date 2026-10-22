@@ -1,6 +1,6 @@
 ## 0.6.0
 
-- `Plugins`: what became of the project's native plugins on the runner's host, one `PluginStatus` per plugin: loaded, failed, built nothing, no implementation for this host, or answered by the runner itself. Sent after `RunnerHello`.
+- `Plugins`: what became of the project's native plugins on the runner's host, one `PluginReport` per plugin: loaded, failed, built nothing, no implementation for this host, or answered by the runner itself. Sent after `RunnerHello`.
 
 ## 0.5.0
 
