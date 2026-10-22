@@ -19,6 +19,7 @@ final class RunnerLaunch {
     this.width = 800,
     this.height = 600,
     this.pixelRatio = 1.0,
+    this.dataDir,
   });
 
   final String runnerBinary;
@@ -30,6 +31,11 @@ final class RunnerLaunch {
   final int height;
   final double pixelRatio;
 
+  /// Where the app's files live: its preferences, and on Linux the XDG
+  /// base directories the Dart-only plugins use. Without one every app
+  /// hosted by this runner binary shares the runner's own.
+  final String? dataDir;
+
   List<String> get arguments => [
     'serve',
     '--engine-dir',
@@ -40,6 +46,7 @@ final class RunnerLaunch {
     icuData,
     '--socket',
     endpoint.path,
+    if (dataDir case final dir?) ...['--data-dir', dir],
     '--width',
     '$width',
     '--height',

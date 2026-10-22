@@ -603,6 +603,52 @@ void main() {
   );
 
   test(
+    'a data directory keeps the app\'s files apart from other apps\'',
+    () async {
+      // On Linux, path_provider and shared_preferences are Dart only and put
+      // every app hosted by one executable under the same XDG directory; the
+      // runner points XDG_DATA_HOME into the app's data directory instead.
+      // example/channels prints what it sees.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final dataDir = p.join(temp.path, 'data');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: channelsAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          dataDir: dataDir,
+        ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      try {
+        final deadline = DateTime.now().add(const Duration(seconds: 15));
+        while (!output.any((line) => line.startsWith('XDG_DATA_HOME:')) &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        expect(
+          output,
+          contains('XDG_DATA_HOME:${p.join(dataDir, 'xdg', 'data')}'),
+        );
+      } finally {
+        final client = await RunnerClient.connect(endpoint);
+        client.shutdown();
+        await client.close();
+        expect(await runner.exitCode.timeout(const Duration(seconds: 10)), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready && Directory(channelsAssets).existsSync()
+        ? false
+        : 'build the runner and example/channels first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'a client that imports GPU buffers gets frames as buffer indices and their descriptors on the GPU socket',
     () async {
       // The spin example animates, so frames keep coming.
