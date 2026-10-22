@@ -7,8 +7,13 @@ import 'package:raccoon_view/src/frame_decoder.dart';
 import 'package:raccoon_view/src/disconnected_overlay.dart';
 import 'package:raccoon_view/src/frame_view.dart';
 import 'package:raccoon_runtime/raccoon_runtime.dart'
-    show RunnerConnection, ComposingConnection, GpuBufferConnection;
+    show
+        RunnerConnection,
+        ComposingConnection,
+        GpuBufferConnection,
+        ChannelConnection;
 import 'package:raccoon_view/src/host_gpu_textures.dart';
+import 'package:raccoon_view/src/hosted_mouse_cursor.dart';
 import 'package:raccoon_view/src/hosted_text_input.dart';
 import 'package:raccoon_view/src/input_mapping.dart';
 
@@ -65,6 +70,8 @@ class _RaccoonViewState extends State<RaccoonView> {
   StreamSubscription<rc.Frame>? _frames;
   StreamSubscription<rc.TextField>? _fields;
   HostedTextInput? _text;
+  HostedMouseCursor? _mouseCursor;
+  MouseCursor _cursor = MouseCursor.defer;
   ui.Image? _image;
   rc.Frame? _pending;
   bool _decoding = false;
@@ -85,6 +92,7 @@ class _RaccoonViewState extends State<RaccoonView> {
     unawaited(_frames?.cancel());
     _unsubscribeText();
     _unsubscribeGpu();
+    _unsubscribeCursor();
     _sentSize = null;
     _subscribe();
   }
@@ -94,6 +102,7 @@ class _RaccoonViewState extends State<RaccoonView> {
     unawaited(_frames?.cancel());
     _unsubscribeText();
     _unsubscribeGpu();
+    _unsubscribeCursor();
     _focus.dispose();
     _image?.dispose();
     super.dispose();
@@ -102,6 +111,7 @@ class _RaccoonViewState extends State<RaccoonView> {
   void _subscribe() {
     _subscribeText();
     _subscribeGpu();
+    _subscribeCursor();
     _lost = false;
     _frames = widget.connection.frames.listen(
       _onFrame,
@@ -190,6 +200,22 @@ class _RaccoonViewState extends State<RaccoonView> {
     _gpuLive = false;
   }
 
+  /// A connection that can serve the app's channels takes its mouse cursor
+  /// too; until the app asks for one the view defers to what is around it.
+  void _subscribeCursor() {
+    final connection = widget.connection;
+    if (connection is! ChannelConnection) return;
+    _mouseCursor = HostedMouseCursor(connection, (cursor) {
+      if (mounted && cursor != _cursor) setState(() => _cursor = cursor);
+    });
+  }
+
+  void _unsubscribeCursor() {
+    _mouseCursor?.detach();
+    _mouseCursor = null;
+    _cursor = MouseCursor.defer;
+  }
+
   void _unsubscribeText() {
     unawaited(_fields?.cancel());
     _fields = null;
@@ -199,7 +225,11 @@ class _RaccoonViewState extends State<RaccoonView> {
 
   void _onLost() {
     if (!mounted || _lost) return;
-    setState(() => _lost = true);
+    // The app's cursor went with it.
+    setState(() {
+      _lost = true;
+      _cursor = MouseCursor.defer;
+    });
     widget.onDisconnected?.call();
   }
 
@@ -323,34 +353,38 @@ class _RaccoonViewState extends State<RaccoonView> {
           focusNode: _focus,
           autofocus: widget.autofocus,
           onKeyEvent: _onKey,
-          child: Listener(
-            onPointerDown: _onPointer,
-            onPointerMove: _onPointer,
-            onPointerUp: _onPointer,
-            onPointerHover: _onPointer,
-            onPointerCancel: _onPointer,
-            onPointerSignal: _onPointer,
-            onPointerPanZoomStart: _onPointer,
-            onPointerPanZoomUpdate: _onPointer,
-            onPointerPanZoomEnd: _onPointer,
-            behavior: HitTestBehavior.opaque,
-            child: SizedBox.expand(
-              child: Stack(
-                // No text direction needed: hosts need not provide one.
-                alignment: Alignment.topLeft,
-                fit: StackFit.expand,
-                children: [
-                  switch ((_gpuLive, _textureId, _gpu)) {
-                    // A texture that starts at the bottom left (GL's do)
-                    // is drawn the other way up.
-                    (true, final id?, final gpu?) => Transform.flip(
-                      flipY: gpu.bottomUp,
-                      child: Texture(textureId: id),
-                    ),
-                    _ => RaccoonFrameView(frame: _image, fit: BoxFit.fill),
-                  },
-                  if (_lost) const DisconnectedOverlay(),
-                ],
+          child: MouseRegion(
+            // What the app asks for (see HostedMouseCursor).
+            cursor: _cursor,
+            child: Listener(
+              onPointerDown: _onPointer,
+              onPointerMove: _onPointer,
+              onPointerUp: _onPointer,
+              onPointerHover: _onPointer,
+              onPointerCancel: _onPointer,
+              onPointerSignal: _onPointer,
+              onPointerPanZoomStart: _onPointer,
+              onPointerPanZoomUpdate: _onPointer,
+              onPointerPanZoomEnd: _onPointer,
+              behavior: HitTestBehavior.opaque,
+              child: SizedBox.expand(
+                child: Stack(
+                  // No text direction needed: hosts need not provide one.
+                  alignment: Alignment.topLeft,
+                  fit: StackFit.expand,
+                  children: [
+                    switch ((_gpuLive, _textureId, _gpu)) {
+                      // A texture that starts at the bottom left (GL's do)
+                      // is drawn the other way up.
+                      (true, final id?, final gpu?) => Transform.flip(
+                        flipY: gpu.bottomUp,
+                        child: Texture(textureId: id),
+                      ),
+                      _ => RaccoonFrameView(frame: _image, fit: BoxFit.fill),
+                    },
+                    if (_lost) const DisconnectedOverlay(),
+                  ],
+                ),
               ),
             ),
           ),

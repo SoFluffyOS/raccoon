@@ -1,8 +1,10 @@
 # raccoon_view
 
 Flutter widgets that show an app hosted by the Raccoon runtime inside Lumide:
-the frame view, pointer and key forwarding, and the hosted app's text field
-mirrored into the host's input method.
+the frame view, pointer and key forwarding, the hosted app's mouse cursor
+(what it activates on `flutter/mousecursor`, shown over the view when the
+connection serves channels), and the hosted app's text field mirrored into
+the host's input method.
 
 On Linux and macOS it is a plugin too. When the connection carries GPU
 buffers, the native side takes the runner's buffers from its GPU socket and

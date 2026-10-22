@@ -1,4 +1,11 @@
+import 'dart:typed_data';
+
 import 'package:raccoon/raccoon.dart';
+
+/// Serves one platform channel for the hosted app, the way a desktop
+/// embedder's plugin would. Returns the reply bytes, or null for "no plugin",
+/// which the app sees as a null reply.
+typedef PlatformChannelHandler = Future<Uint8List?> Function(Uint8List data);
 
 /// What a view needs from a runner: frames in, size and input out.
 /// [RunnerClient] implements it over the socket; tests use fakes.
@@ -43,4 +50,13 @@ abstract interface class GpuBufferConnection implements RunnerConnection {
 
   /// Gives a GPU buffer back to the runner once the host is done with it.
   void releaseGpuBuffer(int generation, int index);
+}
+
+/// A connection that can serve one of the hosted app's channels: what the
+/// app sends on [channel] goes to the handler, whose answer goes back. A
+/// view serves what belongs to it this way (the app's mouse cursor).
+abstract interface class ChannelConnection implements RunnerConnection {
+  void registerChannel(String channel, PlatformChannelHandler handler);
+
+  void unregisterChannel(String channel);
 }

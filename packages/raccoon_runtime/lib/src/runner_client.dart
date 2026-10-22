@@ -10,15 +10,14 @@ import 'package:raccoon_runtime/src/runner_endpoint.dart';
 import 'package:raccoon_runtime/src/runner_transport.dart';
 import 'package:raccoon_runtime/src/startup_failure.dart';
 
-/// Serves one platform channel for the hosted app, the way a desktop
-/// embedder's plugin would. Returns the reply bytes, or null for "no plugin",
-/// which the app sees as a null reply.
-typedef PlatformChannelHandler = Future<Uint8List?> Function(Uint8List data);
-
 /// A connection to one runner: frames, logs and platform messages in; resize,
 /// input and platform replies out.
 final class RunnerClient
-    implements RunnerConnection, ComposingConnection, GpuBufferConnection {
+    implements
+        RunnerConnection,
+        ComposingConnection,
+        GpuBufferConnection,
+        ChannelConnection {
   RunnerClient._(
     this._transport, {
     required this.composes,
@@ -220,10 +219,12 @@ final class RunnerClient
 
   /// Serves [channel] with [handler]. Channels without a handler get a
   /// "no plugin" reply.
+  @override
   void registerChannel(String channel, PlatformChannelHandler handler) {
     _channels[channel] = handler;
   }
 
+  @override
   void unregisterChannel(String channel) => _channels.remove(channel);
 
   void send(ClientMessage message) {
