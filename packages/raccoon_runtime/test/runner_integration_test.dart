@@ -654,10 +654,16 @@ void main() {
         );
         if (Platform.isMacOS) {
           expect(locales, isNot('LOCALES:'));
-          final style = await Process.run('defaults', [
-            'read',
-            '-g',
-            'AppleInterfaceStyle',
+          // Read as apps read it, through NSUserDefaults: managed
+          // preferences included, which `defaults read -g` leaves out.
+          final style = await Process.run('osascript', [
+            '-l',
+            'JavaScript',
+            '-e',
+            'ObjC.import("Foundation"); '
+                'var s = \$.NSUserDefaults.standardUserDefaults'
+                '.stringForKey("AppleInterfaceStyle"); '
+                's.isNil() ? "" : ObjC.unwrap(s)',
           ]);
           final dark = '${style.stdout}'.trim().toLowerCase() == 'dark';
           expect(output, contains('BRIGHTNESS:${dark ? 'dark' : 'light'}'));
