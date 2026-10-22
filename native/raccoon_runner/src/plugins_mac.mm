@@ -13,7 +13,10 @@
 #import <Metal/Metal.h>
 #include <dlfcn.h>
 
+#include <unistd.h>
+
 #include <cstdio>
+#include <cstring>
 #include <mutex>
 #include <unordered_map>
 
@@ -432,8 +435,41 @@ bool PluginHost::Prepare(const std::string& flutter_framework, std::string* erro
     return false;
   }
   // Plugins name it by @rpath; dyld takes this copy for them once it is in.
-  if (dlopen(flutter_framework.c_str(), RTLD_NOW | RTLD_GLOBAL) == nullptr) {
-    *error = dlerror();
+  // FlutterMacOS and the engine library carry many of the same Objective-C
+  // classes (channels, codecs, the Darwin helpers), and the runtime prints
+  // a line for each as the framework maps. Same engine revision, nothing
+  // to act on: those lines go, anything else printed meanwhile stays.
+  fflush(stderr);
+  const int saved = dup(STDERR_FILENO);
+  FILE* held = tmpfile();
+  if (saved >= 0 && held != nullptr) dup2(fileno(held), STDERR_FILENO);
+  void* handle = dlopen(flutter_framework.c_str(), RTLD_NOW | RTLD_GLOBAL);
+  const std::string why = handle == nullptr ? dlerror() : "";
+  int shared = 0;
+  if (saved >= 0 && held != nullptr) {
+    fflush(stderr);
+    dup2(saved, STDERR_FILENO);
+    rewind(held);
+    char line[4096];
+    while (fgets(line, sizeof(line), held) != nullptr) {
+      if (std::strstr(line, " is implemented in both ") != nullptr &&
+          std::strstr(line, "FlutterMacOS") != nullptr) {
+        ++shared;
+        continue;
+      }
+      std::fputs(line, stderr);
+    }
+  }
+  if (held != nullptr) fclose(held);
+  if (saved >= 0) close(saved);
+  if (shared > 0) {
+    std::fprintf(stderr,
+                 "raccoon_runner: FlutterMacOS shares %d Objective-C classes with the engine "
+                 "library, the same revision; the runtime's warnings are left out\n",
+                 shared);
+  }
+  if (handle == nullptr) {
+    *error = why;
     return false;
   }
   return true;

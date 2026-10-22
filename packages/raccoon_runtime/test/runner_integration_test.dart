@@ -848,6 +848,11 @@ void main() {
         ),
       );
       final client = await RunnerClient.connect(endpoint);
+      // The runner's stderr from before the first frame, relayed.
+      final logs = <String>[];
+      final logged = client.messages
+          .where((m) => m.hasLog())
+          .listen((m) => logs.add(m.log.message));
       try {
         await client.hello.timeout(const Duration(seconds: 10));
         final plugins = await client.plugins.first.timeout(
@@ -866,7 +871,18 @@ void main() {
           PluginState.PLUGIN_STATE_BUILT_IN,
         );
         expect(client.latestPlugins, plugins);
+        if (Platform.isMacOS) {
+          // FlutterMacOS shares classes with the engine library; the
+          // runtime's line for each is left out, one line says so.
+          await Future<void>.delayed(const Duration(seconds: 1));
+          expect(
+            logs.where((l) => l.contains('is implemented in both')),
+            isEmpty,
+          );
+          expect(logs, contains(contains('FlutterMacOS shares')));
+        }
       } finally {
+        await logged.cancel();
         client.shutdown();
         await client.close();
         expect(await _exitCode(runner), 0);
