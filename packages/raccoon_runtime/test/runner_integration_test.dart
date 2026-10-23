@@ -1142,6 +1142,12 @@ void main() {
       final client = await RunnerClient.connect(endpoint, gpuBuffers: true);
       try {
         await client.hello.timeout(const Duration(seconds: 10));
+        // Without a Vulkan device (a CI machine) the runner rasterizes in
+        // software and offers no textures: nothing to open.
+        if (runner.renderer != 'vulkan') {
+          printOnFailure('renderer ${runner.renderer}, no shared textures');
+          return;
+        }
         final set = await client.gpuBufferSets.first.timeout(
           const Duration(seconds: 10),
         );
