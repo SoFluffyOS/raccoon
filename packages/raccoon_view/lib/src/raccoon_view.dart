@@ -126,7 +126,7 @@ class _RaccoonViewState extends State<RaccoonView> {
     final connection = widget.connection;
     if (connection is! ComposingConnection) return;
     if (!connection.composes) return;
-    final text = HostedTextInput(connection);
+    final text = HostedTextInput(connection, _focus);
     _text = text;
     _fields = connection.textFields.listen(text.field);
   }
@@ -219,7 +219,7 @@ class _RaccoonViewState extends State<RaccoonView> {
   void _unsubscribeText() {
     unawaited(_fields?.cancel());
     _fields = null;
-    _text?.detach();
+    _text?.dispose();
     _text = null;
   }
 

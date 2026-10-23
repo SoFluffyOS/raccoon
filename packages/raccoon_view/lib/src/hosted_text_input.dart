@@ -1,20 +1,27 @@
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show FocusNode;
 import 'package:raccoon/raccoon.dart' as rc;
 import 'package:raccoon_runtime/raccoon_runtime.dart' show ComposingConnection;
 
 /// The hosted app's active text field, mirrored in the host's own input
-/// method: the host attaches a text input connection while the app has a
-/// field focused, keeps its editing value equal to the field's, and sends
-/// what the input method produces, composition included, back to the runner.
+/// method: while the view has focus, the host attaches a text input
+/// connection for the field, keeps its editing value equal to the field's,
+/// and sends what the input method produces, composition included, back to
+/// the runner. A host field that takes the method takes it for good; the
+/// view takes it back when it gets focus again.
 final class HostedTextInput with TextInputClient {
-  HostedTextInput(this._connection);
+  HostedTextInput(this._connection, this._focus) {
+    _focus.addListener(_onFocus);
+  }
 
   final ComposingConnection _connection;
+  final FocusNode _focus;
   TextInputConnection? _host;
+  rc.TextField? _field;
   TextEditingValue _value = TextEditingValue.empty;
 
   /// Whether the host's input method is open for the hosted field.
-  bool get attached => _host != null;
+  bool get attached => _host?.attached ?? false;
 
   /// Whether the input method is in the middle of composing text; then the
   /// editing keys belong to it, not to the app.
@@ -24,9 +31,30 @@ final class HostedTextInput with TextInputClient {
   /// The app's field changed, or went away.
   void field(rc.TextField field) {
     if (!field.active) {
-      detach();
+      _field = null;
+      _close();
       return;
     }
+    _field = field;
+    if (_focus.hasFocus) _open(field);
+  }
+
+  void dispose() {
+    _focus.removeListener(_onFocus);
+    _field = null;
+    _close();
+  }
+
+  void _onFocus() {
+    final field = _field;
+    if (!_focus.hasFocus) {
+      _close();
+    } else if (field != null) {
+      _open(field);
+    }
+  }
+
+  void _open(rc.TextField field) {
     final value = TextEditingValue(
       text: field.text,
       selection: TextSelection(
@@ -41,25 +69,31 @@ final class HostedTextInput with TextInputClient {
         _ => TextRange.empty,
       },
     );
-    _host ??= TextInput.attach(
-      this,
-      TextInputConfiguration(
-        inputType: switch (field.multiline) {
-          true => TextInputType.multiline,
-          false => TextInputType.text,
-        },
-        obscureText: field.obscure,
-        inputAction: _action(field.inputAction),
-        autocorrect: false,
-        enableSuggestions: false,
-      ),
-    )..show();
-    if (value == _value) return;
+    // A connection another client took is no longer ours to talk on: in a
+    // release build its calls reach whatever client the engine has, or none,
+    // and the macOS embedder crashes on none (#97).
+    if (!attached) {
+      _host = TextInput.attach(
+        this,
+        TextInputConfiguration(
+          inputType: switch (field.multiline) {
+            true => TextInputType.multiline,
+            false => TextInputType.text,
+          },
+          obscureText: field.obscure,
+          inputAction: _action(field.inputAction),
+          autocorrect: false,
+          enableSuggestions: false,
+        ),
+      )..show();
+    } else if (value == _value) {
+      return;
+    }
     _value = value;
     _host?.setEditingState(value);
   }
 
-  void detach() {
+  void _close() {
     _host?.close();
     _host = null;
     _value = TextEditingValue.empty;

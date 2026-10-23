@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:raccoon/raccoon.dart' as rc;
 import 'package:raccoon_runtime/raccoon_runtime.dart';
@@ -123,4 +124,61 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
     expect(connection.keys, isEmpty);
   });
+
+  // #97: a release build crashed the host in the engine's setEditingState.
+  testWidgets(
+    'a host field takes the method; the view takes it back on focus',
+    (tester) async {
+      final connection = _ComposingConnection();
+      final hostFocus = FocusNode();
+      final hostText = TextEditingController();
+      addTearDown(hostFocus.dispose);
+      addTearDown(hostText.dispose);
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Column(
+            children: [
+              SizedBox(
+                height: 40,
+                child: EditableText(
+                  controller: hostText,
+                  focusNode: hostFocus,
+                  style: const TextStyle(),
+                  cursorColor: const Color(0xFF000000),
+                  backgroundCursorColor: const Color(0xFF000000),
+                ),
+              ),
+              Expanded(
+                child: RaccoonView(connection: connection, autofocus: true),
+              ),
+            ],
+          ),
+        ),
+      );
+      connection.fields.add(_field(text: 'app'));
+      await tester.pump();
+      expect(tester.testTextInput.editingState?['text'], 'app');
+
+      hostFocus.requestFocus();
+      await tester.pump();
+      hostFocus.unfocus();
+      await tester.pump();
+      expect(tester.testTextInput.hasAnyClients, isFalse);
+
+      // The app's field changes while the host's method has no client.
+      tester.testTextInput.log.clear();
+      connection.fields.add(_field(text: 'apps', base: 4, extent: 4));
+      await tester.pump();
+      expect(
+        tester.testTextInput.log.map((call) => call.method),
+        isNot(contains('TextInput.setEditingState')),
+      );
+
+      await tester.tap(find.byType(RaccoonView));
+      await tester.pump();
+      expect(tester.testTextInput.hasAnyClients, isTrue);
+      expect(tester.testTextInput.editingState?['text'], 'apps');
+    },
+  );
 }
