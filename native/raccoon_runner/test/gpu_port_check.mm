@@ -154,19 +154,22 @@ int main(int argc, char** argv) {
           return Fail("a surface of the wrong size");
         }
       }
-      // The engine draws into these: give it a few frames, then some
-      // surface holds pixels.
-      usleep(500000);
+      // The engine draws into these: some surface holds pixels once it
+      // has, which a slow machine takes a while to (#79).
       bool drawn = false;
-      for (IOSurfaceRef surface : surfaces) {
-        IOSurfaceLock(surface, kIOSurfaceLockReadOnly, nullptr);
-        const auto* bytes = static_cast<const uint8_t*>(IOSurfaceGetBaseAddress(surface));
-        const size_t size = IOSurfaceGetAllocSize(surface);
-        for (size_t at = 0; at < size && !drawn; ++at) drawn = bytes[at] != 0;
-        IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, nullptr);
-        CFRelease(surface);
+      const auto draw_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+      while (!drawn && std::chrono::steady_clock::now() < draw_deadline) {
+        usleep(100000);
+        for (IOSurfaceRef surface : surfaces) {
+          IOSurfaceLock(surface, kIOSurfaceLockReadOnly, nullptr);
+          const auto* bytes = static_cast<const uint8_t*>(IOSurfaceGetBaseAddress(surface));
+          const size_t size = IOSurfaceGetAllocSize(surface);
+          for (size_t at = 0; at < size && !drawn; ++at) drawn = bytes[at] != 0;
+          IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, nullptr);
+        }
       }
-      if (!drawn) return Fail("no surface holds a drawn frame");
+      for (IOSurfaceRef surface : surfaces) CFRelease(surface);
+      if (!drawn) return Fail("no surface holds a drawn frame in 5 s");
       std::printf("PORTS ok: %u surfaces of %ux%u by port from %s, drawn into, none by ID\n",
                   count, width, height, service.c_str());
       return 0;
