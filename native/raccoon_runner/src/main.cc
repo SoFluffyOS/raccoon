@@ -37,6 +37,7 @@
 
 #include "engine_host.h"
 #include "glib_pump.h"
+#include "message_pump.h"
 #include "run_loop_pump.h"
 #include "event_loop.h"
 #include "flutter_embedder.h"
@@ -306,9 +307,12 @@ int NextWait(raccoon::EngineHost& host, int cap) {
   return wait;
 }
 
-// What plugins' main loop is: GLib's on Linux, the main run loop on macOS.
+// What plugins' main loop is: GLib's on Linux, the main run loop on macOS,
+// the thread's Win32 messages on Windows.
 #if defined(__APPLE__)
 using PluginPump = raccoon::RunLoopPump;
+#elif defined(_WIN32)
+using PluginPump = raccoon::MessagePump;
 #else
 using PluginPump = raccoon::GlibPump;
 #endif

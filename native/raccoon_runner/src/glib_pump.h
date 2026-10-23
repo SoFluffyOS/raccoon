@@ -2,7 +2,7 @@
 // GLib's main context, pumped from the runner's own loop: plugins post
 // idles, run GTasks and talk GDBus on it. The context's descriptors and
 // timeout join each poll of the loop; its sources are dispatched after.
-#if RACCOON_HAS_PLUGINS && !defined(__APPLE__)
+#if RACCOON_HAS_PLUGINS && !defined(__APPLE__) && !defined(_WIN32)
 #include <glib.h>
 
 #include <vector>
@@ -36,4 +36,4 @@ namespace raccoon {
 // it either way.
 class GlibPump {};
 }  // namespace raccoon
-#endif  // RACCOON_HAS_PLUGINS && !__APPLE__
+#endif  // RACCOON_HAS_PLUGINS && !__APPLE__ && !_WIN32

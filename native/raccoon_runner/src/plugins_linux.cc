@@ -1,4 +1,4 @@
-#if RACCOON_HAS_PLUGINS && !defined(__APPLE__)
+#if RACCOON_HAS_PLUGINS && !defined(__APPLE__) && !defined(_WIN32)
 // The Linux half of plugins.h: GObject plugins on the vendored flutter_linux.
 #include "plugins.h"
 
@@ -123,4 +123,4 @@ gboolean PluginHost::UnregisterExternalTexture(gpointer user_data, int64_t textu
 }
 
 }  // namespace raccoon
-#endif  // RACCOON_HAS_PLUGINS && !__APPLE__
+#endif  // RACCOON_HAS_PLUGINS && !__APPLE__ && !_WIN32

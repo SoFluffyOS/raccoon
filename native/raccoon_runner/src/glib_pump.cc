@@ -1,4 +1,4 @@
-#if RACCOON_HAS_PLUGINS && !defined(__APPLE__)
+#if RACCOON_HAS_PLUGINS && !defined(__APPLE__) && !defined(_WIN32)
 #include "glib_pump.h"
 
 namespace raccoon {
@@ -45,4 +45,4 @@ void GlibPump::Dispatch(const pollfd* fds, size_t count) {
 }
 
 }  // namespace raccoon
-#endif  // RACCOON_HAS_PLUGINS && !__APPLE__
+#endif  // RACCOON_HAS_PLUGINS && !__APPLE__ && !_WIN32

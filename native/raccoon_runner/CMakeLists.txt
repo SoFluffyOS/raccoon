@@ -181,10 +181,61 @@ if(APPLE)
     message(STATUS "No FlutterMacOS.framework in the SDK cache: example plugin skipped")
   endif()
 elseif(WIN32)
-  # Software rendering, frames inline. D3D11 shared textures and native
-  # plugins come later (raccoon#25, raccoon#36).
+  # Software rendering, frames inline; D3D11 shared textures come later
+  # (raccoon#25).
   message(STATUS "GPU renderer: off (not on Windows yet)")
-  message(STATUS "Native plugins: off (not on Windows yet)")
+  # Native plugins: the C API of Flutter's Windows embedding, implemented in
+  # a flutter_windows.dll of the runner's own, beside it, from the vendored
+  # headers (third_party/flutter_windows). Plugin DLLs import that name.
+  add_library(flutter_windows SHARED src/flutter_windows/flutter_windows.cc)
+  target_include_directories(flutter_windows PRIVATE
+    ${CMAKE_SOURCE_DIR}/third_party/flutter_windows/include)
+  target_compile_definitions(flutter_windows PRIVATE
+    FLUTTER_DESKTOP_LIBRARY NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_compile_options(flutter_windows PRIVATE /W3 /utf-8)
+  target_link_libraries(flutter_windows PRIVATE user32 shcore)
+  target_sources(raccoon_runner PRIVATE src/plugins_windows.cc src/message_pump.cc)
+  target_include_directories(raccoon_runner PRIVATE
+    ${CMAKE_SOURCE_DIR}/third_party/flutter_windows/include)
+  target_compile_definitions(raccoon_runner PRIVATE RACCOON_HAS_PLUGINS=1)
+  add_dependencies(raccoon_runner flutter_windows)
+  message(STATUS "Native plugins: on")
+  # example/plugins/echo as the desktop template builds a plugin: against
+  # the SDK's import library and C++ client wrapper, which need its Windows
+  # artifacts (flutter precache --windows). The tests load it.
+  find_program(RACCOON_FLUTTER NAMES flutter.bat flutter)
+  if(RACCOON_FLUTTER)
+    get_filename_component(RACCOON_FLUTTER_REAL ${RACCOON_FLUTTER} REALPATH)
+    get_filename_component(RACCOON_SDK ${RACCOON_FLUTTER_REAL} DIRECTORY)
+    get_filename_component(RACCOON_SDK ${RACCOON_SDK} DIRECTORY)
+    set(RACCOON_FLUTTER_WINDOWS_DIR ${RACCOON_SDK}/bin/cache/artifacts/engine/windows-x64)
+  endif()
+  if(RACCOON_FLUTTER_WINDOWS_DIR AND EXISTS ${RACCOON_FLUTTER_WINDOWS_DIR}/flutter_windows.dll.lib)
+    set(RACCOON_WRAPPER ${RACCOON_FLUTTER_WINDOWS_DIR}/cpp_client_wrapper)
+    add_library(flutter INTERFACE)
+    target_include_directories(flutter INTERFACE ${RACCOON_FLUTTER_WINDOWS_DIR})
+    target_link_libraries(flutter INTERFACE ${RACCOON_FLUTTER_WINDOWS_DIR}/flutter_windows.dll.lib)
+    add_library(flutter_wrapper_plugin STATIC
+      ${RACCOON_WRAPPER}/core_implementations.cc
+      ${RACCOON_WRAPPER}/standard_codec.cc
+      ${RACCOON_WRAPPER}/plugin_registrar.cc)
+    target_include_directories(flutter_wrapper_plugin PUBLIC ${RACCOON_WRAPPER}/include)
+    target_link_libraries(flutter_wrapper_plugin PUBLIC flutter)
+    target_compile_features(flutter_wrapper_plugin PUBLIC cxx_std_17)
+    # What Flutter's Windows template gives a plugin.
+    function(APPLY_STANDARD_SETTINGS TARGET)
+      target_compile_features(${TARGET} PUBLIC cxx_std_17)
+      target_compile_options(${TARGET} PRIVATE /W4 /WX /wd4100)
+      target_compile_options(${TARGET} PRIVATE /EHsc)
+      target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
+      target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")
+    endfunction()
+    add_subdirectory(example/plugins/echo/windows example_plugins/echo)
+    set_target_properties(raccoon_echo_plugin PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/example_plugins/echo)
+  else()
+    message(STATUS "No Windows artifacts in the SDK cache: example plugin skipped")
+  endif()
 else()
   find_package(PkgConfig QUIET)
   if(PkgConfig_FOUND)

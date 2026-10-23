@@ -758,9 +758,11 @@ void main() {
             p.dirname(binary),
             'example_plugins',
             'echo',
-            ...Platform.isMacOS
-                ? ['raccoon_echo.framework', 'raccoon_echo']
-                : ['libraccoon_echo_plugin.so'],
+            ...switch (Platform.operatingSystem) {
+              'macos' => ['raccoon_echo.framework', 'raccoon_echo'],
+              'windows' => ['raccoon_echo_plugin.dll'],
+              _ => ['libraccoon_echo_plugin.so'],
+            },
           ]);
   // macOS plugins link FlutterMacOS; the manifest names the SDK's, which
   // the runner opens first.
@@ -818,7 +820,8 @@ void main() {
           await Future<void>.delayed(const Duration(milliseconds: 100));
         }
         // The plugin answers from GLib's main loop on Linux, the main queue on
-        // macOS: the runner turns the plugins' main loop.
+        // macOS, the platform thread's messages on Windows: the runner turns
+        // the plugins' main loop.
         expect(output, contains('ECHO:echo: hello'));
       } finally {
         final client = await RunnerClient.connect(endpoint);
@@ -1594,7 +1597,7 @@ Future<int?> _exitCode(RunnerProcess runner) async {
 
 /// A manifest entry for a plugin of [name] in [library]: registered by its
 /// `<name>_plugin_register_with_registrar` on Linux, by [pluginClass] on
-/// macOS.
+/// macOS, by `<pluginClass>RegisterWithRegistrar` on Windows.
 Map<String, String> _pluginEntry(
   String name,
   String library,
@@ -1604,6 +1607,8 @@ Map<String, String> _pluginEntry(
   'library': library,
   if (Platform.isMacOS)
     'class': pluginClass
+  else if (Platform.isWindows)
+    'symbol': '${pluginClass}RegisterWithRegistrar'
   else
     'symbol': '${name}_plugin_register_with_registrar',
 };

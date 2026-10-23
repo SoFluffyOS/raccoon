@@ -1,7 +1,8 @@
 import 'package:flutter/services.dart';
 
-/// One method, `echo`, answered by the Linux plugin from a GLib idle
-/// callback: a round trip through the main loop the host has to pump.
+/// One method, `echo`, answered from a GLib idle callback on Linux, the
+/// main queue on macOS, a message posted to the view's window on Windows:
+/// a round trip through the main loop the host has to pump.
 abstract final class RaccoonEcho {
   static const _channel = MethodChannel('raccoon_echo');
 

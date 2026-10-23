@@ -6,7 +6,9 @@
 // bridge of five calls. On macOS they come from FlutterMacOS.framework,
 // opened from the Flutter SDK before the plugins, and the runner implements
 // the messenger, registrar and texture registry protocols over the same
-// bridge (third_party/flutter_macos has the headers).
+// bridge (third_party/flutter_macos has the headers). On Windows they call
+// the C API of flutter_windows.dll, which the runner builds over the same
+// bridge and opens before the plugins (src/flutter_windows).
 #if RACCOON_HAS_PLUGINS
 #include <cstddef>
 #include <cstdint>
@@ -15,7 +17,9 @@
 #include <string>
 #include <vector>
 
-#if !defined(__APPLE__)
+#if defined(_WIN32)
+#include "flutter_windows/raccoon_bridge.h"
+#elif !defined(__APPLE__)
 #include "flutter/shell/platform/linux/fl_engine_private.h"
 #include "flutter/shell/platform/linux/public/flutter_linux/fl_plugin_registrar.h"
 #endif
@@ -26,9 +30,10 @@ namespace raccoon {
 struct PluginEntry {
   std::string name;
   // The binary to open: a shared library on Linux, a framework's
-  // executable on macOS.
+  // executable on macOS, a DLL on Windows.
   std::string library;
-  // Linux: its <name>_plugin_register_with_registrar.
+  // Linux: its <name>_plugin_register_with_registrar. Windows: its
+  // <PluginClass>RegisterWithRegistrar.
   std::string symbol;
   // macOS: the class the registrant registers, and the Swift module it is
   // in, if any; the class is looked up as module.Class, then as Class.
@@ -99,7 +104,7 @@ class PluginHost {
                        FlutterMetalExternalTexture* out);
 #else
   // A frame of a plugin's texture, on the raster thread with the GL
-  // context current.
+  // context current. None on Windows, whose renderer draws no textures.
   bool PopulateTexture(int64_t texture_id, size_t width, size_t height,
                        FlutterOpenGLTexture* out);
 #endif
@@ -115,6 +120,21 @@ class PluginHost {
 #if defined(__APPLE__)
   struct Impl;
   std::unique_ptr<Impl> impl_;
+#elif defined(_WIN32)
+  static bool SendPlatformMessage(void* user_data, const char* channel, const uint8_t* data,
+                                  size_t size, FlutterDesktopBinaryReply reply,
+                                  void* reply_data);
+  static void SendPlatformMessageResponse(void* user_data,
+                                          const FlutterDesktopMessageResponseHandle* handle,
+                                          const uint8_t* data, size_t size);
+
+  RaccoonWindowsBridge c_bridge_{};
+  // flutter_windows.dll, the runner's, and what the runner calls in it.
+  void* embedding_ = nullptr;
+  RaccoonWindowsRegistrarFn registrar_ = nullptr;
+  RaccoonWindowsHandleMessageFn handle_message_ = nullptr;
+  RaccoonWindowsDetachFn detach_ = nullptr;
+  std::vector<void*> handles_;
 #else
   static void SendPlatformMessage(gpointer user_data, const gchar* channel,
                                   const uint8_t* data, size_t size, FlRaccoonReply reply,
