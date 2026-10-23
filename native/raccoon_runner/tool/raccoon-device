@@ -943,42 +943,69 @@ build_native_assets() {
       ;;
     *) return 0 ;;
   esac
-  python3 - "$config" <<'PY' || return 0
-import json, os, sys
+  # What the build depends on, as one hash; none when no package has a hook.
+  # The packages and their versions, the pubspecs, the SDK's engine, the
+  # target, and the files of every package with a hook, so a hook edited in
+  # a path dependency builds again (#111).
+  local inputs
+  inputs="$(python3 - "$config" "$project" "$(sdk_root)" "${target[*]}" <<'PY'
+import hashlib, json, os, sys
 from urllib.parse import unquote, urlparse
-config = sys.argv[1]
+config, project, sdk, target = sys.argv[1:5]
 dart_tool = os.path.dirname(os.path.abspath(config))
+digest = hashlib.sha256(target.encode())
+for path in (config, os.path.join(project, 'pubspec.lock'), os.path.join(project, 'pubspec.yaml'),
+             os.path.join(sdk, 'bin', 'cache', 'engine.stamp')):
+    if os.path.isfile(path):
+        digest.update(open(path, 'rb').read())
+hooks = 0
 for package in json.load(open(config)).get('packages', []):
     uri = package.get('rootUri', '')
     root = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, uri))
-    if os.path.isfile(os.path.join(root, 'hook', 'build.dart')):
-        sys.exit(0)
-sys.exit(1)
+    if not os.path.isfile(os.path.join(root, 'hook', 'build.dart')):
+        continue
+    hooks += 1
+    newest = 0
+    for directory, names, files in os.walk(root):
+        names[:] = [n for n in names if n not in ('.dart_tool', 'build', '.git')]
+        for name in files:
+            newest = max(newest, os.stat(os.path.join(directory, name)).st_mtime_ns)
+    digest.update(('%s %s %d\n' % (package.get('name'), root, newest)).encode())
+if hooks == 0:
+    sys.exit(1)
+print(digest.hexdigest())
 PY
+)" || return 0
   if [ ! -f "$project/lib/main.dart" ]; then
     echo "🦝 native assets skipped: no lib/main.dart to build them with" >&2
     return 0
   fi
   log="$app/native_assets.log"
   mkdir -p "$out"
-  had_linux=""
-  [ -d "$project/linux" ] && had_linux=1
-  local status=0 started
+  local status=0 started unchanged="" stamp="$out/raccoon_inputs"
   started="$(python3 -c 'import time; print(time.time())')"
-  (cd "$project" && "$(sdk_root)/bin/flutter" assemble --no-version-check \
-    -dBuildMode=debug -dTargetFile=lib/main.dart --output="$out" \
-    "${target[@]}") > "$log" 2>&1 || status=$?
-  # The Linux target's engine copy, in a project that had no linux/ before.
-  if [ "$(uname -s)" = Linux ] && [ -z "$had_linux" ] && [ -d "$project/linux/flutter/ephemeral" ]; then
-    rm -rf "$project/linux"
+  if [ -f "$manifest" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$inputs" ]; then
+    unchanged=1
+  else
+    rm -f "$stamp"
+    had_linux=""
+    [ -d "$project/linux" ] && had_linux=1
+    (cd "$project" && "$(sdk_root)/bin/flutter" assemble --no-version-check \
+      -dBuildMode=debug -dTargetFile=lib/main.dart --output="$out" \
+      "${target[@]}") > "$log" 2>&1 || status=$?
+    # The Linux target's engine copy, in a project that had no linux/ before.
+    if [ "$(uname -s)" = Linux ] && [ -z "$had_linux" ] && [ -d "$project/linux/flutter/ephemeral" ]; then
+      rm -rf "$project/linux"
+    fi
+    if [ "$status" -ne 0 ] || [ ! -f "$manifest" ]; then
+      echo "🦝 native assets did not build; see $log" >&2
+      return 0
+    fi
+    echo "$inputs" > "$stamp"
   fi
-  if [ "$status" -ne 0 ] || [ ! -f "$manifest" ]; then
-    echo "🦝 native assets did not build; see $log" >&2
-    return 0
-  fi
-  python3 - "$manifest" "$built" "$app" "$started" <<'PY'
+  python3 - "$manifest" "$built" "$app" "$started" "$unchanged" <<'PY'
 import json, os, shutil, sys, time
-manifest_path, built, app, started = sys.argv[1:5]
+manifest_path, built, app, started, unchanged = sys.argv[1:6]
 manifest = json.load(open(manifest_path))
 installed = os.path.join(app, 'native_assets')
 shutil.rmtree(installed, ignore_errors=True)
@@ -993,7 +1020,8 @@ for assets in manifest.get('native-assets', {}).values():
             assets[asset] = ['absolute', os.path.join(installed, path[1])]
         count += 1
 json.dump(manifest, open(os.path.join(app, 'flutter_assets', 'NativeAssetsManifest.json'), 'w'))
-print('🦝 native assets ready in %.1f s, %d for this host' % (time.time() - float(started), count), file=sys.stderr)
+print('🦝 native assets ready in %.1f s, %d for this host%s' % (
+    time.time() - float(started), count, ', unchanged since the last build' if unchanged else ''), file=sys.stderr)
 PY
 }
 

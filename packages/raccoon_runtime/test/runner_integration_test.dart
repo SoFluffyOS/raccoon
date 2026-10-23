@@ -356,6 +356,75 @@ void main() {
     timeout: const Timeout(Duration(minutes: 5)),
   );
   test(
+    'native assets build again only when their inputs change',
+    () async {
+      // #111: flutter assemble costs seconds per install; the helper keeps
+      // what the last one made while the inputs are the same. A hook's own
+      // files are inputs, so touching native_add's builds again.
+      final temp = Directory.systemTemp.createTempSync('raccoon_native');
+      final helper = p.join(runnerDir, 'tool', 'raccoon-device');
+      final environment = {
+        'RACCOON_RUNNER': binary!,
+        if (sdk != null) 'FLUTTER_ROOT': sdk,
+        'XDG_DATA_HOME': p.join(temp.path, 'data'),
+        'XDG_RUNTIME_DIR': temp.path,
+        'TMPDIR': '${temp.path}/',
+      };
+      Future<String> install() async {
+        final result = await Process.run(helper, [
+          'install',
+          nativeAssetsBundle,
+          'native_assets_app',
+        ], environment: environment);
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        return '${result.stderr}';
+      }
+
+      try {
+        File(
+          p.join(runnerDir, 'example', 'native_add', 'hook', 'build.dart'),
+        ).setLastModifiedSync(DateTime.now());
+        final built = await install();
+        expect(built, contains('1 for this host'));
+        expect(built, isNot(contains('unchanged')));
+
+        final again = await install();
+        expect(again, contains('1 for this host, unchanged'));
+        final manifest =
+            jsonDecode(
+                  File(
+                    p.join(
+                      temp.path,
+                      'data',
+                      'raccoon',
+                      'apps',
+                      'native_assets_app',
+                      'flutter_assets',
+                      'NativeAssetsManifest.json',
+                    ),
+                  ).readAsStringSync(),
+                )
+                as Map;
+        final paths = [
+          for (final assets in (manifest['native-assets'] as Map).values)
+            for (final path in (assets as Map).values) (path as List).last,
+        ];
+        expect(paths, hasLength(1));
+        expect(File('${paths.single}').existsSync(), isTrue);
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((ready, Platform.isWindows)) {
+      (false, _) => 'build the runner and example/native_assets_app first',
+      (_, true) => 'native assets come from the Flutter tool on Windows',
+      _ when !Directory(nativeAssetsBundle).existsSync() =>
+        'build example/native_assets_app first',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
+  test(
     'an app starts at the size the board saved for it',
     () async {
       // A device that names no size: the helper reads AppSizes, so the app
