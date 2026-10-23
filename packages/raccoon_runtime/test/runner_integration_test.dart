@@ -832,6 +832,115 @@ void main() {
     timeout: const Timeout(Duration(minutes: 5)),
   );
   test(
+    'on macOS a pod\'s vendored framework and library land beside it',
+    () async {
+      // ffmpeg_kit_flutter_new vendors plain frameworks, isar's libs a
+      // dylib: CocoaPods leaves both where they are, for an app's embed
+      // step to copy (#93).
+      final temp = Directory.systemTemp.createTempSync('raccoon_vendored');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final macos = p.join(temp.path, 'plugin_f', 'macos');
+      final plain = p.join(macos, 'Plain.framework');
+      Directory(p.join(plain, 'Versions', 'A')).createSync(recursive: true);
+      File(
+        p.join(temp.path, 'plain.c'),
+      ).writeAsStringSync('int plain_value(void) { return 1; }\n');
+      File(
+        p.join(temp.path, 'ready.c'),
+      ).writeAsStringSync('int ready_value(void) { return 2; }\n');
+      Future<void> run(List<String> arguments) async {
+        final result = await Process.run('xcrun', arguments);
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+      }
+
+      await run([
+        'clang',
+        '-dynamiclib',
+        '-arch',
+        'arm64',
+        '-arch',
+        'x86_64',
+        '-install_name',
+        '@rpath/Plain.framework/Versions/A/Plain',
+        '-o',
+        p.join(plain, 'Versions', 'A', 'Plain'),
+        p.join(temp.path, 'plain.c'),
+      ]);
+      Link(p.join(plain, 'Versions', 'Current')).createSync('A');
+      Link(p.join(plain, 'Plain')).createSync('Versions/Current/Plain');
+      await run([
+        'clang',
+        '-dynamiclib',
+        '-arch',
+        'arm64',
+        '-arch',
+        'x86_64',
+        '-install_name',
+        '@rpath/libready.dylib',
+        '-o',
+        p.join(macos, 'libready.dylib'),
+        p.join(temp.path, 'ready.c'),
+      ]);
+
+      final manifest = await installFake(
+        temp,
+        {
+          'plugin_f/pubspec.yaml':
+              'name: plugin_f\nversion: 1.0.0\nflutter:\n  plugin:\n'
+              '    platforms:\n      macos:\n        pluginClass: PluginF\n',
+          'plugin_f/macos/plugin_f.podspec':
+              "Pod::Spec.new do |s|\n  s.name = 'plugin_f'\n"
+              "  s.version = '1.0.0'\n  s.summary = 'plugin_f'\n"
+              "  s.homepage = 'https://example.com'\n"
+              "  s.license = { :type => 'BSD' }\n  s.author = 'Raccoon'\n"
+              "  s.source = { :path => '.' }\n"
+              "  s.source_files = 'Classes/**/*'\n"
+              "  s.vendored_frameworks = 'Plain.framework'\n"
+              "  s.vendored_libraries = 'libready.dylib'\n"
+              "  s.pod_target_xcconfig = { 'OTHER_LDFLAGS' => "
+              "'-framework Plain -lready' }\n"
+              "  s.dependency 'FlutterMacOS'\n"
+              "  s.platform = :osx, '10.15'\nend\n",
+          'plugin_f/macos/Classes/PluginF.h':
+              '@import FlutterMacOS;\n'
+              '@interface PluginF : NSObject <FlutterPlugin>\n@end\n',
+          'plugin_f/macos/Classes/PluginF.m':
+              '#import "PluginF.h"\nint plain_value(void);\n'
+              'int ready_value(void);\n@implementation PluginF\n'
+              '+ (void)registerWithRegistrar:(id<FlutterPluginRegistrar>)registrar {\n'
+              '  (void)(plain_value() + ready_value());\n}\n@end\n',
+        },
+        ['plugin_f'],
+      );
+      expect(manifest['status'], isEmpty);
+      final frameworks = Directory(
+        p.join(
+          temp.path,
+          'data',
+          'raccoon',
+          'apps',
+          'app',
+          'plugins',
+          'frameworks',
+        ),
+      ).listSync().map((entry) => p.basename(entry.path));
+      expect(
+        frameworks,
+        containsAll([
+          'plugin_f.framework',
+          'Plain.framework',
+          'libready.dylib',
+        ]),
+      );
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isMacOS)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'CocoaPods plugins are macOS',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 5)),
+  );
+  test(
     'a pub workspace member gets its own plugins, not the other members\'',
     () async {
       // A member has no package config of its own; the workspace root's

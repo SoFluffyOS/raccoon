@@ -574,22 +574,64 @@ def frameworks(directory):
                   if f.endswith('.framework') and not f.startswith('._')) if os.path.isdir(directory) else []
 
 
+def binaries(directory):
+    """The frameworks and libraries in a cache entry or the install."""
+    return sorted(f for f in os.listdir(directory)
+                  if f.endswith(('.framework', '.dylib')) and not f.startswith('._')) if os.path.isdir(directory) else []
+
+
+def binary_of(path):
+    """The Mach-O file of a framework, or the library itself."""
+    if path.endswith('.dylib'):
+        return path
+    return os.path.join(path, os.path.basename(path)[:-len('.framework')])
+
+
+def rpath_needs(binary):
+    """The frameworks and libraries [binary] loads by @rpath, by name."""
+    listing = subprocess.run(['otool', '-L', binary], capture_output=True, text=True).stdout
+    return re.findall(r'@rpath/([^/\s]+\.(?:framework|dylib))', listing)
+
+
+def vendored(made, roots):
+    """What the built frameworks load by @rpath that the build left where a
+    pod vendors it, as an app's embed step would copy it: plain frameworks
+    (ffmpegkit) and libraries (libisar.dylib), and what they load in turn
+    (#93). Looked for under [roots]: the plugin's sources, the pods."""
+    present = {os.path.basename(path) for path in made} | {'FlutterMacOS.framework'}
+    queue = [binary_of(path) for path in made]
+    found = []
+    while queue:
+        for need in rpath_needs(queue.pop()):
+            if need in present:
+                continue
+            present.add(need)
+            path = next((os.path.join(top, need)
+                         for root in roots if os.path.isdir(root)
+                         for top, dirs, files in os.walk(root, followlinks=True)
+                         if need in dirs or need in files), None)
+            if path is None:
+                continue
+            found.append(path)
+            queue.append(binary_of(path))
+    return found
+
+
 def in_cache(plugin):
-    """Whether the cache holds the plugin, every framework its frameworks
-    load by @rpath included: a helper before #84 left out the ready-made
-    ones, so such an entry is built again. Checked once, then stamped."""
+    """Whether the cache holds the plugin, every framework and library its
+    frameworks load by @rpath included: helpers before #84 and #93 left out
+    the vendored ones, so such an entry is built again. Checked once, then
+    stamped."""
     entry = os.path.join(cache, plugin['key'])
-    present = frameworks(entry)
-    if not present:
+    present = binaries(entry)
+    if not any(f.endswith('.framework') for f in present):
         return False
     stamp = os.path.join(entry, '.complete')
     if os.path.exists(stamp):
         return True
     loadable = set(present) | {'FlutterMacOS.framework'}
     for f in present:
-        listing = subprocess.run(['otool', '-L', os.path.join(entry, f, f[:-len('.framework')])],
-                                 capture_output=True, text=True).stdout
-        if any(dep not in loadable for dep in re.findall(r'@rpath/([^/\s]+\.framework)/', listing)):
+        if any(dep not in loadable for dep in rpath_needs(binary_of(os.path.join(entry, f)))):
             return False
     open(stamp, 'w').close()
     return True
@@ -814,6 +856,13 @@ if misses:
         for d, f in made:
             shutil.copytree(os.path.join(release, d, f), os.path.join(cached, f), symlinks=True,
                             dirs_exist_ok=True)
+        for path in vendored([os.path.join(release, d, f) for d, f in made],
+                             [plugin['sources'], os.path.join(pods, 'Pods')]):
+            target = os.path.join(cached, os.path.basename(path))
+            if os.path.isdir(path):
+                shutil.copytree(path, target, symlinks=True, dirs_exist_ok=True)
+            else:
+                shutil.copy2(path, target)
         built.append(name)
 
 entries = []
@@ -827,9 +876,13 @@ for plugin in wanted:
     cached = os.path.join(cache, plugin['key'])
     if name not in built:
         from_cache.append(name)
-    for f in frameworks(cached):
+    for f in binaries(cached):
         target = os.path.join(out, 'frameworks', f)
-        if not os.path.exists(target):
+        if os.path.exists(target):
+            continue
+        if f.endswith('.dylib'):
+            shutil.copy2(os.path.join(cached, f), target)
+        else:
             shutil.copytree(os.path.join(cached, f), target, symlinks=True)
     library = os.path.join(out, 'frameworks', name + '.framework', name)
     if plugin['class'] is None:
@@ -1013,6 +1066,9 @@ case "$verb" in
     fi
     if [ -d "$APPS/$key/plugins/frameworks" ]; then
       export DYLD_FRAMEWORK_PATH="$APPS/$key/plugins/frameworks${DYLD_FRAMEWORK_PATH:+:$DYLD_FRAMEWORK_PATH}"
+      # A vendored library the app opens by name (isar's libisar.dylib), as
+      # an app's bundle would have it (#93).
+      export DYLD_LIBRARY_PATH="$APPS/$key/plugins/frameworks${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
     fi
     binary="$RUNNER"
     if [ "$(uname -s)" = Darwin ] && { [ -n "$manifest" ] || [ -d "$APPS/$key/native_assets" ]; }; then
