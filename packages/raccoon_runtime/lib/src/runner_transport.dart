@@ -140,6 +140,17 @@ final class RunnerTransport {
   }
 
   void _onError(Object error, StackTrace stackTrace) {
+    // A write that fails (Broken pipe) is a runner that is gone, as when it
+    // exits while a Shutdown or a pointer is on its way: it hung up, which
+    // ends the transport as any hang-up does, and is nobody's error (#90).
+    if (error is SocketException && error.message.startsWith('Write failed')) {
+      _runnerClosed = true;
+      if (_hungUp case final hungUp? when !hungUp.isCompleted) {
+        hungUp.complete();
+      }
+      unawaited(close());
+      return;
+    }
     _inbound.addError(error, stackTrace);
     unawaited(close());
   }

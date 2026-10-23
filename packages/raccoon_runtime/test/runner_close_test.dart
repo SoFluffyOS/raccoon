@@ -99,4 +99,60 @@ void main() {
       reports.close();
     },
   );
+
+  test('a write to a runner that is gone does nothing', () async {
+    // The runner exits while the client, busy, hasn't seen it hang up yet:
+    // the next write hits a closed socket, Broken pipe (#90).
+    final temp = Directory.systemTemp.createTempSync('raccoon_gone');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    final path = p.join(temp.path, 'runner.sock');
+    final reports = ReceivePort();
+    final messages = StreamIterator(reports);
+    await Isolate.spawn(_exitingRunner, (path, reports.sendPort));
+    await messages.moveNext();
+    final commands = messages.current as SendPort;
+    while (!File(path).existsSync()) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+
+    final client = await RunnerClient.connect(UnixSocketEndpoint(path));
+    // As a host listens: an error here would go uncaught and fail the test.
+    client.messages.listen((_) {});
+    await client.hello.timeout(const Duration(seconds: 5));
+    commands.send('exit');
+    // Busy while the runner exits: its hang-up waits in the queue, unseen.
+    sleep(const Duration(milliseconds: 300));
+    client
+      ..shutdown()
+      ..resize(100, 100, 1);
+    await client.closed.timeout(const Duration(seconds: 5));
+    await client.close();
+    reports.close();
+  });
+}
+
+/// A runner stand-in that says hello, then exits when told, in an isolate
+/// of its own so it does while the test's isolate is blocked.
+Future<void> _exitingRunner((String, SendPort) args) async {
+  final (path, report) = args;
+  final commands = ReceivePort();
+  report.send(commands.sendPort);
+  final server = await ServerSocket.bind(
+    InternetAddress(path, type: InternetAddressType.unix),
+    0,
+  );
+  final socket = await server.first;
+  socket.done.ignore();
+  socket.listen((_) {}, onError: (Object _) {});
+  socket.add(
+    MessageFraming.frame(
+      RunnerMessage(
+        hello: RunnerHello(protocolVersion: 1, pid: 7),
+      ).writeToBuffer(),
+    ),
+  );
+  await commands.first;
+  socket.destroy();
+  await server.close();
+  commands.close();
 }
