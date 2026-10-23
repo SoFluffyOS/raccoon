@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:ffi' show Abi;
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -200,12 +201,15 @@ final class RuntimeStore {
   Future<EngineRuntime> ensure(String revision) async {
     if (installed(revision) case final runtime?) return runtime;
     final uri = artifactUri(revision, platform: platform);
-    final archive = ZipDecoder().decodeBytes(await _download(uri));
+    final bytes = await _download(uri);
     final directory = Directory(directoryFor(revision));
     final staging = Directory('${directory.path}.partial');
     if (staging.existsSync()) staging.deleteSync(recursive: true);
     staging.createSync(recursive: true);
-    _extract(archive, p.join(staging.path, _extractionRoot(platform)));
+    // On another isolate: unzipping and writing an engine takes a few hundred
+    // milliseconds, and the caller is often a host's UI (#113).
+    final root = p.join(staging.path, _extractionRoot(platform));
+    await Isolate.run(() => _extract(ZipDecoder().decodeBytes(bytes), root));
     final library = File(p.join(staging.path, engineLibraryOf(platform)));
     if (!library.existsSync()) {
       staging.deleteSync(recursive: true);

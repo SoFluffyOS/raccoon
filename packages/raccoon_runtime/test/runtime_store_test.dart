@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ffi' show Abi;
 import 'dart:io';
 import 'dart:typed_data';
@@ -195,6 +196,38 @@ void main() {
     );
     expect(store.installed('rev1'), isNotNull);
   }, skip: Platform.isWindows ? 'symbolic links' : false);
+
+  // #113: unpacking took the caller's isolate for 300 ms, the UI's in a
+  // host.
+  test('ensure unpacks without holding up the caller\'s isolate', () async {
+    // A large, poorly compressible library takes a while to unpack.
+    var seed = 1;
+    final library = Uint8List(24 << 20);
+    for (var i = 0; i < library.length; i++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      library[i] = seed >> 16;
+    }
+    final zip = ZipEncoder().encodeBytes(
+      Archive()..addFile(ArchiveFile.bytes('libflutter_engine.so', library)),
+    );
+    final store = RuntimeStore(
+      cacheDirectory: temp.path,
+      platform: 'linux-x64',
+      download: (_) async => zip,
+    );
+    var ticks = 0;
+    final timer = Timer.periodic(
+      const Duration(milliseconds: 5),
+      (_) => ticks++,
+    );
+    final runtime = await store.ensure('big');
+    timer.cancel();
+    expect(
+      File(p.join(runtime.directory, 'libflutter_engine.so')).lengthSync(),
+      library.length,
+    );
+    expect(ticks, greaterThan(2));
+  });
 
   test('ensure rejects an archive without the engine library', () async {
     final store = RuntimeStore(
