@@ -955,7 +955,18 @@ import hashlib, json, os, sys
 from urllib.parse import unquote, urlparse
 config, project, sdk, target, manifest, built = sys.argv[1:7]
 dart_tool = os.path.dirname(os.path.abspath(config))
-root_project = os.path.dirname(dart_tool)
+# The pub graph and the root's pubspecs sit where pub resolved: the project,
+# or a workspace root above it (whose member's config is a scoped copy).
+root_project = os.path.abspath(project)
+here = root_project
+while True:
+    if os.path.isfile(os.path.join(here, '.dart_tool', 'package_graph.json')):
+        root_project = here
+        break
+    parent = os.path.dirname(here)
+    if parent == here:
+        break
+    here = parent
 digest = hashlib.sha256(target.encode())
 for path in (config, os.path.join(project, 'pubspec.lock'), os.path.join(project, 'pubspec.yaml'),
              os.path.join(root_project, 'pubspec.lock'), os.path.join(root_project, 'pubspec.yaml'),
@@ -969,13 +980,13 @@ for package in json.load(open(config)).get('packages', []):
     roots[package.get('name')] = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, uri))
 hooked = [name for name, root in roots.items() if os.path.isfile(os.path.join(root, 'hook', 'build.dart'))]
 if not hooked:
-    sys.exit(1)
+    sys.exit(3)
 # The packages a hook package depends on, directly or not, from the pub
 # graph; the local ones count file by file, as the hook packages do. A
 # hosted or SDK package changes only with its version, in the config.
 graph = {}
 try:
-    for package in json.load(open(os.path.join(dart_tool, 'package_graph.json'))).get('packages', []):
+    for package in json.load(open(os.path.join(root_project, '.dart_tool', 'package_graph.json'))).get('packages', []):
         graph[package.get('name')] = package.get('dependencies', [])
 except (OSError, ValueError):
     pass
@@ -993,17 +1004,25 @@ for name in sorted(scanned):
     root = roots[name]
     if name not in hooked and os.path.realpath(root).startswith(immutable):
         continue
-    digest.update(('%s %s\n' % (name, root)).encode())
-    for directory, names, files in os.walk(root):
-        names[:] = sorted(n for n in names if n not in ('.dart_tool', 'build', '.git'))
-        for name in sorted(files):
-            path = os.path.join(directory, name)
+    digest.update(('%s %s\n' % (name, root)).encode('utf-8', 'surrogateescape'))
+    seen = set()
+    for directory, names, files in os.walk(root, followlinks=True):
+        real = os.path.realpath(directory)
+        if real in seen:
+            names[:] = []
+            continue
+        seen.add(real)
+        # The package's own build output and tool state; .git anywhere.
+        top = directory == root
+        names[:] = sorted(n for n in names if n != '.git' and not (top and n in ('.dart_tool', 'build')))
+        for file in sorted(files):
+            path = os.path.join(directory, file)
             try:
                 # lstat: a link counts as itself, a dangling one too.
                 stat = os.lstat(path)
             except OSError:
                 continue
-            digest.update(('%s %d %d\n' % (os.path.relpath(path, root), stat.st_mtime_ns, stat.st_size)).encode())
+            digest.update(('%s %d %d\n' % (os.path.relpath(path, root), stat.st_mtime_ns, stat.st_size)).encode('utf-8', 'surrogateescape'))
 try:
     for assets in json.load(open(manifest)).get('native-assets', {}).values():
         for path in assets.values():
@@ -1015,8 +1034,8 @@ except (OSError, ValueError):
 print(digest.hexdigest())
 PY
 )" || scan=$?
-  # 1: no package has a hook. Any other failure: build, and keep no stamp.
-  [ "$scan" -eq 1 ] && return 0
+  # 3: no package has a hook. Any other failure: build, and keep no stamp.
+  [ "$scan" -eq 3 ] && return 0
   if [ ! -f "$project/lib/main.dart" ]; then
     echo "🦝 native assets skipped: no lib/main.dart to build them with" >&2
     return 0

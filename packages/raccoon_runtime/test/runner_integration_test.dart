@@ -415,6 +415,34 @@ void main() {
         ).setLastModifiedSync(DateTime.now());
         expect(await install(), isNot(contains('unchanged')));
 
+        // A source in a folder named build, below the package's own.
+        final nested = File(
+          p.join(runnerDir, 'example', 'native_add', 'src', 'build', 'x.c'),
+        )..createSync(recursive: true);
+        try {
+          expect(await install(), isNot(contains('unchanged')));
+          expect(await install(), contains('unchanged'));
+          nested.writeAsStringSync('// changed');
+          expect(await install(), isNot(contains('unchanged')));
+        } finally {
+          nested.parent.deleteSync(recursive: true);
+        }
+
+        // A folder linked into the package counts through the link.
+        final outside = Directory(p.join(temp.path, 'linked_sources'))
+          ..createSync();
+        final linked = Link(
+          p.join(runnerDir, 'example', 'native_add', 'linked_sources'),
+        )..createSync(outside.path);
+        try {
+          await install();
+          expect(await install(), contains('unchanged'));
+          File(p.join(outside.path, 'y.c')).writeAsStringSync('// new');
+          expect(await install(), isNot(contains('unchanged')));
+        } finally {
+          linked.deleteSync();
+        }
+
         // A dangling link in the package must not cost the app its assets.
         final dangling = Link(
           p.join(runnerDir, 'example', 'native_add', 'dangling_probe'),
