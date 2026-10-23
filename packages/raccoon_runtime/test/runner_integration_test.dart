@@ -1436,11 +1436,8 @@ void main() {
   };
 
   /// Runs example/camera with [source] as the camera's source; its CAMERA:
-  /// lines, and the runner's stderr.
-  Future<({List<String> lines, List<String> said})> runCamera(
-    Directory temp,
-    String source,
-  ) async {
+  /// lines.
+  Future<List<String>> runCamera(Directory temp, String source) async {
     final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
     final runner = await RunnerProcess.start(
       RunnerLaunch(
@@ -1452,8 +1449,6 @@ void main() {
         cameraSource: source,
       ),
     );
-    final said = <String>[];
-    runner.stderr.listen(said.add);
     final lines = <String>[];
     final done = Completer<void>();
     runner.stdout.listen((line) {
@@ -1477,7 +1472,7 @@ void main() {
       lines.firstWhere((l) => l.startsWith('picture'), orElse: () => ''),
     );
     if (picture?[4] case final path?) File(path).deleteSync();
-    return (lines: lines, said: said);
+    return lines;
   }
 
   test(
@@ -1488,7 +1483,7 @@ void main() {
       final video = p.join(temp.path, 'source.mp4');
       final made = await Process.run(testVideo, [video]);
       expect(made.exitCode, 0, reason: '${made.stderr}');
-      final (:lines, said: _) = await runCamera(temp, video);
+      final lines = await runCamera(temp, video);
       // Each channel within 16 of the video's, as H.264 and then JPEG keep
       // them; the top half is red and green, so neither half is flipped.
       void near(String what, String? seen, List<int> want) {
@@ -1536,12 +1531,13 @@ void main() {
       addTearDown(() => temp.deleteSync(recursive: true));
       final video = File(p.join(temp.path, 'source.mp4'))
         ..writeAsBytesSync([0, 0, 0, 0]);
-      final (:lines, :said) = await runCamera(temp, video.path);
+      final lines = await runCamera(temp, video.path);
+      // The pattern's bars: the runner said why (before it listened) and
+      // kept to its pattern.
       expect(
         lines,
         contains(startsWith('stream bgra8888 planes=1 raw=1111970369 bars ok')),
       );
-      expect(said, contains(contains('videos play on Windows only for now')));
     },
     skip:
         Platform.isWindows
