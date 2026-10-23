@@ -688,6 +688,16 @@ if misses:
                         "    end\n"
                         "  end\n"
                         "end\n")
+                # A pod's own minimum goes, so it builds for this machine as
+                # the platform above says; Flutter's podhelper drops it too
+                # when it asks for less than the app (#83).
+                f.write("post_install do |installer|\n"
+                        "  installer.pods_project.targets.each do |target|\n"
+                        "    target.build_configurations.each do |config|\n"
+                        "      config.build_settings.delete 'MACOSX_DEPLOYMENT_TARGET'\n"
+                        "    end\n"
+                        "  end\n"
+                        "end\n")
                 # Never integrated, so no Xcode project is read: the target is
                 # a name, and Swift 5 is what Flutter's Runner target would
                 # give the pods that name no Swift version.

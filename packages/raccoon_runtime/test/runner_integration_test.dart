@@ -318,6 +318,102 @@ void main() {
     timeout: const Timeout(Duration(minutes: 5)),
   );
   test(
+    'on macOS a pod asking for an older macOS builds for this one',
+    () async {
+      // plugin_c asks for macOS 10.13 and uses UTType, which is macOS 11:
+      // built at 10.13 it doesn't compile, as Flutter's own build never
+      // does it (#83).
+      final temp = Directory.systemTemp.createTempSync('raccoon_pods');
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      write(
+        'plugin_c/pubspec.yaml',
+        'name: plugin_c\nversion: 1.0.0\nflutter:\n  plugin:\n    platforms:\n'
+            '      macos:\n        pluginClass: PluginC\n',
+      );
+      write(
+        'plugin_c/macos/plugin_c.podspec',
+        "Pod::Spec.new do |s|\n  s.name = 'plugin_c'\n  s.version = '1.0.0'\n"
+            "  s.summary = 'plugin_c'\n  s.homepage = 'https://example.com'\n"
+            "  s.license = { :type => 'BSD' }\n  s.author = 'Raccoon'\n"
+            "  s.source = { :path => '.' }\n  s.source_files = 'Classes/**/*'\n"
+            "  s.dependency 'FlutterMacOS'\n  s.swift_version = '5.0'\n"
+            "  s.platform = :osx, '10.13'\nend\n",
+      );
+      write(
+        'plugin_c/macos/Classes/PluginC.swift',
+        'import FlutterMacOS\nimport UniformTypeIdentifiers\n\n'
+            'public class PluginC: NSObject, FlutterPlugin {\n'
+            '  public static func register(with registrar: FlutterPluginRegistrar) {\n'
+            '    _ = UTType.png\n  }\n}\n',
+      );
+      write('app/pubspec.yaml', 'name: app\ndependencies:\n  plugin_c:\n');
+      write(
+        'app/.dart_tool/package_config.json',
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+            {
+              'name': 'plugin_c',
+              'rootUri': '../../plugin_c',
+              'packageUri': 'lib/',
+            },
+          ],
+        }),
+      );
+      final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+        ..createSync(recursive: true);
+      final data = p.join(temp.path, 'data');
+      try {
+        final result = await Process.run(
+          p.join(runnerDir, 'tool', 'raccoon-device'),
+          ['install', bundle.path, 'app'],
+          environment: {
+            'RACCOON_RUNNER': binary!,
+            if (sdk != null) 'FLUTTER_ROOT': sdk,
+            'XDG_DATA_HOME': data,
+            'RACCOON_PLUGIN_CACHE': p.join(temp.path, 'cache'),
+            'RACCOON_NO_PREBUILT': '1',
+          },
+        );
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        final manifest =
+            jsonDecode(
+                  File(
+                    p.join(
+                      data,
+                      'raccoon',
+                      'apps',
+                      'app',
+                      'plugins',
+                      'manifest.json',
+                    ),
+                  ).readAsStringSync(),
+                )
+                as Map;
+        expect(manifest['status'], isEmpty);
+        expect(
+          [
+            for (final entry in manifest['plugins'] as List)
+              '${(entry as Map)['name']}',
+          ],
+          ['plugin_c'],
+        );
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isMacOS)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'CocoaPods plugins are macOS',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 5)),
+  );
+  test(
     'a pub workspace member gets its own plugins, not the other members\'',
     () async {
       // A member has no package config of its own; the workspace root's
