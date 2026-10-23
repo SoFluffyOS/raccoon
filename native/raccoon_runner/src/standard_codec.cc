@@ -287,6 +287,11 @@ class Writer {
         Size(value.items().size() / 2);
         for (const CodecValue& item : value.items()) Value(item);
         return;
+      case CodecValue::Type::kBytes:
+        Byte(kUint8List);
+        Size(value.bytes().size());
+        Bytes(value.bytes().data(), value.bytes().size());
+        return;
     }
   }
 
@@ -350,6 +355,13 @@ CodecValue CodecValue::Map(
   return out;
 }
 
+CodecValue CodecValue::Bytes(std::vector<uint8_t> bytes) {
+  CodecValue out;
+  out.type_ = Type::kBytes;
+  out.bytes_ = std::move(bytes);
+  return out;
+}
+
 double CodecValue::AsDouble(double fallback) const {
   if (type_ == Type::kDouble) return double_;
   if (type_ == Type::kInt) return static_cast<double>(int_);
@@ -389,6 +401,14 @@ bool DecodeValue(const uint8_t* data, size_t size, CodecValue* value) {
 std::vector<uint8_t> EncodeValue(const CodecValue& value) {
   Writer writer;
   writer.Value(value);
+  return writer.Take();
+}
+
+std::vector<uint8_t> EncodeMethodCall(const std::string& method,
+                                      const CodecValue& arguments) {
+  Writer writer;
+  writer.String(method);
+  writer.Value(arguments);
   return writer.Take();
 }
 

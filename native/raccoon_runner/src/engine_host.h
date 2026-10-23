@@ -10,6 +10,7 @@
 
 #include "engine_loader.h"
 #include "flutter_embedder.h"
+#include "camera_channels.h"
 #include "gpu_renderer.h"
 #if RACCOON_HAS_PLUGINS
 #include "plugins.h"
@@ -57,8 +58,9 @@ class EngineHost {
       std::function<void(const std::string& tag, const std::string& message)>;
   // A platform channel message from the app. |handle| is null when the app
   // expects no reply; otherwise Respond must be called with it exactly once.
-  // The window and shared preferences channels never get here: the host
-  // answers them itself (see window_channels.h, user_defaults_channels.h).
+  // The window, shared preferences and camera channels never get here: the
+  // host answers them itself (see window_channels.h,
+  // user_defaults_channels.h, camera_channels.h).
   using PlatformMessageCallback = std::function<void(
       const std::string& channel, const uint8_t* data, size_t size,
       const FlutterPlatformMessageResponseHandle* handle)>;
@@ -117,6 +119,11 @@ class EngineHost {
   // Milliseconds until ServiceVsync has something to do: -1 when the engine
   // has not asked, 0 when it is due.
   int MillisUntilVsync() const;
+  // Sends the camera's events and stream frames that are due. From the loop
+  // thread, every iteration.
+  void ServiceCamera();
+  // Milliseconds until ServiceCamera has something to do, or -1.
+  int MillisUntilCamera() const;
 
   // The VM service URI once the engine announced it, else empty.
   std::string vm_service_uri() const;
@@ -199,6 +206,7 @@ class EngineHost {
   bool alt_ = false;
   bool meta_ = false;
   UserDefaultsChannels user_defaults_;
+  CameraChannels camera_;
   FLUTTER_API_SYMBOL(FlutterEngine) engine_ = nullptr;
   LogCallback on_log_;
   PlatformMessageCallback on_platform_message_;

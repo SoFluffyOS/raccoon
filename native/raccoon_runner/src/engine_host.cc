@@ -31,6 +31,9 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   on_log_ = std::move(on_log);
   on_wake_ = std::move(on_wake);
   assets_ = options.assets;
+  camera_.SetSend([this](const std::string& channel, std::vector<uint8_t> message) {
+    SendPlatformMessage(channel, message.data(), message.size());
+  });
   if (!options.data_dir.empty()) {
     user_defaults_.SetStorePath(options.data_dir + "/shared_preferences.bin");
 #if !defined(_WIN32)
@@ -437,6 +440,16 @@ int EngineHost::MillisUntilVsync() const {
   return static_cast<int>((due - now + 999999) / 1000000);
 }
 
+void EngineHost::ServiceCamera() {
+  if (engine_ == nullptr) return;
+  camera_.Service(NowMicros());
+}
+
+int EngineHost::MillisUntilCamera() const {
+  if (engine_ == nullptr) return -1;
+  return camera_.MillisUntilDue(NowMicros());
+}
+
 void EngineHost::ReleaseAllGpuBuffers() {
   if (gpu_) gpu_->ReleaseAll();
 }
@@ -610,7 +623,9 @@ void EngineHost::OnPlatformMessage(const FlutterPlatformMessage* message,
       host->user_defaults_.Handle(channel, message->message,
                                   message->message_size, &reply) ||
       host->text_input_.Handle(channel, message->message,
-                               message->message_size, &reply)) {
+                               message->message_size, &reply) ||
+      host->camera_.Handle(channel, message->message, message->message_size,
+                           &reply)) {
     host->Respond(message->response_handle, reply.data(), reply.size());
     return;
   }

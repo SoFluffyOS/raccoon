@@ -1,0 +1,12 @@
+name: camera_app
+description: "Uses the camera plugin the way an app does - lists the cameras, takes a picture and streams frames in each format - against the runner's test camera, printing CAMERA lines for the runner's test."
+publish_to: "none"
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  camera: ^0.12.1
+  camera_platform_interface: ^2.15.0

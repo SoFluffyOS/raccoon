@@ -87,11 +87,13 @@ target_link_libraries(raccoon_proto PUBLIC libprotobuf-lite)
 
 add_executable(raccoon_runner
   src/main.cc
+  src/camera_channels.cc
   src/engine_host.cc
   src/engine_loader.cc
   src/event_loop.cc
   src/host_settings.cc
   src/host_settings_win.cc
+  src/jpeg_encoder.cc
   src/glib_pump.cc
   src/plugins.cc
   src/plugins_linux.cc

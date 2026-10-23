@@ -304,7 +304,8 @@ std::string GpuSocketPath(const std::string& socket) {
 // most |cap| milliseconds.
 int NextWait(raccoon::EngineHost& host, int cap) {
   int wait = cap;
-  for (int next : {host.platform().MillisUntilNextTask(), host.MillisUntilVsync()}) {
+  for (int next : {host.platform().MillisUntilNextTask(), host.MillisUntilVsync(),
+                   host.MillisUntilCamera()}) {
     if (next >= 0 && next < wait) wait = next;
   }
   return wait;
@@ -494,6 +495,7 @@ int Render(const Options& options) {
          std::chrono::steady_clock::now() < deadline) {
     host.platform().RunDueTasks();
     host.ServiceVsync();
+    host.ServiceCamera();
     if (!reported_first && host.frame().FrameCount() > 0) {
       reported_first = true;
       std::fprintf(stderr, "🦝 first frame after %ld ms\n",
@@ -887,6 +889,7 @@ int Serve(const Options& options) {
   auto Turn = [&]() {
     host.platform().RunDueTasks();
     host.ServiceVsync();
+    host.ServiceCamera();
     SendLogs();
     if (server.has_client()) {
       if (!vm_sent) {

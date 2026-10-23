@@ -2,7 +2,8 @@
 
 // Flutter's StandardMessageCodec and StandardMethodCodec, the subset the
 // runner needs to answer method channels itself: null, booleans, integers,
-// doubles, strings, lists and maps. Typed data lists decode into plain lists.
+// doubles, strings, lists, maps and, written only, byte lists. Typed data
+// lists decode into plain lists.
 
 #include <cstddef>
 #include <cstdint>
@@ -14,7 +15,7 @@ namespace raccoon {
 
 class CodecValue {
  public:
-  enum class Type { kNull, kBool, kInt, kDouble, kString, kList, kMap };
+  enum class Type { kNull, kBool, kInt, kDouble, kString, kList, kMap, kBytes };
 
   CodecValue() = default;
   static CodecValue Bool(bool value);
@@ -25,6 +26,8 @@ class CodecValue {
   // A map from string keys, the shape plugins use for arguments and results.
   static CodecValue Map(
       std::vector<std::pair<std::string, CodecValue>> entries);
+  // A Uint8List on the Dart side.
+  static CodecValue Bytes(std::vector<uint8_t> bytes);
 
   Type type() const { return type_; }
   bool is_null() const { return type_ == Type::kNull; }
@@ -34,6 +37,7 @@ class CodecValue {
   const std::string& string_value() const { return string_; }
   // A list's items; for a map, keys and values alternate.
   const std::vector<CodecValue>& items() const { return items_; }
+  const std::vector<uint8_t>& bytes() const { return bytes_; }
 
   // A number as a double, whichever way it was encoded; |fallback| otherwise.
   double AsDouble(double fallback) const;
@@ -47,6 +51,7 @@ class CodecValue {
   double double_ = 0;
   std::string string_;
   std::vector<CodecValue> items_;
+  std::vector<uint8_t> bytes_;
 };
 
 struct MethodCall {
@@ -62,6 +67,10 @@ bool DecodeMethodCall(const uint8_t* data, size_t size, MethodCall* call);
 // number they wrap.
 bool DecodeValue(const uint8_t* data, size_t size, CodecValue* value);
 std::vector<uint8_t> EncodeValue(const CodecValue& value);
+
+// A StandardMethodCodec call, for a channel the app handles.
+std::vector<uint8_t> EncodeMethodCall(const std::string& method,
+                                      const CodecValue& arguments);
 
 // The StandardMethodCodec envelopes.
 std::vector<uint8_t> EncodeSuccess(const CodecValue& result);

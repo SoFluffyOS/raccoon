@@ -35,6 +35,21 @@ Design notes: `docs/internal_docs/raccoon/`.
   executable: with `--data-dir` the runner points `XDG_DATA_HOME` and
   `XDG_CACHE_HOME` into it, so apps do not share one.
   `example/channels` checks the answers.
+- Answers the `camera` plugin from a test pattern: `camera` ships no
+  desktop implementation, so the app falls back to its method channel one.
+  There are two cameras, back and front; the resolution preset picks the
+  size, up to 1920×1080. Colour bars cover the top three quarters, and a white
+  block moves along the bottom quarter. `takePicture` writes the
+  current frame as a JPEG to the temp directory. Image streams run at up to
+  30 fps, as I420 (`yuv420`), BGRA (`bgra8888`, the default) or JPEG.
+  Video recording is refused for now. The preview is a `Texture` by camera
+  id that nothing fills yet. On Windows the embedder takes no external
+  textures from a Vulkan or software renderer at all. `CameraController`'s
+  `startImageStream` asserts in a debug build, because the method channel
+  implementation reports no streaming. `CameraPlatform.instance.
+  onStreamedFrameAvailable` streams without that check. `example/camera`
+  takes a picture and streams each format: 352×288 frames at 30.0 fps,
+  each format's colours checked.
 - Tells the app the host's locales and appearance after the engine starts,
   as a desktop embedding does: on macOS the preferred languages, light or
   dark, and the locale's 12- or 24-hour clock; on Linux the locales of

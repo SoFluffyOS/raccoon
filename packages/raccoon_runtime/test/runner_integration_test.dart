@@ -1213,6 +1213,81 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  // example/camera lists the cameras, takes a picture and streams in each
+  // format through the camera plugin, checking the test pattern's colours.
+  final cameraAssets = p.join(
+    runnerDir,
+    'example',
+    'camera',
+    'build',
+    'flutter_assets',
+  );
+  test(
+    'the runner answers the camera plugin from a test pattern',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: cameraAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final lines = <String>[];
+      final done = Completer<void>();
+      runner.stdout.listen((line) {
+        final at = line.indexOf('CAMERA:');
+        if (at < 0) return;
+        final said = line.substring(at + 'CAMERA:'.length);
+        lines.add(said);
+        if ((said == 'done' || said.startsWith('error')) && !done.isCompleted) {
+          done.complete();
+        }
+      });
+      final client = await RunnerClient.connect(endpoint);
+      final forwarded = <String>[];
+      client.registerChannel('plugins.flutter.io/camera', (data) async {
+        forwarded.add('plugins.flutter.io/camera');
+        return null;
+      });
+      try {
+        await done.future.timeout(const Duration(seconds: 30));
+        expect(lines, contains('cameras back,front'));
+        expect(lines, contains('initialized 352x288'));
+        final picture = lines.firstWhere((l) => l.startsWith('picture'));
+        expect(picture, startsWith('picture bars ok '));
+        final file = File(picture.substring('picture bars ok '.length));
+        expect(file.readAsBytesSync().take(2), [0xFF, 0xD8]);
+        file.deleteSync();
+        // Video range: white is 235, blue 41.
+        final yuv = lines.firstWhere((l) => l.startsWith('stream yuv420'));
+        expect(yuv, contains('planes=3 352x288 y=235/41'));
+        final fps = double.parse(yuv.split('fps=').last);
+        expect(fps, inInclusiveRange(20, 40));
+        expect(
+          lines,
+          contains('stream bgra8888 planes=1 raw=1111970369 bars ok'),
+        );
+        expect(lines, contains('stream jpeg planes=1 raw=256 bars ok'));
+        expect(lines.last, 'done');
+        expect(forwarded, isEmpty);
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready && Directory(cameraAssets).existsSync()
+            ? false
+            : 'build the runner and example/camera first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   test(
     'keys reach the framework and typed characters reach a text field',
     () async {
