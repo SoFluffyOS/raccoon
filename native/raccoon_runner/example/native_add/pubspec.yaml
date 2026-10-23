@@ -1,0 +1,11 @@
+name: native_add
+description: A code asset built by a build hook, for Raccoon's native assets test.
+publish_to: "none"
+
+environment:
+  sdk: ^3.10.0
+
+dependencies:
+  code_assets: ^2.1.0
+  hooks: ^2.2.0
+  native_toolchain_c: ^0.19.5

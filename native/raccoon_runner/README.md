@@ -175,8 +175,12 @@ Design notes: `docs/internal_docs/raccoon/`.
   projects with hook packages: on an M1 Pro, 9 s the first time for a new
   project, about a second after. Such an app runs in its own bundle too, so
   `path_provider` names its directories after it
-  (`~/Library/Application Support/dev.raccoon.app.<app>`). On Linux the
-  hooks are not built yet.
+  (`~/Library/Application Support/dev.raccoon.app.<app>`). On Linux the same
+  with the Linux bundle target (`debug_bundle_linux-x64_assets`); it unpacks
+  the GTK engine into `linux/flutter/ephemeral`, and the helper takes a
+  `linux/` folder away again when the project had none. `example/native_assets_app`
+  calls a C function from a hook (`example/native_add`) and prints
+  `NATIVE:42`.
 - Never leaves the app waiting on a plugin nobody serves. A channel no one
   answers gets an empty reply, which the app sees as
   `MissingPluginException` (Pigeon's `channel-error`), as on a desktop the

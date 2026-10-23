@@ -134,6 +134,13 @@ jobs:
             (cd "example/$example" && flutter build bundle --target-platform=${{ matrix.target }})
           done
 
+      # A code asset from a build hook (#53, #57); its C exports nothing for
+      # a Windows DLL.
+      - name: Build the native assets example
+        if: runner.os != 'Windows'
+        working-directory: native/raccoon_runner/example/native_assets_app
+        run: flutter build bundle --target-platform=${{ matrix.target }}
+
       # Libraries on Linux, frameworks on macOS: at least one, or it fails.
       # No native plugins on Windows yet (#36).
       - name: Prebuild the common plugins

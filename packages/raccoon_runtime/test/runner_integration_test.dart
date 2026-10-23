@@ -212,6 +212,93 @@ void main() {
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );
+  final nativeAssetsApp = p.join(runnerDir, 'example', 'native_assets_app');
+  final nativeAssetsBundle = p.join(nativeAssetsApp, 'build', 'flutter_assets');
+  test(
+    'a code asset from a build hook loads, on macOS and on Linux',
+    () async {
+      // native_add's hook compiles add() in C. The tool builds the bundle
+      // for the Linux device it thinks Raccoon is, without running hooks for
+      // this host; the helper runs them and installs the library (#53, #57).
+      final temp = Directory.systemTemp.createTempSync('raccoon_native');
+      final helper = p.join(runnerDir, 'tool', 'raccoon-device');
+      final data = p.join(temp.path, 'data');
+      final helperEnvironment = {
+        'RACCOON_RUNNER': binary!,
+        if (sdk != null) 'FLUTTER_ROOT': sdk,
+        'XDG_DATA_HOME': data,
+        'XDG_RUNTIME_DIR': temp.path,
+        'TMPDIR': '${temp.path}/',
+      };
+      final hadLinux = Directory(p.join(nativeAssetsApp, 'linux')).existsSync();
+      final install = await Process.run(helper, [
+        'install',
+        nativeAssetsBundle,
+        'native_assets_app',
+      ], environment: helperEnvironment);
+      expect(install.exitCode, 0, reason: '${install.stderr}');
+      expect('${install.stderr}', contains('native assets, 1 for this host'));
+      // The Linux target's engine copy goes again.
+      expect(
+        Directory(p.join(nativeAssetsApp, 'linux')).existsSync(),
+        hadLinux,
+      );
+      final manifest =
+          jsonDecode(
+                File(
+                  p.join(
+                    data,
+                    'raccoon',
+                    'apps',
+                    'native_assets_app',
+                    'flutter_assets',
+                    'NativeAssetsManifest.json',
+                  ),
+                ).readAsStringSync(),
+              )
+              as Map;
+      final paths = [
+        for (final assets in (manifest['native-assets'] as Map).values)
+          for (final path in (assets as Map).values) (path as List).last,
+      ];
+      expect(paths, hasLength(1));
+      expect(File('${paths.single}').existsSync(), isTrue);
+
+      final run = await Process.start(helper, [
+        'run',
+        'native_assets_app',
+      ], environment: helperEnvironment);
+      final lines = <String>[];
+      run.stdout
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .listen(lines.add);
+      run.stderr.drain<void>().ignore();
+      try {
+        final deadline = DateTime.now().add(const Duration(seconds: 30));
+        while (!lines.any((line) => line.contains('NATIVE:')) &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        expect(lines, contains(contains('NATIVE:42')));
+      } finally {
+        run.kill();
+        await run.exitCode;
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((
+      binary != null &&
+          sdk != null &&
+          Directory(nativeAssetsBundle).existsSync(),
+      Platform.isWindows,
+    )) {
+      (false, _) => 'build the runner and example/native_assets_app first',
+      (_, true) => 'the helper runs in Git Bash on Windows',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 5)),
+  );
   test(
     'an app starts at the size the board saved for it',
     () async {
