@@ -351,6 +351,7 @@ class _RaccoonViewState extends State<RaccoonView> {
     // The size goes to the runner from layout. A LayoutBuilder would lay the
     // view out again for every frame, and repaint what is around it (#107).
     return _SizeReport(
+      connection: widget.connection,
       pixelRatio: pixelRatio,
       onSize: _sendSize,
       child: Focus(
@@ -407,21 +408,24 @@ class _RaccoonViewState extends State<RaccoonView> {
 }
 
 /// Reports the biggest size its constraints allow, when finite and not
-/// empty, after a layout; lays out again only when the constraints or the
-/// pixel ratio change.
+/// empty, after a layout; lays out again only when the constraints, the
+/// pixel ratio or the connection change. A new connection is a runner that
+/// has not heard the size yet.
 class _SizeReport extends SingleChildRenderObjectWidget {
   const _SizeReport({
+    required this.connection,
     required this.pixelRatio,
     required this.onSize,
     super.child,
   });
 
+  final RunnerConnection connection;
   final double pixelRatio;
   final void Function(Size size, double pixelRatio) onSize;
 
   @override
   RenderObject createRenderObject(BuildContext context) =>
-      _RenderSizeReport(pixelRatio, onSize);
+      _RenderSizeReport(connection, pixelRatio, onSize);
 
   @override
   void updateRenderObject(
@@ -429,16 +433,24 @@ class _SizeReport extends SingleChildRenderObjectWidget {
     _RenderSizeReport renderObject,
   ) {
     renderObject
+      ..connection = connection
       ..pixelRatio = pixelRatio
       ..onSize = onSize;
   }
 }
 
 class _RenderSizeReport extends RenderProxyBox {
-  _RenderSizeReport(this._pixelRatio, this.onSize);
+  _RenderSizeReport(this._connection, this._pixelRatio, this.onSize);
 
+  RunnerConnection _connection;
   double _pixelRatio;
   void Function(Size size, double pixelRatio) onSize;
+
+  set connection(RunnerConnection value) {
+    if (identical(value, _connection)) return;
+    _connection = value;
+    markNeedsLayout();
+  }
 
   set pixelRatio(double value) {
     if (value == _pixelRatio) return;

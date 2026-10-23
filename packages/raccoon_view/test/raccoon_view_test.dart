@@ -82,6 +82,29 @@ void main() {
     expect(connection.resizes, [(600, 400, 2.0)]);
   });
 
+  // #107: the size goes again to a new connection, though nothing moved.
+  testWidgets('sends its size to a new connection of the same size', (
+    tester,
+  ) async {
+    final first = _FakeConnection();
+    final second = _FakeConnection();
+    Widget view(RunnerConnection connection) => MediaQuery(
+      data: const MediaQueryData(devicePixelRatio: 2),
+      child: Center(
+        child: SizedBox(
+          width: 300,
+          height: 200,
+          child: RaccoonView(connection: connection),
+        ),
+      ),
+    );
+    await tester.pumpWidget(view(first));
+    await tester.pumpWidget(view(second));
+
+    expect(first.resizes, [(600, 400, 2.0)]);
+    expect(second.resizes, [(600, 400, 2.0)]);
+  });
+
   testWidgets('a pixel ratio override replaces the display ratio', (
     tester,
   ) async {
