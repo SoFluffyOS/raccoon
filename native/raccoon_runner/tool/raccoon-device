@@ -868,7 +868,9 @@ case "$verb" in
     if [ -n "$SIZE" ]; then
       w="${SIZE%%x*}"; rest="${SIZE#*x}"; h="${rest%%@*}"; r="${rest#*@}"
       [ "$r" = "$rest" ] && r=1
-      size_args="--width $w --height $h --dpr $r"
+      # The size is logical; the runner takes pixels.
+      size_args="$(awk -v w="$w" -v h="$h" -v r="$r" \
+        'BEGIN { printf "--width %d --height %d --dpr %s", w * r + 0.5, h * r + 0.5, r }')"
     fi
     # FFI plugins' libraries, opened by the Dart side by name: on Linux by
     # library name, on macOS as <name>.framework/<name>, on Windows as a DLL
