@@ -570,6 +570,27 @@ def frameworks(directory):
                   if f.endswith('.framework') and not f.startswith('._')) if os.path.isdir(directory) else []
 
 
+def in_cache(plugin):
+    """Whether the cache holds the plugin, every framework its frameworks
+    load by @rpath included: a helper before #84 left out the ready-made
+    ones, so such an entry is built again. Checked once, then stamped."""
+    entry = os.path.join(cache, plugin['key'])
+    present = frameworks(entry)
+    if not present:
+        return False
+    stamp = os.path.join(entry, '.complete')
+    if os.path.exists(stamp):
+        return True
+    loadable = set(present) | {'FlutterMacOS.framework'}
+    for f in present:
+        listing = subprocess.run(['otool', '-L', os.path.join(entry, f, f[:-len('.framework')])],
+                                 capture_output=True, text=True).stdout
+        if any(dep not in loadable for dep in re.findall(r'@rpath/([^/\s]+\.framework)/', listing)):
+            return False
+    open(stamp, 'w').close()
+    return True
+
+
 wanted = []
 status = []  # what never gets as far as a library, for the runner to relay
 packages = []
@@ -629,10 +650,10 @@ if not wanted and not status:
 
 os.makedirs(os.path.join(out, 'frameworks'), exist_ok=True)
 built, failed, empty, from_cache = [], [], [], []
-misses = [p for p in wanted if not frameworks(os.path.join(cache, p['key']))]
+misses = [p for p in wanted if not in_cache(p)]
 if misses:
     fetch_prebuilt()
-    misses = [p for p in wanted if not frameworks(os.path.join(cache, p['key']))]
+    misses = [p for p in wanted if not in_cache(p)]
 broken = {}  # name: why, for the misses that did not build
 if misses:
     toolchain = can_build()
@@ -691,10 +712,22 @@ if misses:
                 # A pod's own minimum goes, so it builds for this machine as
                 # the platform above says; Flutter's podhelper drops it too
                 # when it asks for less than the app (#83).
+                # And every pod links every framework its dependencies build,
+                # not only its own pods': a ready-made static library inside
+                # it (GoogleAppMeasurement) needs symbols from pods it never
+                # names (#84).
                 f.write("post_install do |installer|\n"
                         "  installer.pods_project.targets.each do |target|\n"
                         "    target.build_configurations.each do |config|\n"
                         "      config.build_settings.delete 'MACOSX_DEPLOYMENT_TARGET'\n"
+                        "    end\n"
+                        "  end\n"
+                        "  installer.pod_targets.each do |pod|\n"
+                        "    needed = pod.recursive_dependent_targets.select(&:should_build?).map(&:product_module_name).uniq\n"
+                        "    native = installer.pods_project.targets.find { |t| t.name == pod.label }\n"
+                        "    next if needed.empty? || native.nil?\n"
+                        "    native.build_configurations.each do |config|\n"
+                        "      config.build_settings['OTHER_LDFLAGS'] = ['$(inherited)'] + needed.flat_map { |n| ['-framework', n] }\n"
                         "    end\n"
                         "  end\n"
                         "end\n")
@@ -749,12 +782,27 @@ if misses:
         made = [(d, f) for d in sorted(os.listdir(release))
                 if d not in ('FlutterMacOS', 'XCFrameworkIntermediates')
                 for f in frameworks(os.path.join(release, d))] if os.path.isdir(release) else []
+        # Ready-made dynamic frameworks the pods bring (Agora's), which
+        # CocoaPods leaves under XCFrameworkIntermediates/<pod>/<variant>;
+        # not FlutterMacOS, and not the static ones, linked in already (#84).
+        intermediates = os.path.join(release, 'XCFrameworkIntermediates')
+        for pod in sorted(os.listdir(intermediates)) if os.path.isdir(intermediates) else []:
+            if pod == 'FlutterMacOS':
+                continue
+            for variant, _, _ in os.walk(os.path.join(intermediates, pod)):
+                for f in frameworks(variant):
+                    binary = os.path.join(variant, f, f[:-len('.framework')])
+                    kind = subprocess.run(['file', '-bL', binary], capture_output=True, text=True).stdout
+                    if 'dynamically linked shared library' in kind:
+                        made.append((os.path.relpath(variant, release), f))
         if not any(f == name + '.framework' for _, f in made):
             empty.append(name)
             status.append({'name': name, 'state': 'built_nothing', 'detail': 'built and made no framework'})
             broken[name] = None
             continue
-        os.makedirs(cached, exist_ok=True)
+        # A fresh entry: one built again replaces what an older helper left.
+        shutil.rmtree(cached, ignore_errors=True)
+        os.makedirs(cached)
         for d, f in made:
             shutil.copytree(os.path.join(release, d, f), os.path.join(cached, f), symlinks=True,
                             dirs_exist_ok=True)

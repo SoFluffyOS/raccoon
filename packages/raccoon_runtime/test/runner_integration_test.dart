@@ -414,6 +414,145 @@ void main() {
     timeout: const Timeout(Duration(minutes: 5)),
   );
   test(
+    'on macOS a ready-made framework in a plugin\'s pod lands beside it',
+    () async {
+      // plugin_d's pod brings Ready.xcframework, a dynamic framework the
+      // plugin links, as Agora's pods bring AgoraRtcWrapper. CocoaPods
+      // leaves it under XCFrameworkIntermediates; without it beside the
+      // plugin, the plugin never loads (#84).
+      final temp = Directory.systemTemp.createTempSync('raccoon_pods');
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      final ready = p.join(temp.path, 'ready', 'Ready.framework');
+      write('ready/ready.c', 'int ready_value(void) { return 42; }\n');
+      write(
+        'ready/Ready.framework/Versions/A/Headers/Ready.h',
+        'int ready_value(void);\n',
+      );
+      write(
+        'ready/Ready.framework/Versions/A/Resources/Info.plist',
+        '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict>'
+            '<key>CFBundleExecutable</key><string>Ready</string>'
+            '<key>CFBundleIdentifier</key><string>dev.raccoon.ready</string>'
+            '<key>CFBundlePackageType</key><string>FMWK</string>'
+            '</dict></plist>\n',
+      );
+      Future<void> run(String executable, List<String> arguments) async {
+        final result = await Process.run(executable, arguments);
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+      }
+
+      await run('xcrun', [
+        'clang',
+        '-dynamiclib',
+        '-arch',
+        'arm64',
+        '-arch',
+        'x86_64',
+        '-install_name',
+        '@rpath/Ready.framework/Versions/A/Ready',
+        '-o',
+        p.join(ready, 'Versions', 'A', 'Ready'),
+        p.join(temp.path, 'ready', 'ready.c'),
+      ]);
+      for (final (link, target) in [
+        ('Versions/Current', 'A'),
+        ('Ready', 'Versions/Current/Ready'),
+        ('Headers', 'Versions/Current/Headers'),
+        ('Resources', 'Versions/Current/Resources'),
+      ]) {
+        Link(p.join(ready, link)).createSync(target);
+      }
+      await run('xcodebuild', [
+        '-create-xcframework',
+        '-framework',
+        ready,
+        '-output',
+        p.join(temp.path, 'plugin_d', 'macos', 'Ready.xcframework'),
+      ]);
+      write(
+        'plugin_d/pubspec.yaml',
+        'name: plugin_d\nversion: 1.0.0\nflutter:\n  plugin:\n    platforms:\n'
+            '      macos:\n        pluginClass: PluginD\n',
+      );
+      write(
+        'plugin_d/macos/plugin_d.podspec',
+        "Pod::Spec.new do |s|\n  s.name = 'plugin_d'\n  s.version = '1.0.0'\n"
+            "  s.summary = 'plugin_d'\n  s.homepage = 'https://example.com'\n"
+            "  s.license = { :type => 'BSD' }\n  s.author = 'Raccoon'\n"
+            "  s.source = { :path => '.' }\n  s.source_files = 'Classes/**/*'\n"
+            "  s.vendored_frameworks = 'Ready.xcframework'\n"
+            "  s.pod_target_xcconfig = { 'OTHER_LDFLAGS' => '-framework Ready' }\n"
+            "  s.dependency 'FlutterMacOS'\n  s.platform = :osx, '10.15'\nend\n",
+      );
+      write(
+        'plugin_d/macos/Classes/PluginD.h',
+        '@import FlutterMacOS;\n@interface PluginD : NSObject <FlutterPlugin>\n@end\n',
+      );
+      write(
+        'plugin_d/macos/Classes/PluginD.m',
+        '#import "PluginD.h"\n#import <Ready/Ready.h>\n@implementation PluginD\n'
+            '+ (void)registerWithRegistrar:(id<FlutterPluginRegistrar>)registrar {\n'
+            '  (void)ready_value();\n}\n@end\n',
+      );
+      write('app/pubspec.yaml', 'name: app\ndependencies:\n  plugin_d:\n');
+      write(
+        'app/.dart_tool/package_config.json',
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+            {
+              'name': 'plugin_d',
+              'rootUri': '../../plugin_d',
+              'packageUri': 'lib/',
+            },
+          ],
+        }),
+      );
+      final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+        ..createSync(recursive: true);
+      final data = p.join(temp.path, 'data');
+      try {
+        final result = await Process.run(
+          p.join(runnerDir, 'tool', 'raccoon-device'),
+          ['install', bundle.path, 'app'],
+          environment: {
+            'RACCOON_RUNNER': binary!,
+            if (sdk != null) 'FLUTTER_ROOT': sdk,
+            'XDG_DATA_HOME': data,
+            'RACCOON_PLUGIN_CACHE': p.join(temp.path, 'cache'),
+            'RACCOON_NO_PREBUILT': '1',
+          },
+        );
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        final plugins = p.join(data, 'raccoon', 'apps', 'app', 'plugins');
+        final manifest =
+            jsonDecode(
+                  File(p.join(plugins, 'manifest.json')).readAsStringSync(),
+                )
+                as Map;
+        expect(manifest['status'], isEmpty);
+        expect(
+          Directory(
+            p.join(plugins, 'frameworks'),
+          ).listSync().map((entry) => p.basename(entry.path)),
+          containsAll(['plugin_d.framework', 'Ready.framework']),
+        );
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isMacOS)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'CocoaPods plugins are macOS',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 5)),
+  );
+  test(
     'a pub workspace member gets its own plugins, not the other members\'',
     () async {
       // A member has no package config of its own; the workspace root's
