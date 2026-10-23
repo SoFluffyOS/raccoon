@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace raccoon {
@@ -101,6 +102,11 @@ struct MetalRenderer::Impl {
   };
   std::mutex pixels_mutex;
   std::unordered_map<int64_t, Pixels> pixels;
+  // Ids let go: a raster call that comes late does not make them again.
+  // Their textures live until the next PixelTexture, on the raster thread,
+  // by when the engine took the handles it was given (#114).
+  std::unordered_set<int64_t> forgotten;
+  std::vector<Pixels> retired;
 
   // Mutex held.
   bool EnsureReadback(size_t width, size_t height);
@@ -235,6 +241,8 @@ bool MetalRenderer::PixelTexture(int64_t texture_id, size_t width, size_t height
                                  const uint8_t* bgra, FlutterMetalExternalTexture* out) {
   if (impl_->device == nil || width == 0 || height == 0) return false;
   std::lock_guard<std::mutex> lock(impl_->pixels_mutex);
+  impl_->retired.clear();
+  if (impl_->forgotten.count(texture_id) != 0) return false;
   Impl::Pixels& kept = impl_->pixels[texture_id];
   if (kept.filled && kept.number != number) kept.current = 1 - kept.current;
   id<MTLTexture> texture = kept.textures[kept.current];
@@ -269,7 +277,11 @@ bool MetalRenderer::PixelTexture(int64_t texture_id, size_t width, size_t height
 
 void MetalRenderer::ForgetPixelTexture(int64_t texture_id) {
   std::lock_guard<std::mutex> lock(impl_->pixels_mutex);
-  impl_->pixels.erase(texture_id);
+  impl_->forgotten.insert(texture_id);
+  const auto found = impl_->pixels.find(texture_id);
+  if (found == impl_->pixels.end()) return;
+  impl_->retired.push_back(std::move(found->second));
+  impl_->pixels.erase(found);
 }
 
 const std::string& MetalRenderer::description() const {

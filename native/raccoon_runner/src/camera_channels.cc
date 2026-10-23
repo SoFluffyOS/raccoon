@@ -474,17 +474,31 @@ void CameraChannels::Service(uint64_t now_micros) {
 
 void CameraChannels::ServicePreview(int64_t id, Camera& camera, uint64_t now_micros) {
   if (!camera.previewing || camera.paused || now_micros < camera.next_preview_micros) return;
-  camera.next_preview_micros = NextDue(camera.next_preview_micros, now_micros,
-                                       1000000 / static_cast<uint64_t>(camera.fps));
   auto preview = std::make_shared<Preview>();
   preview->width = camera.height;
   preview->height = camera.width;
   preview->number = ++previews_made_;
   preview->bgra = Frame(preview->width, preview->height, now_micros);
+  bool drawn = false;
   {
     std::lock_guard<std::mutex> lock(previews_mutex_);
-    previews_[id] = std::move(preview);
+    PreviewSlot& slot = previews_[id];
+    drawn = slot.drawn;
+    slot.frame = std::move(preview);
+    slot.drawn = false;
   }
+  camera.undrawn = drawn ? 0 : camera.undrawn + 1;
+  // The engine takes a preview only while something draws its texture. A
+  // few frames in a row that nothing took, and the preview drops to a
+  // probe a few times a second: an app that shows none, or a camera a hot
+  // restart orphaned, no longer keeps the app drawing (#114). The probe
+  // finds out when something draws the texture again.
+  constexpr int kUndrawnBeforeProbe = 3;
+  constexpr uint64_t kProbeMicros = 250000;
+  const uint64_t interval = camera.undrawn >= kUndrawnBeforeProbe
+                                ? kProbeMicros
+                                : 1000000 / static_cast<uint64_t>(camera.fps);
+  camera.next_preview_micros = NextDue(camera.next_preview_micros, now_micros, interval);
   textures_.frame(id);
 }
 
@@ -498,10 +512,12 @@ void CameraChannels::StopPreview(int64_t id, Camera& camera) {
   textures_.remove(id);
 }
 
-std::shared_ptr<const CameraChannels::Preview> CameraChannels::PreviewOf(int64_t id) const {
+std::shared_ptr<const CameraChannels::Preview> CameraChannels::PreviewOf(int64_t id) {
   std::lock_guard<std::mutex> lock(previews_mutex_);
   const auto found = previews_.find(id);
-  return found == previews_.end() ? nullptr : found->second;
+  if (found == previews_.end()) return nullptr;
+  found->second.drawn = true;
+  return found->second.frame;
 }
 
 void CameraChannels::ServiceRecording(uint64_t now_micros) {

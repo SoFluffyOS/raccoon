@@ -218,6 +218,7 @@ bool GlRenderer::PixelTexture(int64_t texture_id, size_t width, size_t height, u
     glDeleteTextures(static_cast<GLsizei>(forgotten_.size()), forgotten_.data());
     forgotten_.clear();
   }
+  if (forgotten_ids_.count(texture_id) != 0) return false;
   Pixels& kept = pixels_[texture_id];
   const bool fresh = kept.name == 0;
   if (fresh) {
@@ -265,6 +266,7 @@ bool GlRenderer::PixelTexture(int64_t texture_id, size_t width, size_t height, u
 
 void GlRenderer::ForgetPixelTexture(int64_t texture_id) {
   std::lock_guard<std::mutex> lock(pixels_mutex_);
+  forgotten_ids_.insert(texture_id);
   const auto found = pixels_.find(texture_id);
   if (found == pixels_.end()) return;
   forgotten_.push_back(found->second.name);

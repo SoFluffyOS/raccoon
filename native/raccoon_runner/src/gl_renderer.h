@@ -24,6 +24,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "flutter_embedder.h"
@@ -133,7 +134,10 @@ class GlRenderer : public GpuRenderer {
   };
   std::mutex pixels_mutex_;
   std::unordered_map<int64_t, Pixels> pixels_;
+  // Names to delete with the context current, and ids let go, which a
+  // raster call that comes late does not make again (#114).
   std::vector<GLuint> forgotten_;
+  std::unordered_set<int64_t> forgotten_ids_;
   std::vector<uint8_t> rgba_;
 
   mutable std::mutex mutex_;

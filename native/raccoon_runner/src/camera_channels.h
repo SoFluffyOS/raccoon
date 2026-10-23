@@ -78,9 +78,10 @@ class CameraChannels {
   bool Handle(const std::string& channel, const uint8_t* data, size_t size,
               std::vector<uint8_t>* reply);
 
-  // Camera |id|'s latest preview, null for none. From any thread: the
-  // renderer asks on its raster thread.
-  std::shared_ptr<const Preview> PreviewOf(int64_t id) const;
+  // Camera |id|'s latest preview, null for none, and a note that something
+  // drew it. From any thread: the renderer asks on its raster thread, and
+  // only while the texture is drawn.
+  std::shared_ptr<const Preview> PreviewOf(int64_t id);
 
   // Sends what is due at |now_micros|: events, previews, then the stream's
   // next frame.
@@ -106,6 +107,8 @@ class CameraChannels {
     bool previewing = false;
     bool paused = false;
     uint64_t next_preview_micros = 0;
+    // Preview frames in a row that nothing drew.
+    int undrawn = 0;
   };
 
   // What the camera sees at |time_micros|, at |width| x |height|: the
@@ -141,8 +144,13 @@ class CameraChannels {
   // from 1 on macOS, pointers on Linux.
   int64_t next_id_ = (int64_t{1} << 48) + 1;
   Textures textures_;
-  mutable std::mutex previews_mutex_;
-  std::map<int64_t, std::shared_ptr<const Preview>> previews_;
+  // A camera's latest preview, and whether the renderer took it.
+  struct PreviewSlot {
+    std::shared_ptr<const Preview> frame;
+    bool drawn = true;
+  };
+  std::mutex previews_mutex_;
+  std::map<int64_t, PreviewSlot> previews_;
   uint64_t previews_made_ = 0;
   uint64_t pictures_taken_ = 0;
   // The recording under way: the camera's frames into |recorder|, on a grid

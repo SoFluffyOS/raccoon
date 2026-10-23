@@ -1390,10 +1390,15 @@ void main() {
       );
       final lines = <String>[];
       final done = Completer<void>();
+      var framesSeen = 0;
+      var framesAtIdle = 0;
+      var framesAfterIdle = 0;
       runner.stdout.listen((line) {
         final at = line.indexOf('CAMERA:');
         if (at < 0) return;
         final said = line.substring(at + 'CAMERA:'.length);
+        if (said == 'idle') framesAtIdle = framesSeen;
+        if (said == 'idle end') framesAfterIdle = framesSeen;
         lines.add(said);
         if ((said == 'done' || said.startsWith('error')) && !done.isCompleted) {
           done.complete();
@@ -1409,6 +1414,7 @@ void main() {
       // pattern's first bar is white, its last blue.
       var previewed = false;
       final frames = client.frames.listen((frame) {
+        framesSeen++;
         final y = frame.height ~/ 4;
         if (_pixel(frame, frame.width ~/ 14, y) == (r: 255, g: 255, b: 255) &&
             _pixel(frame, frame.width * 13 ~/ 14, y) == (r: 0, g: 0, b: 255)) {
@@ -1420,6 +1426,9 @@ void main() {
         await frames.cancel();
         if (runner.renderer == 'gl' || runner.renderer == 'metal') {
           expect(previewed, isTrue, reason: 'no frame showed the preview');
+          // #114: two seconds of a camera nobody shows are a few frames,
+          // not sixty.
+          expect(framesAfterIdle - framesAtIdle, lessThan(20));
         }
         expect(lines, contains('cameras back,front'));
         expect(lines, contains('initialized 352x288'));

@@ -104,6 +104,18 @@ Future<void> main() async {
       _say('video refused ${error.code}');
     }
     await recorder.dispose();
+
+    // A camera nobody shows: the runner stops drawing it at its frame rate.
+    final idle = CameraController(
+      cameras.first,
+      ResolutionPreset.low,
+      enableAudio: false,
+    );
+    await idle.initialize();
+    _say('idle');
+    await Future<void>.delayed(const Duration(seconds: 2));
+    _say('idle end');
+    await idle.dispose();
     _say('done');
   } catch (error) {
     _say('error $error');
