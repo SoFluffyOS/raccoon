@@ -22,6 +22,23 @@
 
 using raccoon::PluginHost;
 
+// FlutterMacOS casts engine_id to an Objective-C engine and asks it for a
+// local view controller. There is none: Raccoon's visible view belongs to
+// the client. A real Objective-C identity makes that lookup safely return
+// a null window handle, as Flutter documents for a view without a window.
+@interface RaccoonEngineIdentity : NSObject
+@end
+
+@implementation RaccoonEngineIdentity
+- (NSViewController*)viewControllerForIdentifier:(int64_t)viewId {
+  (void)viewId;
+  return nil;
+}
+- (id)windowController {
+  return nil;
+}
+@end
+
 // ---- The messenger ----------------------------------------------------------
 
 // A serial queue a handler asked to be called on.
@@ -336,21 +353,25 @@ struct TextureFrame {
 
 @interface RaccoonRegistrar : NSObject <FlutterPluginRegistrar>
 - (instancetype)initWithMessenger:(RaccoonMessenger*)messenger
-                         textures:(RaccoonTextures*)textures;
+                         textures:(RaccoonTextures*)textures
+                   viewController:(NSViewController*)viewController;
 @property(nonatomic, readonly, nullable) NSObject* published;
 @end
 
 @implementation RaccoonRegistrar {
   RaccoonMessenger* _messenger;
   RaccoonTextures* _textures;
+  NSViewController* _viewController;
   NSMutableArray<NSObject<FlutterAppLifecycleDelegate>*>* _delegates;
 }
 
 - (instancetype)initWithMessenger:(RaccoonMessenger*)messenger
-                         textures:(RaccoonTextures*)textures {
+                         textures:(RaccoonTextures*)textures
+                   viewController:(NSViewController*)viewController {
   if ((self = [super init])) {
     _messenger = messenger;
     _textures = textures;
+    _viewController = viewController;
     _delegates = [NSMutableArray array];
   }
   return self;
@@ -364,13 +385,15 @@ struct TextureFrame {
   return _textures;
 }
 
-// No view: the app's window is the client's pane.
+// A shared, detached backing view for plugins that keep per-view state.
+// The app's visible window is the client's pane; this has no native window
+// and does not receive native pointer or drag-and-drop events.
 - (NSView*)view {
-  return nil;
+  return _viewController.view;
 }
 
 - (NSViewController*)viewController {
-  return nil;
+  return _viewController;
 }
 
 - (void)addMethodCallDelegate:(id<FlutterPlugin>)delegate channel:(FlutterMethodChannel*)channel {
@@ -409,9 +432,17 @@ struct TextureFrame {
 
 namespace raccoon {
 
+std::shared_ptr<void> CreateMacOSEngineIdentity() {
+  void* identity = (__bridge_retained void*)[[RaccoonEngineIdentity alloc] init];
+  return std::shared_ptr<void>(identity, [](void* object) {
+    CFRelease(object);
+  });
+}
+
 struct PluginHost::Impl {
   RaccoonMessenger* messenger = nil;
   RaccoonTextures* textures = nil;
+  NSViewController* view_controller = nil;
   NSMutableArray<RaccoonRegistrar*>* registrars = nil;
 };
 
@@ -424,6 +455,8 @@ PluginHost::PluginHost(Bridge bridge) : bridge_(std::move(bridge)), impl_(std::m
   [NSApplication sharedApplication];
   [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
   [NSApp finishLaunching];
+  impl_->view_controller = [[NSViewController alloc] init];
+  impl_->view_controller.view = [[NSView alloc] initWithFrame:NSZeroRect];
 }
 
 // The frameworks stay loaded: a plugin's objects may outlive this.
@@ -506,7 +539,8 @@ bool PluginHost::Load(const PluginEntry& entry, std::string* error) {
     return false;
   }
   RaccoonRegistrar* registrar = [[RaccoonRegistrar alloc] initWithMessenger:impl_->messenger
-                                                                   textures:impl_->textures];
+                                                                   textures:impl_->textures
+                                                             viewController:impl_->view_controller];
   // Some APIs throw outside an application bundle (UserNotifications does
   // at registration); the plugin fails alone and says why.
   @try {

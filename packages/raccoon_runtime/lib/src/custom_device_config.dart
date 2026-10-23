@@ -49,10 +49,10 @@ final class CustomDeviceConfig {
   static final String hostPlatform = platformFor(Abi.current());
 
   /// The tool accepts only `linux-x64` and `linux-arm64` as a custom device's
-  /// platform, whatever the host. That is fine: a debug bundle is built from
-  /// the host's own snapshots regardless, and the runner loads the host's
-  /// engine. Naming the host's architecture keeps the tool's artifact paths
-  /// honest at least.
+  /// platform, whatever the host. Dart snapshots work with the host engine,
+  /// but build hooks also see this platform and may try to cross-compile
+  /// Linux libraries on macOS. Use `raccoon-device launch` there to build
+  /// host assets before starting Flutter's custom-device hot runner.
   static String platformFor(Abi abi) => switch (abi) {
     Abi.linuxArm64 || Abi.macosArm64 || Abi.windowsArm64 => 'linux-arm64',
     Abi.linuxX64 || Abi.macosX64 || Abi.windowsX64 => 'linux-x64',

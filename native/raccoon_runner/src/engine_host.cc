@@ -83,6 +83,11 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
 
   runners_.struct_size = sizeof(FlutterCustomTaskRunners);
   runners_.platform_task_runner = &platform_->description();
+#if defined(__APPLE__)
+  // macOS native APIs called through Dart FFI require the AppKit thread,
+  // including after hot restart. Match Flutter's macOS merged UI thread.
+  runners_.ui_task_runner = &platform_->description();
+#endif
 
   FlutterProjectArgs args{};
   args.struct_size = sizeof(FlutterProjectArgs);
@@ -95,6 +100,12 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   args.custom_task_runners = &runners_;
   args.platform_message_callback = OnPlatformMessage;
   args.vsync_callback = OnVsync;
+#if RACCOON_HAS_PLUGINS && defined(__APPLE__)
+  // FlutterMacOS's native lookups expect an Objective-C object, even for
+  // an engine whose view has no local window.
+  macos_engine_identity_ = CreateMacOSEngineIdentity();
+  args.engine_id = reinterpret_cast<int64_t>(macos_engine_identity_.get());
+#endif
 
   started_ = std::chrono::steady_clock::now();
   const FlutterEngineResult result =

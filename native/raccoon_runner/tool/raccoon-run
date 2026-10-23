@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""Build a macOS host bundle, then use Flutter's custom device hot runner."""
+
+import base64
+import json
+import os
+from pathlib import Path
+import platform
+import re
+import shutil
+import subprocess
+import sys
+
+
+HELP = """usage: raccoon-run [--flutter /path/to/flutter] [flutter run options]
+
+Run from the Flutter application's directory. Uses the nearest FVM SDK, or
+flutter on PATH. Defaults to -d raccoon. Supports debug builds on macOS.
+
+Examples:
+  raccoon-run -d raccoon
+  raccoon-run -t lib/demo.dart --dart-define=DEMO=true
+"""
+
+
+def flutter_for(project):
+    for directory in (project, *project.parents):
+        candidate = directory / '.fvm/flutter_sdk/bin/flutter'
+        if candidate.is_file():
+            return str(candidate.resolve())
+    return shutil.which('flutter')
+
+
+def defines_from_file(path):
+    data = path.read_bytes()
+    content = data.decode('utf-16' if data.startswith((b'\xff\xfe', b'\xfe\xff')) else 'utf-8-sig')
+    if content.lstrip().startswith('{'):
+        entries = json.loads(content)
+        if not isinstance(entries, dict):
+            raise ValueError('Dart define file must contain an object: ' + str(path))
+        return entries
+    entries = {}
+    for line in content.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        match = re.fullmatch(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.*)', line)
+        if not match or match.group(2).startswith('"""'):
+            raise ValueError('invalid property in Dart define file: ' + str(path))
+        key, value = match.groups()
+        for quote in ('"', "'", '`'):
+            quoted = re.fullmatch(re.escape(quote) + r'(.*)' + re.escape(quote) + r'\s*(?:#.*)?', value)
+            if quoted:
+                value = quoted.group(1)
+                break
+        else:
+            unquoted = re.fullmatch(r'([^#\s]*)\s*(?:#.*)?', value)
+            if unquoted:
+                value = unquoted.group(1)
+        entries[key] = value
+    return entries
+
+
+def build_options(arguments, project):
+    """Translate the run options that affect the initial kernel and assets."""
+    target = 'lib/main.dart'
+    build = []
+    file_defines = {}
+    defines = []
+    device = 'raccoon'
+    options_with_values = {
+        '-t', '--target', '-d', '--device-id', '-D', '--dart-define',
+        '--dart-define-from-file', '--flavor', '--packages',
+    }
+    i = 0
+    while i < len(arguments):
+        argument = arguments[i]
+        option, separator, value = argument.partition('=')
+        if option in options_with_values:
+            if not separator:
+                i += 1
+                if i == len(arguments):
+                    raise ValueError('missing value for ' + option)
+                value = arguments[i]
+            if option in ('-t', '--target'):
+                target = value
+            elif option in ('-d', '--device-id'):
+                device = value
+            elif option in ('-D', '--dart-define'):
+                defines.append(value)
+            elif option == '--dart-define-from-file':
+                file_defines.update(defines_from_file(project / value))
+            elif option == '--flavor':
+                build.append('-dFlavor=' + value)
+            else:
+                raise ValueError('--packages is not supported by raccoon-run')
+        elif option in ('--profile', '--release', '--use-application-binary',
+                        '--build-name', '--build-number', '--no-pub'):
+            raise ValueError(option + ' is not supported by raccoon-run')
+        elif option in ('--track-widget-creation', '--no-track-widget-creation'):
+            build.append('-dTrackWidgetCreation=' + str(not option.startswith('--no-')).lower())
+        i += 1
+    if device != 'raccoon' and not device.startswith('raccoon-'):
+        raise ValueError('raccoon-run requires a Raccoon device, got ' + device)
+    build.append('-dTargetFile=' + target)
+    # assemble's DartDefines build variable is base64 encoded; command-line
+    # defines follow file values, matching flutter run's override order.
+    values = ['%s=%s' % (key, json.dumps(value, separators=(',', ':'))
+                        if not isinstance(value, str) else value)
+              for key, value in file_defines.items()] + defines
+    if values:
+        build.append('-dDartDefines=' + ','.join(
+            base64.b64encode(value.encode()).decode() for value in values))
+    return build, device
+
+
+def main(arguments):
+    if '--help' in arguments or '-h' in arguments:
+        print(HELP)
+        return 0
+    if platform.system() != 'Darwin':
+        raise ValueError('raccoon-run currently supports macOS; use flutter run on Linux')
+    project = Path.cwd()
+    flutter = None
+    run = []
+    i = 0
+    while i < len(arguments):
+        if arguments[i] == '--flutter':
+            i += 1
+            if i == len(arguments):
+                raise ValueError('missing value for --flutter')
+            flutter = arguments[i]
+        elif arguments[i].startswith('--flutter='):
+            flutter = arguments[i].split('=', 1)[1]
+        else:
+            run.append(arguments[i])
+        i += 1
+    flutter = flutter or flutter_for(project)
+    if not flutter:
+        raise ValueError('no Flutter SDK; pass --flutter /path/to/flutter')
+    flutter = str(Path(flutter).resolve())
+    manifest = project / 'pubspec.yaml'
+    if not manifest.is_file():
+        raise ValueError('run raccoon-run from the application directory containing pubspec.yaml')
+    name = re.search(r'^name:\s*[\'"]?([a-z][a-z0-9_]*)[\'"]?\s*(?:#.*)?$',
+                     manifest.read_text(), re.M)
+    if not name:
+        raise ValueError('cannot read the application name from pubspec.yaml')
+    build, device = build_options(run, project)
+    if not any(arg in ('-d', '--device-id') or arg.startswith('--device-id=') or
+               arg.startswith('-d=') for arg in run):
+        run.extend(['-d', device])
+    env = dict(os.environ)
+    env['FLUTTER_ROOT'] = str(Path(flutter).parent.parent)
+    env['PATH'] = str(Path(flutter).parent) + os.pathsep + env.get('PATH', '')
+    output = project / 'build/raccoon/host'
+    env['RACCOON_HOST_BUNDLE'] = str(output)
+    subprocess.run([flutter, 'pub', 'get'], env=env, check=True, stdout=sys.stderr)
+    arch = 'arm64' if platform.machine() == 'arm64' else 'x86_64'
+    print('raccoon-run: building macOS %s bundle for the host runner' % arch,
+          file=sys.stderr)
+    subprocess.run([
+        flutter, 'assemble', '--no-version-check', '-dTargetPlatform=darwin',
+        '-dDarwinArchs=' + arch, '-dBuildMode=debug', *build,
+        '--output=' + str(output), 'debug_macos_bundle_flutter_assets',
+    ], env=env, check=True, stdout=sys.stderr)
+    assets = project / 'build/flutter_assets'
+    if assets.exists():
+        shutil.rmtree(assets)
+    shutil.copytree(output / 'App.framework/Resources/flutter_assets', assets,
+                    symlinks=True)
+    # CustomDevice.startApp skips its Linux bundle build when a prebuilt
+    # binary is supplied. It still installs build/flutter_assets and starts
+    # the ordinary resident runner, so hot reload and restart remain available.
+    marker = Path('build/raccoon/prebuilt') / name.group(1)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text('Raccoon host bundle\n')
+    os.execve(flutter, [flutter, 'run', *run,
+                       '--use-application-binary=' + str(marker)], env)
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+        print('raccoon-run: ' + str(error), file=sys.stderr)
+        sys.exit(error.returncode if isinstance(error, subprocess.CalledProcessError) else 1)

@@ -42,8 +42,9 @@ mkdir -p "$STAGE/tool" "$OUT"
 # remote host.
 OUT="$(cd "$OUT" && pwd)"
 cp "$BINARY" "$STAGE/raccoon_runner$EXE"
-cp "$ROOT/tool/raccoon-device" "$ROOT/tool/engine_dir.sh" "$ROOT/tool/package_scope.dart" \
-  "$ROOT/tool/plugins_windows.dart" "$STAGE/tool/"
+cp "$ROOT/tool/raccoon-device" "$ROOT/tool/raccoon-run" \
+  "$ROOT/tool/native_assets.py" "$ROOT/tool/engine_dir.sh" \
+  "$ROOT/tool/package_scope.dart" "$ROOT/tool/plugins_windows.dart" "$STAGE/tool/"
 cp "$ROOT/VERSION" "$ROOT/LICENSE" "$STAGE/"
 chmod 755 "$STAGE/raccoon_runner$EXE" "$STAGE/tool/"*
 # No AppleDouble (._*) entries from macOS's tar.

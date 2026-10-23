@@ -100,7 +100,8 @@ Design notes: `docs/internal_docs/raccoon/`.
   against `FlutterMacOS.framework` and uses its channel and codec classes;
   the runner opens the Flutter SDK's copy at run time, before the plugins,
   and implements the protocols they are handed (`FlutterBinaryMessenger`,
-  background task queues included, `FlutterPluginRegistrar` with no view,
+  background task queues included, `FlutterPluginRegistrar` with a shared
+  detached backing view and view controller,
   `FlutterTextureRegistry`) over its own engine, from the public headers
   alone (`third_party/flutter_macos`). The manifest names that framework
   and each plugin's binary and class (`module.Class` for Swift);
@@ -135,6 +136,13 @@ Design notes: `docs/internal_docs/raccoon/`.
   them on `DYLD_FRAMEWORK_PATH`, so Dart finds their symbols whether it
   looks in the process (`DynamicLibrary.process()`, as `flutter_pty2`
   does) or opens `<name>.framework/<name>`.
+  Dart's UI isolate shares the AppKit platform thread, as in Flutter's
+  macOS embedding, so native FFI calls run on the main thread. Dart sees
+  an engine identity; native window lookup returns a null handle because
+  the visible window belongs to the client. The backing view allows
+  plugins to initialize per-view state; it receives no native mouse or
+  drag events. Native multi-window hosting and drag-and-drop between
+  native windows are not supported.
 - Loads the project's native plugins on Windows as well. A plugin DLL
   imports the C API of Flutter's Windows embedding from
   `flutter_windows.dll` (through the C++ client wrapper compiled into it);
@@ -174,6 +182,29 @@ Design notes: `docs/internal_docs/raccoon/`.
   `path_provider` names its directories after it
   (`~/Library/Application Support/dev.raccoon.app.<app>`). On Linux the
   hooks are not built yet.
+  If a package's Linux hook fails before installation (for example a Rust
+  GTK hook on macOS), use `tool/raccoon-device launch` instead of
+  `flutter run`. It resolves dependencies using the nearest FVM SDK, or
+  `flutter` on PATH, builds a macOS debug bundle and passes it to Flutter's
+  custom device as a prebuilt application. The native asset manifest and
+  directly opened `@rpath` frameworks both resolve to the installed host
+  libraries. Pub workspaces are supported. Hot reload and hot restart
+  still use Flutter's resident runner.
+
+  ```sh
+  cd /path/to/project/example
+  /path/to/raccoon_runner/tool/raccoon-device launch -d raccoon
+  # Optional SDK and normal run arguments:
+  /path/to/raccoon_runner/tool/raccoon-device launch \
+    --flutter /path/to/flutter/bin/flutter \
+    -t lib/demo.dart --dart-define=DEMO=true
+  ```
+
+  The launcher currently supports debug on macOS. Target, Dart defines
+  (including define files), flavor and widget-creation options apply to
+  both the first build and hot reload. Apps with an optional native
+  multi-window mode must disable it for Raccoon's single view; VIPane's
+  example uses `--dart-define=VIPANE_DISABLE_MULTI_WINDOW=true`.
 - Never leaves the app waiting on a plugin nobody serves. A channel no one
   answers gets an empty reply, which the app sees as
   `MissingPluginException` (Pigeon's `channel-error`), as on a desktop the
@@ -228,7 +259,8 @@ Every tag `v<VERSION>` publishes `raccoon_runner-<version>-<platform>.tar.gz`
 for `linux-x64`, `macos-arm64`, `macos-x64` and `windows-x64` (with
 `raccoon_runner.exe`; its helper runs in Git Bash) on the [releases
 page](https://github.com/SoFluffyOS/raccoon/releases), under `runner-v*` tags, packed by
-`tool/package.sh`: the binary, `tool/raccoon-device`, `tool/engine_dir.sh`,
+`tool/package.sh`: the binary, `tool/raccoon-device`, `tool/raccoon-run`,
+`tool/native_assets.py`, `tool/engine_dir.sh`,
 `VERSION` and `LICENSE`, flat. Unpacked into a folder it works as a runtime
 on its own, and the Raccoon Simulator fetches the archive for its host
 itself.

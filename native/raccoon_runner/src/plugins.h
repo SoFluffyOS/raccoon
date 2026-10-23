@@ -27,6 +27,12 @@
 
 namespace raccoon {
 
+#if defined(__APPLE__)
+// The Objective-C identity used by FlutterMacOS's native window lookups.
+// Raccoon's window is remote, so those lookups return no local controller.
+std::shared_ptr<void> CreateMacOSEngineIdentity();
+#endif
+
 struct PluginEntry {
   std::string name;
   // The binary to open: a shared library on Linux, a framework's

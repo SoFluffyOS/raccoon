@@ -5,6 +5,7 @@
 #   raccoon-device install [--instance KEY] <localPath> <appName>
 #   raccoon-device uninstall [--instance KEY] <appName>
 #   raccoon-device run [--instance KEY] [--size WxH@R] <appName> [engine switches]
+#   raccoon-device launch [flutter run options]   # host native assets on macOS
 #
 # install copies the app bundle the tool built (build/flutter_assets) into the
 # runtime's app store; run starts raccoon_runner serve on it and leaves the
@@ -130,7 +131,8 @@ PLIST
 # The key an app's socket, store and data are named by: the app name, with
 # @N for an instance other than the first.
 app_key() {
-  if [ "$INSTANCE" = "1" ]; then echo "$1"; else echo "$1@$INSTANCE"; fi
+  local name="${1##*/}"
+  if [ "$INSTANCE" = "1" ]; then echo "$name"; else echo "$name@$INSTANCE"; fi
 }
 
 # Prefixes each line with the time of day, to the millisecond.
@@ -708,6 +710,7 @@ if misses:
                 ['xcodebuild', '-project', os.path.join(pods, 'Pods', 'Pods.xcodeproj'),
                  '-target', name, '-configuration', 'Release',
                  'ARCHS=' + arch, 'ONLY_ACTIVE_ARCH=YES',
+                 'MACOSX_DEPLOYMENT_TARGET=' + macos.split('.')[0] + '.0',
                  'SYMROOT=' + symroot, 'OBJROOT=' + os.path.join(pods, 'obj', name),
                  'LD_RUNPATH_SEARCH_PATHS=@loader_path/../../..',
                  'CODE_SIGNING_ALLOWED=NO', 'build'],
@@ -780,6 +783,10 @@ PY
 build_native_assets() {
   local project="$1" app="$2" config arch out log
   [ "$(uname -s)" = Darwin ] || return 0
+  if [ -n "${RACCOON_HOST_BUNDLE:-}" ]; then
+    python3 "$ROOT/tool/native_assets.py" "$RACCOON_HOST_BUNDLE" "$app"
+    return
+  fi
   config="$(package_config "$project")"
   [ -n "$config" ] || return 0
   python3 - "$config" <<'PY' || return 0
@@ -810,31 +817,16 @@ PY
         -dTargetFile=lib/main.dart --output="$out" \
         debug_macos_bundle_flutter_assets) > "$log" 2>&1; then
     echo "raccoon-device: native assets did not build; see $log" >&2
-    return 0
+    return 1
   fi
-  python3 - "$out" "$app" <<'PY'
-import json, os, shutil, sys
-out, app = sys.argv[1:3]
-manifest = json.load(open(os.path.join(out, 'App.framework', 'Resources', 'flutter_assets', 'NativeAssetsManifest.json')))
-built = os.path.join(out, 'native_assets')
-installed = os.path.join(app, 'native_assets')
-shutil.rmtree(installed, ignore_errors=True)
-if os.path.isdir(built):
-    shutil.copytree(built, installed, symlinks=True)
-count = 0
-for assets in manifest.get('native-assets', {}).values():
-    for asset, path in assets.items():
-        # A framework or library the build installed: by absolute path from
-        # where it now is. System and process lookups stay as they are.
-        if len(path) == 2 and path[0] == 'absolute' and not os.path.isabs(path[1]):
-            assets[asset] = ['absolute', os.path.join(installed, path[1])]
-        count += 1
-json.dump(manifest, open(os.path.join(app, 'flutter_assets', 'NativeAssetsManifest.json'), 'w'))
-print('raccoon-device: native assets, %d for this host' % count, file=sys.stderr)
-PY
+  python3 "$ROOT/tool/native_assets.py" "$out" "$app"
 }
 
 case "$verb" in
+  launch)
+    export RACCOON_RUNNER="$RUNNER"
+    exec python3 "$ROOT/tool/raccoon-run" "$@"
+    ;;
   ping)
     test -x "$RUNNER"
     ;;
@@ -901,6 +893,11 @@ case "$verb" in
     if [ -d "$APPS/$key/plugins/frameworks" ]; then
       export DYLD_FRAMEWORK_PATH="$APPS/$key/plugins/frameworks${DYLD_FRAMEWORK_PATH:+:$DYLD_FRAMEWORK_PATH}"
     fi
+    # Packages may open their framework directly through dart:ffi instead of
+    # the native assets resolver, using @rpath/<name>.framework/<name>.
+    if [ "$(uname -s)" = Darwin ] && [ -d "$APPS/$key/native_assets" ]; then
+      export DYLD_FRAMEWORK_PATH="$APPS/$key/native_assets${DYLD_FRAMEWORK_PATH:+:$DYLD_FRAMEWORK_PATH}"
+    fi
     binary="$RUNNER"
     if [ "$(uname -s)" = Darwin ] && { [ -n "$manifest" ] || [ -d "$APPS/$key/native_assets" ]; }; then
       binary="$(app_bundle "$key")"
@@ -946,7 +943,7 @@ case "$verb" in
     exit "$status"
     ;;
   *)
-    echo "usage: raccoon-device ping | install [--instance KEY] <localPath> <appName> | uninstall [--instance KEY] <appName> | run [--instance KEY] [--size WxH@R] <appName> [engine switches] | prebuild <project> <archive.tar.gz>" >&2
+    echo "usage: raccoon-device ping | launch [flutter run options] | install [--instance KEY] <localPath> <appName> | uninstall [--instance KEY] <appName> | run [--instance KEY] [--size WxH@R] <appName> [engine switches] | prebuild <project> <archive.tar.gz>" >&2
     exit 2
     ;;
 esac
