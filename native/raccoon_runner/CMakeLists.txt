@@ -195,6 +195,39 @@ elseif(WIN32)
   target_compile_options(flutter_windows PRIVATE /W3 /utf-8)
   target_link_libraries(flutter_windows PRIVATE user32 shcore)
   target_sources(raccoon_runner PRIVATE src/plugins_windows.cc src/message_pump.cc)
+  # A version resource, as every Windows program has one: package_info_plus
+  # reads the running executable's, and throws without one.
+  enable_language(RC)
+  string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.([0-9]+)" RACCOON_VERSION_NUMBERS
+    "${RACCOON_RUNNER_VERSION}")
+  set(RACCOON_VERSION_COMMAS "${CMAKE_MATCH_1},${CMAKE_MATCH_2},${CMAKE_MATCH_3},0")
+  file(WRITE ${CMAKE_BINARY_DIR}/raccoon_runner.rc "#include <winver.h>
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION ${RACCOON_VERSION_COMMAS}
+ PRODUCTVERSION ${RACCOON_VERSION_COMMAS}
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+  BLOCK \"StringFileInfo\"
+  BEGIN
+    BLOCK \"040904e4\"
+    BEGIN
+      VALUE \"CompanyName\", \"SoFluffy\"
+      VALUE \"FileDescription\", \"Raccoon runner\"
+      VALUE \"FileVersion\", \"${RACCOON_RUNNER_VERSION}\"
+      VALUE \"InternalName\", \"raccoon_runner\"
+      VALUE \"OriginalFilename\", \"raccoon_runner.exe\"
+      VALUE \"ProductName\", \"raccoon_runner\"
+      VALUE \"ProductVersion\", \"${RACCOON_RUNNER_VERSION}\"
+    END
+  END
+  BLOCK \"VarFileInfo\"
+  BEGIN
+    VALUE \"Translation\", 0x409, 1252
+  END
+END
+")
+  target_sources(raccoon_runner PRIVATE ${CMAKE_BINARY_DIR}/raccoon_runner.rc)
   target_include_directories(raccoon_runner PRIVATE
     ${CMAKE_SOURCE_DIR}/third_party/flutter_windows/include)
   target_compile_definitions(raccoon_runner PRIVATE RACCOON_HAS_PLUGINS=1)
