@@ -42,17 +42,18 @@ Design notes: `docs/internal_docs/raccoon/`.
   block moves along the bottom quarter. `--camera-source` or
   `RACCOON_CAMERA_SOURCE` names a PNG or JPEG to show instead. It is decoded
   once with the vendored stb_image (`third_party/stb`), scaled to cover the
-  camera's size and cropped to its centre. On Windows the source can also be
-  a video, such as an MP4. Media Foundation decodes it a frame at a time as
-  each comes due, and it plays in a loop. Other hosts refuse a video for now.
-  A file that doesn't decode is reported, and the pattern stays. The variable works from a terminal too:
+  camera's size and cropped to its centre. On Windows and macOS the source
+  can also be a video, such as an MP4. Media Foundation or AVFoundation
+  decodes it a frame at a time as each comes due, and it plays in a loop.
+  Linux refuses a video for now. A file that doesn't decode is reported, and
+  the pattern stays. The variable works from a terminal too:
   `RACCOON_CAMERA_SOURCE=qr.png flutter run -d raccoon`. `takePicture` writes the
   current frame as a JPEG to the temp directory. Image streams run at up to
   30 fps, as I420 (`yuv420`), BGRA (`bgra8888`, the default) or JPEG.
-  On Windows, video recordings encode what the camera shows to an H.264 MP4
-  with Media Foundation, at the camera's size and fps. Pause and resume
-  leave the paused time out, and `enableStream` streams while recording.
-  Other hosts refuse to record for now. The preview is a `Texture` by camera
+  On Windows and macOS, video recordings encode what the camera shows to an
+  H.264 MP4, with Media Foundation or AVFoundation, at the camera's size and
+  fps. Pause and resume leave the paused time out, and `enableStream`
+  streams while recording. Linux refuses to record for now. The preview is a `Texture` by camera
   id, filled at the camera's frame rate through the GL or Metal renderer's
   external textures. It is the camera's size turned to portrait (288×352
   for `low`), because `CameraPreview` draws a portrait box while the device

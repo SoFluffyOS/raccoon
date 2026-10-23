@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <utility>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
@@ -48,15 +49,45 @@ std::unique_ptr<CameraSource> OpenCameraSource(const std::string& path, std::str
   return std::make_unique<PictureSource>(std::move(picture));
 }
 
-#if !defined(_WIN32)
+bool LoopingVideo::Begin() {
+  if (!ReadNext(&current_, &current_time_)) return false;
+  has_next_ = ReadNext(&next_, &next_time_);
+  return true;
+}
+
+const CameraPicture* LoopingVideo::FrameAt(uint64_t time_micros, uint64_t* number) {
+  if (!opened_at_set_) {
+    opened_at_ = time_micros;
+    opened_at_set_ = true;
+  }
+  // Where in one pass of the video |time_micros| falls.
+  int64_t position = static_cast<int64_t>(time_micros - opened_at_);
+  if (duration_micros_ > 0) position %= duration_micros_;
+  if (position < last_position_) {
+    Restart();
+    if (ReadNext(&current_, &current_time_)) ++frame_number_;
+    has_next_ = ReadNext(&next_, &next_time_);
+  }
+  last_position_ = position;
+  while (has_next_ && next_time_ <= position) {
+    std::swap(current_, next_);
+    current_time_ = next_time_;
+    ++frame_number_;
+    has_next_ = ReadNext(&next_, &next_time_);
+  }
+  *number = frame_number_;
+  return &current_;
+}
+
+#if !defined(_WIN32) && !defined(__APPLE__)
 std::unique_ptr<CameraSource> OpenCameraVideo(const std::string&, std::string* error) {
-  *error = "videos play on Windows only for now; give a PNG or JPEG";
+  *error = "videos play on Windows and macOS only for now; give a PNG or JPEG";
   return nullptr;
 }
 
 std::unique_ptr<CameraRecorder> StartCameraRecorder(const std::string&, size_t, size_t, int,
                                                     std::string* error) {
-  *error = "Raccoon's camera records video on Windows only for now";
+  *error = "Raccoon's camera records video on Windows and macOS only for now";
   return nullptr;
 }
 #endif
