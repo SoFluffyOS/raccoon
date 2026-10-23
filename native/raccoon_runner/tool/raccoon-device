@@ -687,7 +687,7 @@ if misses:
             f.write("use_frameworks!\ntarget 'Host' do\n"
                     "  current_target_definition.swift_version = '5.0'\n")
             f.write("  pod 'FlutterMacOS', :path => 'FlutterMacOS'\n")
-            for plugin in misses:
+            for plugin in wanted:
                 linked = os.path.join('.symlinks', 'plugins', plugin['name'], os.path.basename(plugin['sources']))
                 f.write("  pod %s, :path => %s\n" % (json.dumps(plugin['name']), json.dumps(linked)))
             f.write("end\n")
