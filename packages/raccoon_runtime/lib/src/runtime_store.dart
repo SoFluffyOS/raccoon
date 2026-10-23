@@ -197,7 +197,9 @@ final class RuntimeStore {
   }
 
   /// Returns the runtime for [revision], downloading and extracting it first
-  /// when it is not installed.
+  /// when it is not installed. The unzip runs on another isolate, calls that
+  /// overlap share one install, and an install another store finished
+  /// meanwhile is kept.
   Future<EngineRuntime> ensure(String revision) {
     if (installed(revision) case final runtime?) return Future.value(runtime);
     // Calls that overlap share one install: each would stage its own, but
