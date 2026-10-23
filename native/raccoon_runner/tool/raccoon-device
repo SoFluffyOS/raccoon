@@ -946,8 +946,9 @@ build_native_assets() {
   # What the build depends on, as one hash; none when no package has a hook.
   # The packages and their versions, the pubspecs (the workspace root's too),
   # the SDK's engine, the target, and every file of every package with a
-  # hook, by path, time and size, so an edit, a new file or one gone builds
-  # again (#111). A last build whose libraries went missing never matches.
+  # hook and of the local packages those depend on, by path, time and size,
+  # so an edit, a new file or one gone builds again (#111). A last build
+  # whose libraries went missing never matches.
   local inputs scan=0
   inputs="$(python3 - "$config" "$project" "$(sdk_root)" "${target[*]}" "$manifest" "$built" <<'PY'
 import hashlib, json, os, sys
@@ -962,14 +963,37 @@ for path in (config, os.path.join(project, 'pubspec.lock'), os.path.join(project
     if os.path.isfile(path):
         digest.update(path.encode())
         digest.update(open(path, 'rb').read())
-hooks = 0
+roots = {}
 for package in json.load(open(config)).get('packages', []):
     uri = package.get('rootUri', '')
-    root = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, uri))
-    if not os.path.isfile(os.path.join(root, 'hook', 'build.dart')):
+    roots[package.get('name')] = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, uri))
+hooked = [name for name, root in roots.items() if os.path.isfile(os.path.join(root, 'hook', 'build.dart'))]
+if not hooked:
+    sys.exit(1)
+# The packages a hook package depends on, directly or not, from the pub
+# graph; the local ones count file by file, as the hook packages do. A
+# hosted or SDK package changes only with its version, in the config.
+graph = {}
+try:
+    for package in json.load(open(os.path.join(dart_tool, 'package_graph.json'))).get('packages', []):
+        graph[package.get('name')] = package.get('dependencies', [])
+except (OSError, ValueError):
+    pass
+pub_cache = os.path.realpath(os.environ.get('PUB_CACHE') or os.path.join(os.path.expanduser('~'), '.pub-cache'))
+immutable = (pub_cache + os.sep, os.path.realpath(sdk) + os.sep)
+scanned = []
+pending = list(hooked)
+while pending:
+    name = pending.pop()
+    if name in scanned or name not in roots:
         continue
-    hooks += 1
-    digest.update(('%s %s\n' % (package.get('name'), root)).encode())
+    scanned.append(name)
+    pending.extend(graph.get(name, []))
+for name in sorted(scanned):
+    root = roots[name]
+    if name not in hooked and os.path.realpath(root).startswith(immutable):
+        continue
+    digest.update(('%s %s\n' % (name, root)).encode())
     for directory, names, files in os.walk(root):
         names[:] = sorted(n for n in names if n not in ('.dart_tool', 'build', '.git'))
         for name in sorted(files):
@@ -980,8 +1004,6 @@ for package in json.load(open(config)).get('packages', []):
             except OSError:
                 continue
             digest.update(('%s %d %d\n' % (os.path.relpath(path, root), stat.st_mtime_ns, stat.st_size)).encode())
-if hooks == 0:
-    sys.exit(1)
 try:
     for assets in json.load(open(manifest)).get('native-assets', {}).values():
         for path in assets.values():

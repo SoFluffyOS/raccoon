@@ -9,3 +9,5 @@ dependencies:
   code_assets: ^2.1.0
   hooks: ^2.2.0
   native_toolchain_c: ^0.19.5
+  native_add_defs:
+    path: ../native_add_defs

@@ -208,8 +208,9 @@ Design notes: `docs/internal_docs/raccoon/`.
   projects with hook packages: on an M1 Pro, 9 s the first time for a new
   project, about 1.7 s after any change. While nothing changes, the next
   install reuses that build: the inputs are the package config, the
-  pubspecs, the SDK's engine, the target and the files of each hook
-  package, so a hook edited in a path dependency builds again. Such an app runs in its own bundle too, so
+  pubspecs, the SDK's engine, the target, and the files of each hook
+  package and of the local packages it depends on, so a hook or a header
+  edited in a path dependency builds again. Such an app runs in its own bundle too, so
   `path_provider` names its directories after it
   (`~/Library/Application Support/dev.raccoon.app.<app>`). On Linux the same
   with the Linux bundle target (`debug_bundle_linux-x64_assets`); it unpacks

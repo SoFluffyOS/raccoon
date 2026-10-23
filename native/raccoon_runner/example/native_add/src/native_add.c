@@ -1,3 +1,3 @@
-#include <stdint.h>
+#include "native_add_defs.h"
 
-int32_t add(int32_t a, int32_t b) { return a + b; }
+native_add_int add(native_add_int a, native_add_int b) { return a + b; }

@@ -401,6 +401,20 @@ void main() {
         extra.deleteSync();
         expect(await install(), isNot(contains('unchanged')));
 
+        // A local package the hook package depends on: its header is an
+        // input too.
+        expect(await install(), contains('unchanged'));
+        File(
+          p.join(
+            runnerDir,
+            'example',
+            'native_add_defs',
+            'include',
+            'native_add_defs.h',
+          ),
+        ).setLastModifiedSync(DateTime.now());
+        expect(await install(), isNot(contains('unchanged')));
+
         // A dangling link in the package must not cost the app its assets.
         final dangling = Link(
           p.join(runnerDir, 'example', 'native_add', 'dangling_probe'),

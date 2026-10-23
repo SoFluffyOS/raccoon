@@ -1,0 +1,6 @@
+name: native_add_defs
+description: A C header native_add's hook builds with, from a package of its own, for Raccoon's native assets test.
+publish_to: "none"
+
+environment:
+  sdk: ^3.10.0
