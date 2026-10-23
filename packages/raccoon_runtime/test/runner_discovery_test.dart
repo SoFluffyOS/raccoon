@@ -43,6 +43,22 @@ void main() {
     );
   });
 
+  // #118: a key too long for a socket path runs under a shorter socket
+  // name, with the key in a .name file beside it.
+  test('names the app after its .name file when there is one', () async {
+    final short = await _bind(p.join(temp.path, 'a_long_name~12345.sock'));
+    addTearDown(short.close);
+    File(
+      p.join(temp.path, 'a_long_name~12345.name'),
+    ).writeAsStringSync('a_long_name_that_did_not_fit@phone\n');
+    final plain = await _bind(p.join(temp.path, 'hello.sock'));
+    addTearDown(plain.close);
+    final names = RunnerDiscovery(
+      temp.path,
+    ).list().map(RunnerDiscovery.appNameOf);
+    expect(names, ['a_long_name_that_did_not_fit@phone', 'hello']);
+  });
+
   test('lists sockets only and names the app after the file', () async {
     final discovery = RunnerDiscovery(temp.path);
     File(p.join(temp.path, 'notes.sock')).writeAsStringSync('not a socket');

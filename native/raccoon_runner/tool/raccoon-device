@@ -155,6 +155,24 @@ PLIST
 
 # The key an app's socket, store and data are named by: the app name, with
 # @N for an instance other than the first.
+# The run's socket: <dir>/<key>.sock, or, when that outgrows what a socket
+# path may hold (104 bytes on macOS, whose temp dir alone takes about 50),
+# a shorter name, as much of the key as fits and ~<checksum>, with the key
+# in a .name file beside it, which discovery reads (#118).
+socket_path() {
+  local key="$1" path="$SOCKETS/$1.sock" tail room short
+  if [ "${#path}" -le 100 ]; then
+    echo "$path"
+    return 0
+  fi
+  tail="~$(printf '%s' "$key" | cksum | cut -d' ' -f1)"
+  room=$((100 - ${#SOCKETS} - 1 - ${#tail} - 5))
+  [ "$room" -lt 0 ] && room=0
+  short="${key:0:$room}$tail"
+  printf '%s\n' "$key" > "$SOCKETS/$short.name"
+  echo "$SOCKETS/$short.sock"
+}
+
 app_key() {
   if [ "$INSTANCE" = "1" ]; then echo "$1"; else echo "$1@$INSTANCE"; fi
 }
@@ -1250,7 +1268,7 @@ case "$verb" in
       --engine-dir "$("$ROOT/tool/engine_dir.sh")" \
       --assets "$APPS/$key/flutter_assets" \
       --icu "$(sdk_icu)" \
-      --socket "$SOCKETS/$key.sock" \
+      --socket "$(socket_path "$key")" \
       --data-dir "$DATA/$key" \
       ${manifest:+--plugins "$manifest"} \
       $size_args \

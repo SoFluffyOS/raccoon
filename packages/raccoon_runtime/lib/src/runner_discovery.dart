@@ -52,8 +52,20 @@ final class RunnerDiscovery {
   final Duration? pollInterval;
 
   /// The app name a socket stands for: its file name without the suffix.
-  static String appNameOf(UnixSocketEndpoint endpoint) =>
-      p.basenameWithoutExtension(endpoint.path);
+  static String appNameOf(UnixSocketEndpoint endpoint) {
+    final base = p.basenameWithoutExtension(endpoint.path);
+    // A key too long for a socket path runs as <start>~<checksum>, the key
+    // in a .name file beside the socket (#118).
+    if (!base.contains('~')) return base;
+    try {
+      final named = File(p.join(p.dirname(endpoint.path), '$base.name'));
+      final name = named.readAsStringSync().trim();
+      if (name.isNotEmpty) return name;
+    } on FileSystemException {
+      // No .name file: the socket's own name it is.
+    }
+    return base;
+  }
 
   /// The project behind an app name, without its instance: `wonders` for
   /// `wonders@2`, the second run of the same project (see the device

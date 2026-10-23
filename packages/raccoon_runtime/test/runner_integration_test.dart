@@ -268,6 +268,63 @@ void main() {
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );
+  // #118: a socket path must fit in 104 bytes on macOS. An app whose key
+  // doesn't fit runs under a shorter socket name, its key in a .name file.
+  test(
+    'an app whose name is too long for a socket path still runs',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_long');
+      final helper = p.join(runnerDir, 'tool', 'raccoon-device');
+      final name = 'a_flutter_app_${'with_a_very_long_name_' * 4}x';
+      final environment = {
+        'RACCOON_RUNNER': binary!,
+        if (sdk != null) 'FLUTTER_ROOT': sdk,
+        'XDG_DATA_HOME': p.join(temp.path, 'data'),
+        'XDG_RUNTIME_DIR': temp.path,
+        'TMPDIR': '${temp.path}/',
+      };
+      final install = await Process.run(helper, [
+        'install',
+        assets,
+        name,
+      ], environment: environment);
+      expect(install.exitCode, 0, reason: '${install.stderr}');
+      final run = await Process.start(helper, [
+        'run',
+        name,
+      ], environment: environment);
+      final output = <String>[];
+      run.stderr.transform(utf8.decoder).listen(output.add);
+      run.stdout.drain<void>().ignore();
+      try {
+        final discovery = RunnerDiscovery(p.join(temp.path, 'raccoon'));
+        final deadline = DateTime.now().add(const Duration(seconds: 30));
+        while (discovery.list().isEmpty && DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        final found = discovery.list();
+        expect(found, hasLength(1), reason: output.join());
+        expect(RunnerDiscovery.appNameOf(found.single), name);
+        final client = await RunnerClient.connect(found.single);
+        try {
+          await client.frames.first.timeout(const Duration(seconds: 15));
+        } finally {
+          client.shutdown();
+          await client.close();
+        }
+      } finally {
+        run.kill();
+        await run.exitCode;
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((ready, Platform.isWindows)) {
+      (false, _) => 'build the runner and example first',
+      (_, true) => 'the helper runs in Git Bash on Windows',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
   final nativeAssetsApp = p.join(runnerDir, 'example', 'native_assets_app');
   final nativeAssetsBundle = p.join(nativeAssetsApp, 'build', 'flutter_assets');
   test(
