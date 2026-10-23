@@ -944,19 +944,23 @@ build_native_assets() {
     *) return 0 ;;
   esac
   # What the build depends on, as one hash; none when no package has a hook.
-  # The packages and their versions, the pubspecs, the SDK's engine, the
-  # target, and the files of every package with a hook, so a hook edited in
-  # a path dependency builds again (#111).
-  local inputs
-  inputs="$(python3 - "$config" "$project" "$(sdk_root)" "${target[*]}" <<'PY'
+  # The packages and their versions, the pubspecs (the workspace root's too),
+  # the SDK's engine, the target, and every file of every package with a
+  # hook, by path, time and size, so an edit, a new file or one gone builds
+  # again (#111). A last build whose libraries went missing never matches.
+  local inputs scan=0
+  inputs="$(python3 - "$config" "$project" "$(sdk_root)" "${target[*]}" "$manifest" "$built" <<'PY'
 import hashlib, json, os, sys
 from urllib.parse import unquote, urlparse
-config, project, sdk, target = sys.argv[1:5]
+config, project, sdk, target, manifest, built = sys.argv[1:7]
 dart_tool = os.path.dirname(os.path.abspath(config))
+root_project = os.path.dirname(dart_tool)
 digest = hashlib.sha256(target.encode())
 for path in (config, os.path.join(project, 'pubspec.lock'), os.path.join(project, 'pubspec.yaml'),
+             os.path.join(root_project, 'pubspec.lock'), os.path.join(root_project, 'pubspec.yaml'),
              os.path.join(sdk, 'bin', 'cache', 'engine.stamp')):
     if os.path.isfile(path):
+        digest.update(path.encode())
         digest.update(open(path, 'rb').read())
 hooks = 0
 for package in json.load(open(config)).get('packages', []):
@@ -965,17 +969,32 @@ for package in json.load(open(config)).get('packages', []):
     if not os.path.isfile(os.path.join(root, 'hook', 'build.dart')):
         continue
     hooks += 1
-    newest = 0
+    digest.update(('%s %s\n' % (package.get('name'), root)).encode())
     for directory, names, files in os.walk(root):
-        names[:] = [n for n in names if n not in ('.dart_tool', 'build', '.git')]
-        for name in files:
-            newest = max(newest, os.stat(os.path.join(directory, name)).st_mtime_ns)
-    digest.update(('%s %s %d\n' % (package.get('name'), root, newest)).encode())
+        names[:] = sorted(n for n in names if n not in ('.dart_tool', 'build', '.git'))
+        for name in sorted(files):
+            path = os.path.join(directory, name)
+            try:
+                # lstat: a link counts as itself, a dangling one too.
+                stat = os.lstat(path)
+            except OSError:
+                continue
+            digest.update(('%s %d %d\n' % (os.path.relpath(path, root), stat.st_mtime_ns, stat.st_size)).encode())
 if hooks == 0:
     sys.exit(1)
+try:
+    for assets in json.load(open(manifest)).get('native-assets', {}).values():
+        for path in assets.values():
+            if len(path) == 2 and path[0] == 'absolute' and not os.path.isabs(path[1]) \
+                    and not os.path.exists(os.path.join(built, path[1])):
+                digest.update(b'missing')
+except (OSError, ValueError):
+    pass
 print(digest.hexdigest())
 PY
-)" || return 0
+)" || scan=$?
+  # 1: no package has a hook. Any other failure: build, and keep no stamp.
+  [ "$scan" -eq 1 ] && return 0
   if [ ! -f "$project/lib/main.dart" ]; then
     echo "🦝 native assets skipped: no lib/main.dart to build them with" >&2
     return 0
@@ -984,7 +1003,7 @@ PY
   mkdir -p "$out"
   local status=0 started unchanged="" stamp="$out/raccoon_inputs"
   started="$(python3 -c 'import time; print(time.time())')"
-  if [ -f "$manifest" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$inputs" ]; then
+  if [ -n "$inputs" ] && [ -f "$manifest" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$inputs" ]; then
     unchanged=1
   else
     rm -f "$stamp"
@@ -1001,7 +1020,7 @@ PY
       echo "🦝 native assets did not build; see $log" >&2
       return 0
     fi
-    echo "$inputs" > "$stamp"
+    [ -n "$inputs" ] && echo "$inputs" > "$stamp"
   fi
   python3 - "$manifest" "$built" "$app" "$started" "$unchanged" <<'PY'
 import json, os, shutil, sys, time

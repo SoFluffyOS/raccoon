@@ -390,6 +390,26 @@ void main() {
 
         final again = await install();
         expect(again, contains('1 for this host, unchanged'));
+
+        // A file gone from the hook package, the newest one kept as is:
+        // the build is stale.
+        final extra = File(
+          p.join(runnerDir, 'example', 'native_add', 'hook', 'stale_probe.txt'),
+        )..writeAsStringSync('probe');
+        extra.setLastModifiedSync(DateTime(2000));
+        expect(await install(), contains('1 for this host'));
+        extra.deleteSync();
+        expect(await install(), isNot(contains('unchanged')));
+
+        // A dangling link in the package must not cost the app its assets.
+        final dangling = Link(
+          p.join(runnerDir, 'example', 'native_add', 'dangling_probe'),
+        )..createSync(p.join(temp.path, 'nowhere'));
+        try {
+          expect(await install(), contains('1 for this host'));
+        } finally {
+          dangling.deleteSync();
+        }
         final manifest =
             jsonDecode(
                   File(
