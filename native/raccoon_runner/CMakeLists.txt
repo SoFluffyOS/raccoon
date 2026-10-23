@@ -6,6 +6,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # On Windows the C runtime is linked in, protobuf's too, so a prebuilt runner
 # needs no Visual C++ redistributable.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+# Only what is called gets linked: protobuf-lite and nlohmann bring much the
+# runner never calls (#110). Mach-O drops it by symbol on its own; ELF needs
+# a section per function and per datum first. MSVC's Release link already
+# drops unreferenced code (/OPT:REF).
+if(APPLE)
+  add_link_options(-Wl,-dead_strip)
+elseif(UNIX)
+  add_compile_options(-ffunction-sections -fdata-sections)
+  add_link_options(-Wl,--gc-sections)
+endif()
 
 # The runner's version, one line in VERSION: what --version prints, what the
 # release archives are named after (tool/package.sh), and what the Simulator
