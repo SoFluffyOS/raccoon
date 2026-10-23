@@ -216,6 +216,7 @@ final class RuntimeStore {
     final bytes = await _download(uri);
     final directory = Directory(directoryFor(revision));
     directory.parent.createSync(recursive: true);
+    _removeStaleStaging(directory);
     // A staging folder of its own: another store installing the same
     // revision meanwhile never writes into it.
     final staging = directory.parent.createTempSync(
@@ -231,16 +232,47 @@ final class RuntimeStore {
         throw StateError('no ${engineLibraryOf(platform)} in $uri');
       }
       _makeExecutable(library);
+      // Another store may have installed it meanwhile, and a runner may
+      // already use it: a good install stays.
+      if (installed(revision) case final runtime?) return runtime;
       if (directory.existsSync()) directory.deleteSync(recursive: true);
-      staging.renameSync(directory.path);
+      try {
+        staging.renameSync(directory.path);
+      } on FileSystemException {
+        if (installed(revision) case final runtime?) return runtime;
+        rethrow;
+      }
     } finally {
-      if (staging.existsSync()) staging.deleteSync(recursive: true);
+      _deleteQuietly(staging);
     }
     return EngineRuntime(
       revision: revision,
       directory: directory.path,
       platform: platform,
     );
+  }
+
+  /// Staging folders an install left when its process was killed: an hour
+  /// old and more, so no install is still writing them.
+  static void _removeStaleStaging(Directory directory) {
+    final prefix = '${p.basename(directory.path)}.partial';
+    final before = DateTime.now().subtract(const Duration(hours: 1));
+    for (final entry in directory.parent.listSync()) {
+      if (entry is! Directory || !p.basename(entry.path).startsWith(prefix)) {
+        continue;
+      }
+      if (entry.statSync().modified.isBefore(before)) _deleteQuietly(entry);
+    }
+  }
+
+  /// A cleanup that fails leaves the folder; it never hides the error the
+  /// install itself may be throwing.
+  static void _deleteQuietly(Directory directory) {
+    try {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    } on FileSystemException {
+      // Left for the next install to clear.
+    }
   }
 
   /// Unzips [bytes] under [root] on another isolate. Static, so the closure

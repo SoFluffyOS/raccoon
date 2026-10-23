@@ -265,6 +265,51 @@ void main() {
     );
   });
 
+  test('a store finishing second keeps the first one\'s install', () async {
+    final zip = ZipEncoder().encodeBytes(
+      Archive()
+        ..addFile(ArchiveFile.bytes('libflutter_engine.so', [0x7f, 0x45])),
+    );
+    final first = RuntimeStore(
+      cacheDirectory: temp.path,
+      platform: 'linux-x64',
+      download: (_) async => zip,
+    );
+    // The second store's download ends after the first store installed.
+    final second = RuntimeStore(
+      cacheDirectory: temp.path,
+      platform: 'linux-x64',
+      download: (_) async {
+        final installed = await first.ensure('race');
+        File(p.join(installed.directory, 'in-use')).writeAsStringSync('');
+        return zip;
+      },
+    );
+    final runtime = await second.ensure('race');
+    expect(File(p.join(runtime.directory, 'in-use')).existsSync(), isTrue);
+    expect(second.installed('race'), isNotNull);
+  });
+
+  test('a staging folder a killed install left is cleaned up', () async {
+    final store = RuntimeStore(
+      cacheDirectory: temp.path,
+      platform: 'linux-x64',
+      download:
+          (_) async => ZipEncoder().encodeBytes(
+            Archive()..addFile(
+              ArchiveFile.bytes('libflutter_engine.so', [0x7f, 0x45]),
+            ),
+          ),
+    );
+    final directory = Directory(store.directoryFor('stale'));
+    final left = Directory('${directory.path}.partialKILLED')
+      ..createSync(recursive: true);
+    // An hour ago and more: no install is still writing it.
+    Process.runSync('touch', ['-t', '202001010000', left.path]);
+    await store.ensure('stale');
+    expect(left.existsSync(), isFalse);
+  }, skip: Platform.isWindows ? 'touch -t is for Unix' : false);
+
   test('ensure rejects an archive without the engine library', () async {
     final store = RuntimeStore(
       cacheDirectory: p.join(temp.path, 'engines'),
