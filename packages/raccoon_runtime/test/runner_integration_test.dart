@@ -1119,6 +1119,55 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  // Built beside the runner on Windows: a GPU socket client that opens the
+  // ring's textures by their shared handles and checks the frame in them.
+  final handleCheck =
+      binary == null
+          ? ''
+          : p.join(p.dirname(binary), 'raccoon_gpu_handle_check.exe');
+  test(
+    'on Windows a client opens the ring by its shared handles and finds the frame',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint, gpuBuffers: true);
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        final set = await client.gpuBufferSets.first.timeout(
+          const Duration(seconds: 10),
+        );
+        await client.frames
+            .firstWhere((frame) => frame.inGpuBuffer)
+            .timeout(const Duration(seconds: 10));
+        final check = await Process.run(handleCheck, [set.socket]);
+        printOnFailure('${check.stdout}${check.stderr}');
+        expect(check.exitCode, 0);
+        expect('${check.stdout}', contains('HANDLES ok'));
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        !Platform.isWindows
+            ? 'shared D3D11 textures are Windows'
+            : ready && File(handleCheck).existsSync()
+            ? false
+            : 'build the runner and its handle check first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   test(
     'a client that imports GPU buffers gets frames as buffer indices and their descriptors on the GPU socket',
     () async {
@@ -1218,7 +1267,8 @@ void main() {
 
         // The GPU socket serves the same description: on Linux with one
         // descriptor per buffer riding along, on macOS with the surfaces'
-        // IDs after the pairs and nothing riding along.
+        // IDs after the pairs and nothing riding along, on Windows with the
+        // textures' shared handles there instead.
         gpuSocket = await RawSocket.connect(
           InternetAddress(set.socket, type: InternetAddressType.unix),
           0,
@@ -1228,17 +1278,21 @@ void main() {
         final described = Completer<void>();
         gpuSocket.listen((event) {
           if (event != RawSocketEvent.read) return;
-          final message = gpuSocket.readMessage();
-          if (message == null) return;
-          bytes.addAll(message.data);
-          for (final control in message.controlMessages) {
-            handles.addAll(control.extractHandles());
+          if (Platform.isWindows) {
+            bytes.addAll(gpuSocket.read() ?? const []);
+          } else {
+            final message = gpuSocket.readMessage();
+            if (message == null) return;
+            bytes.addAll(message.data);
+            for (final control in message.controlMessages) {
+              handles.addAll(control.extractHandles());
+            }
           }
           final whole = MessageUnframer()
               .add(Uint8List.fromList(bytes))
               .any((m) => String.fromCharCodes(m.sublist(0, 4)) == 'RGPU');
           if (whole &&
-              (Platform.isMacOS || handles.length >= 4) &&
+              (!Platform.isLinux || handles.length >= 4) &&
               !described.isCompleted) {
             described.complete();
           }
@@ -1255,7 +1309,7 @@ void main() {
         expect(data.getUint32(12, Endian.little), set.width);
         expect(data.getUint32(16, Endian.little), set.height);
         expect(data.getUint32(20, Endian.little), set.fourcc);
-        if (Platform.isMacOS) {
+        if (!Platform.isLinux) {
           expect(messages.first.length, 32 + 4 * 8 + 4 * 4);
           final ids = [
             for (var i = 0; i < 4; i++)

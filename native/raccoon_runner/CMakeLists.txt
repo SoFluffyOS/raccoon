@@ -191,8 +191,14 @@ elseif(WIN32)
   FetchContent_MakeAvailable(vulkan_headers)
   target_sources(raccoon_runner PRIVATE src/vulkan_renderer.cc)
   target_compile_definitions(raccoon_runner PRIVATE RACCOON_HAS_VULKAN=1)
-  target_link_libraries(raccoon_runner PRIVATE Vulkan::Headers)
-  message(STATUS "GPU renderer: on (Vulkan, read back)")
+  target_link_libraries(raccoon_runner PRIVATE Vulkan::Headers d3d11 dxgi)
+  message(STATUS "GPU renderer: on (Vulkan; shared D3D11 textures for a client that imports them)")
+  # A GPU socket client that opens the ring's textures by their shared
+  # handles and checks the frame in them; the tests run it.
+  add_executable(raccoon_gpu_handle_check test/gpu_handle_check.cc)
+  target_compile_definitions(raccoon_gpu_handle_check PRIVATE
+    NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+  target_link_libraries(raccoon_gpu_handle_check PRIVATE ws2_32 d3d11)
   # Native plugins: the C API of Flutter's Windows embedding, implemented in
   # a flutter_windows.dll of the runner's own, beside it, from the vendored
   # headers (third_party/flutter_windows). Plugin DLLs import that name.
