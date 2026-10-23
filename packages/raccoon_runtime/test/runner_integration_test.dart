@@ -1313,7 +1313,7 @@ void main() {
       runner.stdout.listen(output.add);
       try {
         final deadline = DateTime.now().add(const Duration(seconds: 15));
-        while (!output.any((line) => line.startsWith('ECHO:')) &&
+        while (!output.any((line) => line.startsWith('SECURE:')) &&
             DateTime.now().isBefore(deadline)) {
           await Future<void>.delayed(const Duration(milliseconds: 100));
         }
@@ -1321,6 +1321,18 @@ void main() {
         // macOS, the platform thread's messages on Windows: the runner turns
         // the plugins' main loop.
         expect(output, contains('ECHO:echo: hello'));
+        // flutter_secure_storage's options reach the plugin without what an
+        // unsigned process can't have: the login keychain, no access group,
+        // no iCloud sync (#87).
+        if (Platform.isMacOS) {
+          expect(
+            output,
+            contains(
+              'SECURE:accountName=app;synchronizable=false;'
+              'useDataProtectionKeyChain=false;usesDataProtectionKeychain=false',
+            ),
+          );
+        }
       } finally {
         final client = await RunnerClient.connect(endpoint);
         client.shutdown();

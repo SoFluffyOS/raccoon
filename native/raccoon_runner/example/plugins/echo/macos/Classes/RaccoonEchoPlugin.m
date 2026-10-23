@@ -63,6 +63,22 @@
   RaccoonEchoPlugin* plugin = [[RaccoonEchoPlugin alloc] init];
   plugin->_textures = registrar.textures;
   [registrar addMethodCallDelegate:plugin channel:channel];
+  // flutter_secure_storage's channel, answering the options that reached
+  // the plugin as sorted key=value pairs: the runner rewrites the ones an
+  // unsigned process can't have (#87).
+  FlutterMethodChannel* secure =
+      [FlutterMethodChannel methodChannelWithName:@"plugins.it_nomads.com/flutter_secure_storage"
+                                  binaryMessenger:registrar.messenger];
+  [secure setMethodCallHandler:^(FlutterMethodCall* call, FlutterResult result) {
+    NSDictionary* options = [call.arguments isKindOfClass:[NSDictionary class]]
+                                ? call.arguments[@"options"]
+                                : nil;
+    NSMutableArray<NSString*>* pairs = [NSMutableArray array];
+    for (NSString* key in [options.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+      [pairs addObject:[NSString stringWithFormat:@"%@=%@", key, options[key]]];
+    }
+    result([pairs componentsJoinedByString:@";"]);
+  }];
 }
 
 - (void)handleMethodCall:(FlutterMethodCall*)call result:(FlutterResult)result {

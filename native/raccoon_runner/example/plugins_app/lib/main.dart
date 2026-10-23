@@ -2,8 +2,9 @@ import 'package:flutter/widgets.dart';
 import 'package:raccoon_echo/raccoon_echo.dart';
 
 /// Calls the native plugin before the first frame and prints what came
-/// back: ECHO:<answer>, then TEXTURE:<id>. With a texture it draws that full
-/// screen, orange; otherwise green when the plugin answered, red otherwise.
+/// back: ECHO:<answer>, SECURE:<options> (macOS), then TEXTURE:<id>. With a
+/// texture it draws that full screen, orange; otherwise green when the
+/// plugin answered, red otherwise.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   String line;
@@ -14,6 +15,19 @@ Future<void> main() async {
   }
   // ignore: avoid_print
   print(line);
+  try {
+    final options = await RaccoonEcho.secureStorageOptions({
+      'accountName': 'app',
+      'groupId': 'team.group',
+      'synchronizable': 'true',
+      'usesDataProtectionKeychain': 'true',
+    });
+    // ignore: avoid_print
+    print('SECURE:$options');
+  } catch (error) {
+    // ignore: avoid_print
+    print('SECURE:error $error');
+  }
   int? textureId;
   try {
     textureId = await RaccoonEcho.texture();

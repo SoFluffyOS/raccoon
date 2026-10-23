@@ -96,6 +96,7 @@ add_executable(raccoon_runner
   src/plugins.cc
   src/plugins_linux.cc
   src/platform_task_runner.cc
+  src/secure_storage_options.cc
   src/server.cc
   src/shared_buffers.cc
   src/software_frame.cc

@@ -18,4 +18,14 @@ abstract final class RaccoonEcho {
   /// up its own message loop holds the platform thread's.
   static Future<bool?> modal(int milliseconds) =>
       _channel.invokeMethod<bool>('modal', milliseconds);
+
+  /// A write on flutter_secure_storage's channel with [options]; the
+  /// options that reached the plugin, as sorted key=value pairs. macOS only.
+  static Future<String?> secureStorageOptions(Map<String, String> options) =>
+      const MethodChannel('plugins.it_nomads.com/flutter_secure_storage')
+          .invokeMethod<String>('write', {
+            'key': 'k',
+            'value': 'v',
+            'options': options,
+          });
 }

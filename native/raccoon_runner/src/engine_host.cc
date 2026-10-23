@@ -11,6 +11,7 @@
 #endif
 
 #include "host_settings.h"
+#include "secure_storage_options.h"
 
 namespace raccoon {
 
@@ -615,10 +616,19 @@ void EngineHost::OnPlatformMessage(const FlutterPlatformMessage* message,
   }
 #if RACCOON_HAS_PLUGINS
   // A loaded plugin answers its own channels, before a client sees them.
-  if (host->plugins_ &&
-      host->plugins_->HandleMessage(channel, message->message, message->message_size,
-                                    message->response_handle)) {
-    return;
+  if (host->plugins_) {
+    const uint8_t* data = message->message;
+    size_t size = message->message_size;
+#if defined(__APPLE__)
+    std::vector<uint8_t> rewritten;
+    if (RewriteSecureStorageCall(channel, data, size, &rewritten)) {
+      data = rewritten.data();
+      size = rewritten.size();
+    }
+#endif
+    if (host->plugins_->HandleMessage(channel, data, size, message->response_handle)) {
+      return;
+    }
   }
 #endif
   if (host->on_platform_message_) {

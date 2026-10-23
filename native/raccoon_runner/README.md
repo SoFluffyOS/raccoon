@@ -122,7 +122,10 @@ Design notes: `docs/internal_docs/raccoon/`.
   bi-planar YUV pixel buffers, draw through the Metal renderer. An
   Objective-C exception from a plugin's registration or handler fails that
   plugin, not the run; one thrown through Swift code cannot be caught.
-  `shared_preferences_foundation` stays the runner's own, above. On an
+  `shared_preferences_foundation` stays the runner's own, above.
+  `flutter_secure_storage` gets the login keychain: the runner drops the
+  options an unsigned process can't have (the data protection keychain,
+  an access group, iCloud sync) on the way to it. On an
   M1 Pro: `url_launcher` built in 12 s cold, 0.2 s from the cache; the
   fifteen of `tool/plugins` in 2 min cold, all loaded; `firebase_core`
   and its pods in 47 s cold, and `Firebase.initializeApp` answers.
