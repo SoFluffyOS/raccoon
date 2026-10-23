@@ -229,6 +229,42 @@ void main() {
     expect(ticks, greaterThan(2));
   });
 
+  test('overlapping ensures share one install', () async {
+    var seed = 7;
+    final library = Uint8List(8 << 20);
+    for (var i = 0; i < library.length; i++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      library[i] = seed >> 16;
+    }
+    var downloads = 0;
+    final zip = ZipEncoder().encodeBytes(
+      Archive()..addFile(ArchiveFile.bytes('libflutter_engine.so', library)),
+    );
+    final store = RuntimeStore(
+      cacheDirectory: temp.path,
+      platform: 'linux-x64',
+      download: (_) async {
+        downloads++;
+        return zip;
+      },
+    );
+    final runtimes = await Future.wait([
+      store.ensure('twice'),
+      store.ensure('twice'),
+    ]);
+    expect(downloads, 1);
+    for (final runtime in runtimes) {
+      expect(
+        File(p.join(runtime.directory, 'libflutter_engine.so')).lengthSync(),
+        library.length,
+      );
+    }
+    expect(
+      temp.listSync(recursive: true).where((e) => e.path.contains('.partial')),
+      isEmpty,
+    );
+  });
+
   test('ensure rejects an archive without the engine library', () async {
     final store = RuntimeStore(
       cacheDirectory: p.join(temp.path, 'engines'),

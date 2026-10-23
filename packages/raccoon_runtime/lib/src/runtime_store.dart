@@ -198,32 +198,55 @@ final class RuntimeStore {
 
   /// Returns the runtime for [revision], downloading and extracting it first
   /// when it is not installed.
-  Future<EngineRuntime> ensure(String revision) async {
-    if (installed(revision) case final runtime?) return runtime;
+  Future<EngineRuntime> ensure(String revision) {
+    if (installed(revision) case final runtime?) return Future.value(runtime);
+    // Calls that overlap share one install: each would stage its own, but
+    // one download is enough (#113).
+    return _installing[revision] ??= _install(revision).whenComplete(() {
+      // A block, not an arrow: remove returns this very future, and
+      // whenComplete would wait for it.
+      _installing.remove(revision);
+    });
+  }
+
+  final _installing = <String, Future<EngineRuntime>>{};
+
+  Future<EngineRuntime> _install(String revision) async {
     final uri = artifactUri(revision, platform: platform);
     final bytes = await _download(uri);
     final directory = Directory(directoryFor(revision));
-    final staging = Directory('${directory.path}.partial');
-    if (staging.existsSync()) staging.deleteSync(recursive: true);
-    staging.createSync(recursive: true);
-    // On another isolate: unzipping and writing an engine takes a few hundred
-    // milliseconds, and the caller is often a host's UI (#113).
-    final root = p.join(staging.path, _extractionRoot(platform));
-    await Isolate.run(() => _extract(ZipDecoder().decodeBytes(bytes), root));
-    final library = File(p.join(staging.path, engineLibraryOf(platform)));
-    if (!library.existsSync()) {
-      staging.deleteSync(recursive: true);
-      throw StateError('no ${engineLibraryOf(platform)} in $uri');
+    directory.parent.createSync(recursive: true);
+    // A staging folder of its own: another store installing the same
+    // revision meanwhile never writes into it.
+    final staging = directory.parent.createTempSync(
+      '${p.basename(directory.path)}.partial',
+    );
+    try {
+      // On another isolate: unzipping and writing an engine takes a few
+      // hundred milliseconds, and the caller is often a host's UI (#113).
+      final root = p.join(staging.path, _extractionRoot(platform));
+      await _unpack(bytes, root);
+      final library = File(p.join(staging.path, engineLibraryOf(platform)));
+      if (!library.existsSync()) {
+        throw StateError('no ${engineLibraryOf(platform)} in $uri');
+      }
+      _makeExecutable(library);
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+      staging.renameSync(directory.path);
+    } finally {
+      if (staging.existsSync()) staging.deleteSync(recursive: true);
     }
-    _makeExecutable(library);
-    if (directory.existsSync()) directory.deleteSync(recursive: true);
-    staging.renameSync(directory.path);
     return EngineRuntime(
       revision: revision,
       directory: directory.path,
       platform: platform,
     );
   }
+
+  /// Unzips [bytes] under [root] on another isolate. Static, so the closure
+  /// takes only what it is given to the other isolate, not the store.
+  static Future<void> _unpack(List<int> bytes, String root) =>
+      Isolate.run(() => _extract(ZipDecoder().decodeBytes(bytes), root));
 
   /// Writes [archive]'s files and symbolic links under [root]; the framework
   /// is mostly links into its `Versions/A`.
