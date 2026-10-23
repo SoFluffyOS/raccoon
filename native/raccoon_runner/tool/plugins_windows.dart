@@ -71,11 +71,15 @@ Future<void> main(List<String> arguments) async {
       });
       continue;
     }
-    final pubspec = package.pubspec;
-    if (!RegExp(r'^\s+plugin:\s*$', multiLine: true).hasMatch(pubspec)) {
-      continue;
-    }
-    final block = _windowsBlock(pubspec);
+    final found = RegExp(
+      r'^\s+plugin:\s*$',
+      multiLine: true,
+    ).firstMatch(package.pubspec);
+    if (found == null) continue;
+    // Only what flutter: plugin: says: pub.dev's top-level platforms: list
+    // names hosts too, with nothing under them (#92).
+    final plugin = package.pubspec.substring(found.end);
+    final block = _windowsBlock(plugin);
     final pluginClass = RegExp(
       r'pluginClass:\s*(\w+)',
     ).firstMatch(block)?.group(1);
@@ -84,9 +88,9 @@ Future<void> main(List<String> arguments) async {
       // An app-facing plugin with no Windows at all: the app's calls to it
       // will fail, and the pane can say so before they do.
       if (block.isEmpty &&
-          RegExp(r'^\s+platforms:\s*$', multiLine: true).hasMatch(pubspec) &&
-          !RegExp(r'^\s+windows:', multiLine: true).hasMatch(pubspec) &&
-          !RegExp(r'^\s+implements:', multiLine: true).hasMatch(pubspec) &&
+          RegExp(r'^\s+platforms:\s*$', multiLine: true).hasMatch(plugin) &&
+          !RegExp(r'^\s+windows:', multiLine: true).hasMatch(plugin) &&
+          !RegExp(r'^\s+implements:', multiLine: true).hasMatch(plugin) &&
           !implementations.contains(package.name)) {
         status.add({
           'name': package.name,

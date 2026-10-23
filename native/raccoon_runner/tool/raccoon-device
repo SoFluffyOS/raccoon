@@ -348,9 +348,13 @@ for name, root, pubspec in packages:
     if name in virtual:
         status.append({'name': name, 'state': 'built_in', 'detail': 'the runner answers it'})
         continue
-    if not re.search(r'^\s+plugin:\s*$', pubspec, re.M):
+    found = re.search(r'^\s+plugin:\s*$', pubspec, re.M)
+    if not found:
         continue
-    block = linux_block(pubspec)
+    # Only what flutter: plugin: says: pub.dev's top-level platforms: list
+    # names hosts too, with nothing under them (#92).
+    plugin = pubspec[found.end():]
+    block = linux_block(plugin)
     cls = re.search(r'pluginClass:\s*(\w+)', block)
     ffi = re.search(r'ffiPlugin:\s*true', block) is not None
     if cls is None and not ffi:
@@ -358,8 +362,8 @@ for name, root, pubspec in packages:
         # others; an implementation package says what it implements and is
         # not the one to blame): the app's calls to it will fail, and the
         # pane can say so before they do.
-        if (not block and re.search(r'^\s+platforms:\s*$', pubspec, re.M)
-                and not re.search(r'^\s+linux:', pubspec, re.M)
+        if (not block and re.search(r'^\s+platforms:\s*$', plugin, re.M)
+                and not re.search(r'^\s+linux:', plugin, re.M)
                 and not re.search(r'^\s+implements:', pubspec, re.M)
                 and name not in implementations):
             status.append({'name': name, 'state': 'no_host', 'detail': 'no Linux implementation'})
@@ -625,14 +629,18 @@ for name, root, pubspec in packages:
     if name in virtual:
         status.append({'name': name, 'state': 'built_in', 'detail': 'the runner answers it'})
         continue
-    if not re.search(r'^\s+plugin:\s*$', pubspec, re.M):
+    found = re.search(r'^\s+plugin:\s*$', pubspec, re.M)
+    if not found:
         continue
-    block = platform_block(pubspec, 'macos')
+    # Only what flutter: plugin: says: pub.dev's top-level platforms: list
+    # names hosts too, with nothing under them (#92).
+    plugin = pubspec[found.end():]
+    block = platform_block(plugin, 'macos')
     cls = re.search(r'pluginClass:\s*(\w+)', block)
     ffi = re.search(r'ffiPlugin:\s*true', block) is not None
     if cls is None and not ffi:
-        if (not block and re.search(r'^\s+platforms:\s*$', pubspec, re.M)
-                and not re.search(r'^\s+macos:', pubspec, re.M)
+        if (not block and re.search(r'^\s+platforms:\s*$', plugin, re.M)
+                and not re.search(r'^\s+macos:', plugin, re.M)
                 and name not in implementations
                 and (app is None or name in reached)):
             status.append({'name': name, 'state': 'no_host', 'detail': 'no macOS implementation'})

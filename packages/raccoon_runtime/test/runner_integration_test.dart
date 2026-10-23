@@ -698,6 +698,139 @@ void main() {
     },
     timeout: const Timeout(Duration(minutes: 5)),
   );
+  // pub.dev's top-level platforms: list, as isar_community_flutter_libs
+  // declares it: a hosts' key of each name, with nothing under it (#92).
+  const topLevelPlatforms =
+      'platforms:\n  android:\n  ios:\n  linux:\n  macos:\n  windows:\n';
+  Future<Map<String, Object?>> installFake(
+    Directory temp,
+    Map<String, String> files,
+    List<String> plugins,
+  ) async {
+    for (final MapEntry(:key, :value) in files.entries) {
+      File(p.join(temp.path, key))
+        ..createSync(recursive: true)
+        ..writeAsStringSync(value);
+    }
+    File(p.join(temp.path, 'app', 'pubspec.yaml'))
+      ..createSync(recursive: true)
+      ..writeAsStringSync(
+        'name: app\ndependencies:\n${[for (final name in plugins) '  $name:\n'].join()}',
+      );
+    File(p.join(temp.path, 'app', '.dart_tool', 'package_config.json'))
+      ..createSync(recursive: true)
+      ..writeAsStringSync(
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+            for (final name in plugins)
+              {'name': name, 'rootUri': '../../$name', 'packageUri': 'lib/'},
+          ],
+        }),
+      );
+    final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+      ..createSync(recursive: true);
+    final data = p.join(temp.path, 'data');
+    final result = await Process.run(
+      p.join(runnerDir, 'tool', 'raccoon-device'),
+      ['install', bundle.path, 'app'],
+      environment: {
+        'RACCOON_RUNNER': binary ?? '',
+        if (sdk != null) 'FLUTTER_ROOT': sdk,
+        'XDG_DATA_HOME': data,
+        'RACCOON_PLUGIN_CACHE': p.join(temp.path, 'cache'),
+        'RACCOON_NO_PREBUILT': '1',
+      },
+    );
+    expect(result.exitCode, 0, reason: '${result.stderr}');
+    final manifest = File(
+      p.join(data, 'raccoon', 'apps', 'app', 'plugins', 'manifest.json'),
+    );
+    expect(manifest.existsSync(), isTrue, reason: '${result.stderr}');
+    return jsonDecode(manifest.readAsStringSync()) as Map<String, Object?>;
+  }
+
+  test(
+    'a top-level platforms: list doesn\'t stand in for the plugin\'s own',
+    () async {
+      // Android only, by what flutter: plugin: says: no implementation for
+      // this host, whatever the top-level list names.
+      final temp = Directory.systemTemp.createTempSync('raccoon_platforms');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final manifest = await installFake(
+        temp,
+        {
+          'mobile_only/pubspec.yaml':
+              'name: mobile_only\nversion: 1.0.0\n$topLevelPlatforms'
+              'flutter:\n  plugin:\n    platforms:\n      android:\n'
+              '        package: dev.raccoon.mobile_only\n'
+              '        pluginClass: MobileOnly\n',
+        },
+        ['mobile_only'],
+      );
+      expect(
+        [
+          for (final entry in manifest['status'] as List)
+            ((entry as Map)['name'], entry['state']),
+        ],
+        [('mobile_only', 'no_host')],
+      );
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isWindows)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, true) => 'the helper runs in Git Bash on Windows',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+  test(
+    'on macOS a plugin with a top-level platforms: list is built',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_platforms');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final manifest = await installFake(
+        temp,
+        {
+          'plugin_e/pubspec.yaml':
+              'name: plugin_e\nversion: 1.0.0\n$topLevelPlatforms'
+              'flutter:\n  plugin:\n    platforms:\n      macos:\n'
+              '        pluginClass: PluginE\n',
+          'plugin_e/macos/plugin_e.podspec':
+              "Pod::Spec.new do |s|\n  s.name = 'plugin_e'\n"
+              "  s.version = '1.0.0'\n  s.summary = 'plugin_e'\n"
+              "  s.homepage = 'https://example.com'\n"
+              "  s.license = { :type => 'BSD' }\n  s.author = 'Raccoon'\n"
+              "  s.source = { :path => '.' }\n"
+              "  s.source_files = 'Classes/**/*'\n"
+              "  s.dependency 'FlutterMacOS'\n"
+              "  s.platform = :osx, '10.15'\nend\n",
+          'plugin_e/macos/Classes/PluginE.h':
+              '@import FlutterMacOS;\n'
+              '@interface PluginE : NSObject <FlutterPlugin>\n@end\n',
+          'plugin_e/macos/Classes/PluginE.m':
+              '#import "PluginE.h"\n@implementation PluginE\n'
+              '+ (void)registerWithRegistrar:(id<FlutterPluginRegistrar>)registrar {}\n'
+              '@end\n',
+        },
+        ['plugin_e'],
+      );
+      expect(manifest['status'], isEmpty);
+      expect(
+        [
+          for (final entry in manifest['plugins'] as List)
+            '${(entry as Map)['name']}',
+        ],
+        ['plugin_e'],
+      );
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isMacOS)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'CocoaPods plugins are macOS',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 5)),
+  );
   test(
     'a pub workspace member gets its own plugins, not the other members\'',
     () async {
