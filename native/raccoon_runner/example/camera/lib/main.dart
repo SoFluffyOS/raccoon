@@ -11,8 +11,9 @@ import 'package:flutter/widgets.dart';
 /// each format. The test pattern's top three quarters are colour bars, white
 /// first and blue last, so a picture or a frame is checked by its colour at
 /// those two places; a picture given as the source is reported by its colours
-/// there. Shows the preview meanwhile. Prints a CAMERA: line per
-/// step, then CAMERA:done, or CAMERA:error and why.
+/// there. Shows the preview meanwhile, paused while the first stream's rate
+/// is measured. Prints a CAMERA: line per step, then CAMERA:done, or
+/// CAMERA:error and why.
 ///
 /// Frames are streamed through the platform interface: the method channel
 /// implementation says it does not stream, so CameraController's
@@ -36,10 +37,16 @@ Future<void> main() async {
     final size = controller.value.previewSize;
     _say('initialized ${size?.width.toInt()}x${size?.height.toInt()}');
 
+    // Long enough for the test to see the preview in a frame.
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+
     final picture = await controller.takePicture();
     final image = await _decode(await picture.readAsBytes());
     _say('picture ${await _bars(image)} ${picture.path}');
 
+    // Every preview frame is a frame the test's client reads back; paused,
+    // the stream's rate is the stream's own, on a slow machine too.
+    await controller.pausePreview();
     final yuv = await _frames(controller, 10);
     final first = yuv.frames.first;
     final y = first.planes[0];
