@@ -118,7 +118,7 @@ Future<void> main() async {
     // Shown now: the preview comes back to its frame rate.
     preview.value = idle;
     _say('shown');
-    await Future<void>.delayed(const Duration(seconds: 1));
+    await Future<void>.delayed(const Duration(seconds: 2));
     _say('shown end');
     preview.value = null;
     await idle.dispose();

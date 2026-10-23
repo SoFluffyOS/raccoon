@@ -25,6 +25,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "flutter_embedder.h"
@@ -64,8 +65,8 @@ class GlRenderer : public GpuRenderer {
   // comes this way.
   bool PixelTexture(int64_t texture_id, size_t width, size_t height, uint64_t number,
                     const uint8_t* bgra, FlutterOpenGLTexture* out);
-  // Drops texture |texture_id|, from any thread; it is deleted with the
-  // next frame or PixelTexture, the context current.
+  // Drops texture |texture_id|, from any thread; its name is deleted a few
+  // frames later, the context current.
   void ForgetPixelTexture(int64_t texture_id);
 
   bool EnablePool(size_t count, std::string* error) override;
@@ -136,8 +137,12 @@ class GlRenderer : public GpuRenderer {
   std::unordered_map<int64_t, Pixels> pixels_;
   // Names to delete with the context current, and ids let go, which a
   // raster call that comes late does not make again (#114).
-  std::vector<GLuint> forgotten_;
+  std::vector<std::pair<GLuint, uint64_t>> forgotten_;
   std::unordered_set<int64_t> forgotten_ids_;
+  // Frames asked for so far: a name let go is deleted a few frames later,
+  // once no queued frame can still sample it.
+  uint64_t frames_ = 0;
+  void DeleteForgotten();
   std::vector<uint8_t> rgba_;
 
   mutable std::mutex mutex_;

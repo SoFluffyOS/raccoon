@@ -214,10 +214,7 @@ bool GlRenderer::PixelTexture(int64_t texture_id, size_t width, size_t height, u
                               const uint8_t* bgra, FlutterOpenGLTexture* out) {
   if (width == 0 || height == 0) return false;
   std::lock_guard<std::mutex> lock(pixels_mutex_);
-  if (!forgotten_.empty()) {
-    glDeleteTextures(static_cast<GLsizei>(forgotten_.size()), forgotten_.data());
-    forgotten_.clear();
-  }
+  DeleteForgotten();
   if (forgotten_ids_.count(texture_id) != 0) return false;
   Pixels& kept = pixels_[texture_id];
   const bool fresh = kept.name == 0;
@@ -264,12 +261,31 @@ bool GlRenderer::PixelTexture(int64_t texture_id, size_t width, size_t height, u
   return true;
 }
 
+// pixels_mutex_ held, the context current. The engine lets a texture go
+// with a task on this thread, and a frame queued before it may still draw
+// the texture's cached image, which borrows the name: three frames on, none
+// can (#114).
+void GlRenderer::DeleteForgotten() {
+  constexpr uint64_t kFramesKept = 3;
+  std::vector<GLuint> names;
+  auto kept = forgotten_.begin();
+  for (const auto& [name, frame] : forgotten_) {
+    if (frame + kFramesKept <= frames_) {
+      names.push_back(name);
+    } else {
+      *kept++ = {name, frame};
+    }
+  }
+  forgotten_.erase(kept, forgotten_.end());
+  if (!names.empty()) glDeleteTextures(static_cast<GLsizei>(names.size()), names.data());
+}
+
 void GlRenderer::ForgetPixelTexture(int64_t texture_id) {
   std::lock_guard<std::mutex> lock(pixels_mutex_);
   forgotten_ids_.insert(texture_id);
   const auto found = pixels_.find(texture_id);
   if (found == pixels_.end()) return;
-  forgotten_.push_back(found->second.name);
+  forgotten_.emplace_back(found->second.name, frames_);
   pixels_.erase(found);
 }
 
@@ -458,12 +474,9 @@ bool GlRenderer::BuildPool(size_t width, size_t height) {
 uint32_t GlRenderer::Fbo(size_t width, size_t height) {
   if (width == 0 || height == 0) return 0;
   {
-    // Textures let go go with the next frame, the context current (#114).
     std::lock_guard<std::mutex> lock(pixels_mutex_);
-    if (!forgotten_.empty()) {
-      glDeleteTextures(static_cast<GLsizei>(forgotten_.size()), forgotten_.data());
-      forgotten_.clear();
-    }
+    ++frames_;
+    DeleteForgotten();
   }
   int fence = -1;
   uint32_t fbo = 0;

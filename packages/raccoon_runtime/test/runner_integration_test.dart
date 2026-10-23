@@ -1497,8 +1497,10 @@ void main() {
           // #114: two seconds of a camera nobody shows are a few frames,
           // not sixty.
           expect(framesAfterIdle - framesAtIdle, lessThan(20));
-          // Shown again, it runs at its frame rate: a second is about 30.
-          expect(framesAfterShown - framesAtShown, greaterThan(15));
+          // Shown again, it runs at its frame rate: two seconds are about
+          // 60 frames, the probe's about 8. Above 20 tells them apart on a
+          // slow machine too.
+          expect(framesAfterShown - framesAtShown, greaterThan(20));
         }
         expect(lines, contains('cameras back,front'));
         expect(lines, contains('initialized 352x288'));
