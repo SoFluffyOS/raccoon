@@ -17,6 +17,9 @@
 #if RACCOON_HAS_GL
 #include "gl_renderer.h"
 #endif
+#if RACCOON_HAS_VULKAN
+#include "vulkan_renderer.h"
+#endif
 #if RACCOON_HAS_METAL
 #include "metal_renderer.h"
 #endif
@@ -170,6 +173,13 @@ class EngineHost {
                                                const FlutterFrameInfo* info);
   static bool MetalPresent(void* user_data, const FlutterMetalTexture* texture);
   MetalRenderer* metal_ = nullptr;
+#endif
+#if RACCOON_HAS_VULKAN
+  static void* VulkanProc(void* user_data, FlutterVulkanInstanceHandle instance,
+                          const char* name);
+  static FlutterVulkanImage VulkanNextImage(void* user_data, const FlutterFrameInfo* info);
+  static bool VulkanPresent(void* user_data, const FlutterVulkanImage* image);
+  VulkanRenderer* vulkan_ = nullptr;
 #endif
   std::string renderer_ = "software";
   static void OnLog(const char* tag, const char* message, void* user_data);

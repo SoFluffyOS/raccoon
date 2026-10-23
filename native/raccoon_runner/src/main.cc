@@ -1,6 +1,6 @@
 // raccoon_runner: hosts a Flutter app on the C embedder API.
 //
-//   raccoon_runner render --engine-dir DIR --assets DIR --icu FILE [--renderer auto|gl|metal|software] [--out F]
+//   raccoon_runner render --engine-dir DIR --assets DIR --icu FILE [--renderer auto|gl|metal|vulkan|software] [--out F]
 //   raccoon_runner serve  --engine-dir DIR --assets DIR --icu FILE --socket P
 //   raccoon_runner --version
 
@@ -88,7 +88,7 @@ void Usage() {
                "       raccoon_runner serve --engine-dir DIR --assets DIR"
                " --icu FILE --socket PATH\n"
                "       raccoon_runner --version\n"
-               "common: [--width N] [--height N] [--dpr X] [--data-dir DIR] [--renderer auto|gl|metal|software]"
+               "common: [--width N] [--height N] [--dpr X] [--data-dir DIR] [--renderer auto|gl|metal|vulkan|software]"
                " [--plugins MANIFEST]"
                " [-- engine switches...]\n");
 }

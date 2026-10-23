@@ -174,10 +174,35 @@ bool EngineHost::ConfigureRenderer(const std::string& wanted,
                                    FlutterRendererConfig* renderer,
                                    std::string* error) {
   // "auto" takes the GPU renderer this host builds when it starts, else
-  // software; "gl" and "metal" insist on theirs; "software" never tries.
-  const bool insists = wanted == "gl" || wanted == "metal";
+  // software; "gl", "metal" and "vulkan" insist on theirs; "software" never
+  // tries.
+  const bool insists = wanted == "gl" || wanted == "metal" || wanted == "vulkan";
   std::string gpu_error;
   const char* kind = "GPU";
+#if RACCOON_HAS_VULKAN
+  if (wanted == "auto" || wanted == "vulkan") {
+    kind = "Vulkan";
+    auto vulkan = std::make_unique<VulkanRenderer>();
+    if (vulkan->Init(&gpu_error)) {
+      vulkan_ = vulkan.get();
+      gpu_ = std::move(vulkan);
+      renderer->type = kVulkan;
+      auto& config = renderer->vulkan;
+      config.struct_size = sizeof(FlutterVulkanRendererConfig);
+      config.version = vulkan_->api_version();
+      config.instance = vulkan_->instance();
+      config.physical_device = vulkan_->physical_device();
+      config.device = vulkan_->device();
+      config.queue_family_index = vulkan_->queue_family();
+      config.queue = vulkan_->queue();
+      config.get_instance_proc_address_callback = VulkanProc;
+      config.get_next_image_callback = VulkanNextImage;
+      config.present_image_callback = VulkanPresent;
+      renderer_ = "vulkan (" + vulkan_->description() + ")";
+      return true;
+    }
+  }
+#endif
 #if RACCOON_HAS_GL
   if (wanted != "software" && wanted != "metal") {
     kind = "GL";
@@ -288,6 +313,34 @@ bool EngineHost::MetalPresent(void* user_data, const FlutterMetalTexture* textur
   auto* host = static_cast<EngineHost*>(user_data);
   return host->metal_->Present(
       texture->texture_id,
+      [host](const void* pixels, size_t row_bytes, size_t height) {
+        OnPresent(host, pixels, row_bytes, height);
+      });
+}
+#endif
+
+#if RACCOON_HAS_VULKAN
+void* EngineHost::VulkanProc(void* user_data, FlutterVulkanInstanceHandle instance,
+                             const char* name) {
+  return static_cast<EngineHost*>(user_data)->vulkan_->ProcAddress(
+      static_cast<VkInstance>(instance), name);
+}
+
+FlutterVulkanImage EngineHost::VulkanNextImage(void* user_data, const FlutterFrameInfo* info) {
+  // A null image tells the engine there is none for this frame.
+  FlutterVulkanImage image{};
+  image.struct_size = sizeof(FlutterVulkanImage);
+  image.image = reinterpret_cast<FlutterVulkanImageHandle>(
+      static_cast<EngineHost*>(user_data)->vulkan_->NextImage(info->size.width,
+                                                              info->size.height));
+  image.format = VulkanRenderer::kFormat;
+  return image;
+}
+
+bool EngineHost::VulkanPresent(void* user_data, const FlutterVulkanImage* image) {
+  auto* host = static_cast<EngineHost*>(user_data);
+  return host->vulkan_->Present(
+      reinterpret_cast<VkImage>(image->image),
       [host](const void* pixels, size_t row_bytes, size_t height) {
         OnPresent(host, pixels, row_bytes, height);
       });
