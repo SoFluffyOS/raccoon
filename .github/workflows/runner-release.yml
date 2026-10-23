@@ -128,7 +128,7 @@ jobs:
           (cd dist && sha256sum *.tar.gz > SHA256SUMS)
           ls -l dist
           cat > notes.md <<NOTES
-          Prebuilt \`raccoon_runner\` $VERSION for Linux x64, macOS arm64, macOS x64 and Windows x64. Each archive holds the binary, \`tool/raccoon-device\`, \`tool/engine_dir.sh\`, \`VERSION\` and \`LICENSE\`, and works as a runtime on its own once unpacked (on Windows the helper runs in Git Bash):
+          Prebuilt \`raccoon_runner\` $VERSION for Linux x64, macOS arm64, macOS x64 and Windows x64. Each archive holds the binary, \`tool/raccoon-device\` with its scripts (\`engine_dir.sh\`, \`package_scope.dart\`, \`plugins_windows.dart\`), \`VERSION\` and \`LICENSE\`, and works as a runtime on its own once unpacked (on Windows the helper runs in Git Bash):
 
               mkdir raccoon_runner && tar xzf raccoon_runner-$VERSION-<platform>.tar.gz -C raccoon_runner
               raccoon_runner/raccoon_runner --version

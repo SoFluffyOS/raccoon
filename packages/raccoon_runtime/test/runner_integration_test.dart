@@ -213,6 +213,106 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
   test(
+    'a pub workspace member gets its own plugins, not the other members\'',
+    () async {
+      // A member has no package config of its own; the workspace root's
+      // names every member's packages. Each member here depends on a plugin
+      // with no desktop implementation, which the helper reports without
+      // building anything: the report should name the app's, not the
+      // other member's.
+      final temp = Directory.systemTemp.createTempSync('raccoon_workspace');
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      String androidOnly(String name) =>
+          'name: $name\n'
+          'flutter:\n'
+          '  plugin:\n'
+          '    platforms:\n'
+          '      android:\n'
+          '        package: dev.raccoon.$name\n'
+          '        pluginClass: Plugin\n';
+      write(
+        'pubspec.yaml',
+        'name: _workspace\nworkspace:\n  - app\n  - other\n',
+      );
+      write(
+        'app/pubspec.yaml',
+        'name: app\nresolution: workspace\ndependencies:\n  app_plugin:\n',
+      );
+      write(
+        'other/pubspec.yaml',
+        'name: other\nresolution: workspace\ndependencies:\n  other_plugin:\n',
+      );
+      write('app_plugin/pubspec.yaml', androidOnly('app_plugin'));
+      write('other_plugin/pubspec.yaml', androidOnly('other_plugin'));
+      write(
+        '.dart_tool/package_config.json',
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            for (final name in ['app', 'other', 'app_plugin', 'other_plugin'])
+              {'name': name, 'rootUri': '../$name', 'packageUri': 'lib/'},
+          ],
+        }),
+      );
+      write(
+        '.dart_tool/package_graph.json',
+        jsonEncode({
+          'configVersion': 1,
+          'roots': ['app', 'other'],
+          'packages': [
+            {
+              'name': 'app',
+              'dependencies': ['app_plugin'],
+            },
+            {
+              'name': 'other',
+              'dependencies': ['other_plugin'],
+            },
+            {'name': 'app_plugin', 'dependencies': <String>[]},
+            {'name': 'other_plugin', 'dependencies': <String>[]},
+          ],
+        }),
+      );
+      final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+        ..createSync(recursive: true);
+      final data = p.join(temp.path, 'data');
+      try {
+        final install = await Process.run(
+          p.join(runnerDir, 'tool', 'raccoon-device'),
+          ['install', bundle.path, 'app'],
+          environment: {
+            'RACCOON_RUNNER': binary!,
+            if (sdk != null) 'FLUTTER_ROOT': sdk,
+            'XDG_DATA_HOME': data,
+          },
+        );
+        expect(install.exitCode, 0, reason: '${install.stderr}');
+        final manifest = File(
+          p.join(data, 'raccoon', 'apps', 'app', 'plugins', 'manifest.json'),
+        );
+        expect(manifest.existsSync(), isTrue, reason: '${install.stderr}');
+        final status = [
+          for (final entry
+              in (jsonDecode(manifest.readAsStringSync()) as Map)['status']
+                  as List)
+            '${(entry as Map)['name']}',
+        ];
+        expect(status, ['app_plugin']);
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isWindows)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, true) => 'the helper runs in Git Bash on Windows',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+  test(
     "answers the app's clipboard request through the client",
     () async {
       final temp = Directory.systemTemp.createTempSync('raccoon_test');

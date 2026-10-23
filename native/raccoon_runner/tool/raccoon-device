@@ -85,6 +85,19 @@ sdk_icu() {
   native_path "$(sdk_root)/bin/cache/artifacts/engine/$SDK_ENGINE/icudtl.dat"
 }
 
+# The package config the app's packages come from: its own, or for a pub
+# workspace member the workspace's, kept to what the app reaches
+# (tool/package_scope.dart). Prints nothing, and says why, when there is none.
+package_config() {
+  local project="$1" scoped="$1/build/raccoon/package_config.json"
+  if [ -f "$project/.dart_tool/package_config.json" ]; then
+    echo "$project/.dart_tool/package_config.json"
+    return 0
+  fi
+  "$(sdk_root)/bin/cache/dart-sdk/bin/dart$EXE" "$(native_path "$ROOT/tool/package_scope.dart")" \
+    "$(native_path "$project")" "$(native_path "$scoped")" > /dev/null && echo "$scoped"
+}
+
 # On macOS, an application bundle of the app's own around the runner: a
 # symlink to it in <key>.app/Contents/MacOS beside an Info.plist, so the
 # process has a main bundle and an identifier, dev.raccoon.app.<key>. Some
@@ -166,17 +179,18 @@ plugin_headers() {
 # half below. When there is nothing it can do, says why and leaves no
 # manifest; the app then sees no plugin.
 build_plugins() {
-  local project="$1" out="$2"
+  local project="$1" out="$2" config
   rm -rf "$out"
-  [ -f "$project/.dart_tool/package_config.json" ] || return 0
+  config="$(package_config "$project")"
+  [ -n "$config" ] || return 0
   if [ -n "$WINDOWS" ]; then
-    build_plugins_windows "$project" "$out"
+    build_plugins_windows "$project" "$out" "$config"
     return 0
   fi
   command -v python3 >/dev/null || { echo "raccoon-device: no python3; native plugins skipped" >&2; return 0; }
   case "$(uname -s)" in
-    Darwin) build_plugins_macos "$project" "$out" ;;
-    *) build_plugins_linux "$project" "$out" ;;
+    Darwin) build_plugins_macos "$project" "$out" "$config" ;;
+    *) build_plugins_linux "$project" "$out" "$config" ;;
   esac
 }
 
@@ -185,7 +199,7 @@ build_plugins() {
 # C++ client wrapper, and the runner loads the plugins on the
 # flutter_windows.dll beside it, so a runner without one gets none.
 build_plugins_windows() {
-  local project="$1" out="$2" engine version cache sdk
+  local project="$1" out="$2" config="$3" engine version cache sdk
   if [ ! -f "$(dirname "$RUNNER")/flutter_windows.dll" ]; then
     echo "raccoon-device: this runner has no flutter_windows.dll; native plugins skipped" >&2
     return 0
@@ -195,7 +209,7 @@ build_plugins_windows() {
   cache="${RACCOON_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/$engine}"
   sdk="$(sdk_root)"
   "$sdk/bin/cache/dart-sdk/bin/dart.exe" "$(native_path "$ROOT/tool/plugins_windows.dart")" \
-    "$(native_path "$project/.dart_tool/package_config.json")" "$(native_path "$out")" \
+    "$(native_path "$config")" "$(native_path "$out")" \
     "$VIRTUAL_PLUGINS" "$(native_path "$cache")" "$version" \
     "$(native_path "$sdk/bin/cache/artifacts/engine/$SDK_ENGINE")"
 }
@@ -210,7 +224,7 @@ build_plugins_windows() {
 # |out|/lib, which run puts on the runner's library path for the FFI ones. A
 # machine without a toolchain still gets the cached and prebuilt ones.
 build_plugins_linux() {
-  local project="$1" out="$2" lib headers engine version cache
+  local project="$1" out="$2" config="$3" lib headers engine version cache
   lib="$(plugin_library || true)"
   headers="$(plugin_headers || true)"
   if [ -z "$lib" ] || [ -z "$headers" ]; then
@@ -220,7 +234,7 @@ build_plugins_linux() {
   engine="$(basename "$(dirname "$("$ROOT/tool/engine_dir.sh")")")"
   version="$(tr -d '[:space:]' < "$ROOT/VERSION")"
   cache="${RACCOON_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/$engine}"
-  python3 - "$project/.dart_tool/package_config.json" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS" \
+  python3 - "$config" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS" \
     "$cache" "$version" "$(uname -m)" \
     "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-$engine-linux-$(uname -m).tar.gz}" <<'PY'
 import glob, hashlib, json, os, re, shutil, subprocess, sys, tarfile, urllib.request
@@ -444,18 +458,19 @@ PY
 # flat in |out|/frameworks, where they find each other by @loader_path; the
 # manifest names the SDK's FlutterMacOS for the runner to open first.
 build_plugins_macos() {
-  local project="$1" out="$2" sdk engine version cache
+  local project="$1" out="$2" config="$3" sdk engine version cache
   sdk="$(sdk_root)"
   engine="$(basename "$(dirname "$("$ROOT/tool/engine_dir.sh")")")"
   version="$(tr -d '[:space:]' < "$ROOT/VERSION")"
   cache="${RACCOON_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/$engine}"
-  python3 - "$project/.dart_tool/package_config.json" "$out" "$VIRTUAL_PLUGINS_MACOS" \
+  python3 - "$config" "$out" "$VIRTUAL_PLUGINS_MACOS" \
     "$cache" "$version" "$(uname -m)" "$sdk/bin/cache/artifacts/engine/darwin-x64" \
-    "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-$engine-macos-$(uname -m).tar.gz}" <<'PY'
+    "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-$engine-macos-$(uname -m).tar.gz}" \
+    "$project" <<'PY'
 import hashlib, json, os, re, shutil, subprocess, sys, tarfile, urllib.request
 from urllib.parse import unquote, urlparse
 
-config, out, virtual, cache, runner_version, arch, engine_dir, prebuilt_url = sys.argv[1:9]
+config, out, virtual, cache, runner_version, arch, engine_dir, prebuilt_url, project = sys.argv[1:10]
 virtual = set(virtual.split())
 dart_tool = os.path.dirname(os.path.abspath(config))
 # What flutter precache --macos ships: the xcframework, no podspec (one in
@@ -575,7 +590,6 @@ implementations.update(name for name, _, pubspec in packages
 # jni, say, comes only with path_provider_android and is not the app's to
 # miss on macOS.
 by_name = {name: pubspec for name, _, pubspec in packages}
-project = os.path.dirname(dart_tool)
 app = next((name for name, root, _ in packages if os.path.normpath(root) == os.path.normpath(project)), None)
 reached, pending = set(), [app] if app else []
 while pending:
@@ -764,10 +778,11 @@ PY
 # installed manifest names them by absolute path under this host's key, so
 # the engine opens them as an app's would. Skipped without hook packages.
 build_native_assets() {
-  local project="$1" app="$2" arch out log
+  local project="$1" app="$2" config arch out log
   [ "$(uname -s)" = Darwin ] || return 0
-  [ -f "$project/.dart_tool/package_config.json" ] || return 0
-  python3 - "$project/.dart_tool/package_config.json" <<'PY' || return 0
+  config="$(package_config "$project")"
+  [ -n "$config" ] || return 0
+  python3 - "$config" <<'PY' || return 0
 import json, os, sys
 from urllib.parse import unquote, urlparse
 config = sys.argv[1]
