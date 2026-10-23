@@ -1407,12 +1407,16 @@ void main() {
       var framesSeen = 0;
       var framesAtIdle = 0;
       var framesAfterIdle = 0;
+      var framesAtShown = 0;
+      var framesAfterShown = 0;
       runner.stdout.listen((line) {
         final at = line.indexOf('CAMERA:');
         if (at < 0) return;
         final said = line.substring(at + 'CAMERA:'.length);
         if (said == 'idle') framesAtIdle = framesSeen;
         if (said == 'idle end') framesAfterIdle = framesSeen;
+        if (said == 'shown') framesAtShown = framesSeen;
+        if (said == 'shown end') framesAfterShown = framesSeen;
         lines.add(said);
         if ((said == 'done' || said.startsWith('error')) && !done.isCompleted) {
           done.complete();
@@ -1443,6 +1447,8 @@ void main() {
           // #114: two seconds of a camera nobody shows are a few frames,
           // not sixty.
           expect(framesAfterIdle - framesAtIdle, lessThan(20));
+          // Shown again, it runs at its frame rate: a second is about 30.
+          expect(framesAfterShown - framesAtShown, greaterThan(15));
         }
         expect(lines, contains('cameras back,front'));
         expect(lines, contains('initialized 352x288'));

@@ -64,8 +64,8 @@ class GlRenderer : public GpuRenderer {
   // comes this way.
   bool PixelTexture(int64_t texture_id, size_t width, size_t height, uint64_t number,
                     const uint8_t* bgra, FlutterOpenGLTexture* out);
-  // Drops texture |texture_id|, from any thread; it is deleted at the next
-  // PixelTexture, with the context current.
+  // Drops texture |texture_id|, from any thread; it is deleted with the
+  // next frame or PixelTexture, the context current.
   void ForgetPixelTexture(int64_t texture_id);
 
   bool EnablePool(size_t count, std::string* error) override;

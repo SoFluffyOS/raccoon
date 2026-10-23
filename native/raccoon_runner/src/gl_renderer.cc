@@ -457,6 +457,14 @@ bool GlRenderer::BuildPool(size_t width, size_t height) {
 
 uint32_t GlRenderer::Fbo(size_t width, size_t height) {
   if (width == 0 || height == 0) return 0;
+  {
+    // Textures let go go with the next frame, the context current (#114).
+    std::lock_guard<std::mutex> lock(pixels_mutex_);
+    if (!forgotten_.empty()) {
+      glDeleteTextures(static_cast<GLsizei>(forgotten_.size()), forgotten_.data());
+      forgotten_.clear();
+    }
+  }
   int fence = -1;
   uint32_t fbo = 0;
   {

@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -101,12 +102,14 @@ struct MetalRenderer::Impl {
     bool filled = false;
   };
   std::mutex pixels_mutex;
-  std::unordered_map<int64_t, Pixels> pixels;
+  // Each entry where it was made: the engine reads the handles array after
+  // the callback returns, so it never moves.
+  std::unordered_map<int64_t, std::unique_ptr<Pixels>> pixels;
   // Ids let go: a raster call that comes late does not make them again.
-  // Their textures live until the next PixelTexture, on the raster thread,
-  // by when the engine took the handles it was given (#114).
+  // Their entries live until the next drawable, on the raster thread, by
+  // when the engine took the handles it was given (#114).
   std::unordered_set<int64_t> forgotten;
-  std::vector<Pixels> retired;
+  std::vector<std::unique_ptr<Pixels>> retired;
 
   // Mutex held.
   bool EnsureReadback(size_t width, size_t height);
@@ -243,7 +246,9 @@ bool MetalRenderer::PixelTexture(int64_t texture_id, size_t width, size_t height
   std::lock_guard<std::mutex> lock(impl_->pixels_mutex);
   impl_->retired.clear();
   if (impl_->forgotten.count(texture_id) != 0) return false;
-  Impl::Pixels& kept = impl_->pixels[texture_id];
+  std::unique_ptr<Impl::Pixels>& slot = impl_->pixels[texture_id];
+  if (!slot) slot = std::make_unique<Impl::Pixels>();
+  Impl::Pixels& kept = *slot;
   if (kept.filled && kept.number != number) kept.current = 1 - kept.current;
   id<MTLTexture> texture = kept.textures[kept.current];
   if (texture == nil || texture.width != width || texture.height != height) {
@@ -387,6 +392,10 @@ void MetalRenderer::ReleaseAll() {
 bool MetalRenderer::NextDrawable(size_t width, size_t height, int64_t* texture_id,
                                  const void** texture) {
   if (width == 0 || height == 0) return false;
+  {
+    std::lock_guard<std::mutex> lock(impl_->pixels_mutex);
+    impl_->retired.clear();
+  }
   Impl& m = *impl_;
   std::lock_guard<std::mutex> lock(m.mutex);
   m.current = -1;
