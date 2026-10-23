@@ -42,4 +42,18 @@ void main() {
     );
     expect(canvas.invocations, isEmpty);
   });
+
+  test('draws nothing without a step', () {
+    final canvas = TestRecordingCanvas();
+    for (final step in [0.0, -24.0, double.nan]) {
+      paintDotGrid(
+        canvas,
+        const Size(100, 50),
+        Offset.zero,
+        step,
+        const Color(0xFF808080),
+      );
+    }
+    expect(canvas.invocations, isEmpty);
+  });
 }

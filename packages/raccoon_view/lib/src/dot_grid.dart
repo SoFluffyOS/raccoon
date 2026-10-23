@@ -12,6 +12,8 @@ void paintDotGrid(
   double step,
   Color color,
 ) {
+  // No step, no grid; the modulo below would be NaN.
+  if (!(step > 0)) return;
   final startX = origin.dx % step;
   final startY = origin.dy % step;
   if (startX > size.width || startY > size.height) return;
