@@ -281,8 +281,8 @@ class RaccoonViewPlugin : public flutter::Plugin {
 
   // An integer argument, whichever width the codec gave it.
   static int64_t Int(const EncodableMap* arguments, const char* key) {
-    if (const auto* small = Get<int32_t>(arguments, key)) return *small;
-    if (const auto* large = Get<int64_t>(arguments, key)) return *large;
+    if (const auto* narrow = Get<int32_t>(arguments, key)) return *narrow;
+    if (const auto* wide = Get<int64_t>(arguments, key)) return *wide;
     return -1;
   }
 
