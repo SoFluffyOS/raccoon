@@ -1,6 +1,7 @@
 #include "camera_source.h"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -13,6 +14,44 @@
 #include "stb_image.h"
 
 namespace raccoon {
+
+namespace {
+
+// A picture: the same frame at any time.
+class PictureSource : public CameraSource {
+ public:
+  explicit PictureSource(CameraPicture picture) : picture_(std::move(picture)) {}
+
+  const CameraPicture* FrameAt(uint64_t, uint64_t* number) override {
+    *number = 0;
+    return &picture_;
+  }
+
+ private:
+  CameraPicture picture_;
+};
+
+bool IsPicture(const std::string& path) {
+  std::string extension = std::filesystem::u8path(path).extension().u8string();
+  for (char& c : extension) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return extension == ".png" || extension == ".jpg" || extension == ".jpeg";
+}
+
+}  // namespace
+
+std::unique_ptr<CameraSource> OpenCameraSource(const std::string& path, std::string* error) {
+  if (!IsPicture(path)) return OpenCameraVideo(path, error);
+  CameraPicture picture;
+  if (!LoadCameraPicture(path, &picture, error)) return nullptr;
+  return std::make_unique<PictureSource>(std::move(picture));
+}
+
+#if !defined(_WIN32)
+std::unique_ptr<CameraSource> OpenCameraVideo(const std::string&, std::string* error) {
+  *error = "videos play on Windows only for now; give a PNG or JPEG";
+  return nullptr;
+}
+#endif
 
 bool LoadCameraPicture(const std::string& path, CameraPicture* picture, std::string* error) {
   std::ifstream file(std::filesystem::u8path(path), std::ios::binary);

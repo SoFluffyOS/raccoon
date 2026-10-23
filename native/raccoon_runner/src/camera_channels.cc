@@ -94,19 +94,23 @@ std::vector<uint8_t> CameraChannels::Pattern(size_t width, size_t height,
 }
 
 bool CameraChannels::SetSource(const std::string& path, std::string* error) {
-  CameraPicture picture;
-  if (!LoadCameraPicture(path, &picture, error)) return false;
-  source_ = std::move(picture);
-  has_source_ = true;
+  std::unique_ptr<CameraSource> source = OpenCameraSource(path, error);
+  if (!source) return false;
+  source_ = std::move(source);
   fitted_.clear();
   return true;
 }
 
 std::vector<uint8_t> CameraChannels::Frame(size_t width, size_t height, uint64_t time_micros) {
-  if (!has_source_) return Pattern(width, height, time_micros);
+  if (!source_) return Pattern(width, height, time_micros);
+  uint64_t number = 0;
+  const CameraPicture* frame = source_->FrameAt(time_micros, &number);
+  if (frame == nullptr) return Pattern(width, height, time_micros);
   auto [found, added] = fitted_.try_emplace({width, height});
-  if (added) found->second = FitCameraPicture(source_, width, height);
-  return found->second;
+  if (added || found->second.first != number) {
+    found->second = {number, FitCameraPicture(*frame, width, height)};
+  }
+  return found->second.second;
 }
 
 bool CameraChannels::Handle(const std::string& channel, const uint8_t* data, size_t size,

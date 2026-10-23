@@ -127,6 +127,13 @@ target_link_libraries(raccoon_runner PRIVATE raccoon_proto ${CMAKE_DL_LIBS} Thre
 target_link_libraries(raccoon_runner PRIVATE nlohmann_json::nlohmann_json)
 if(WIN32)
   target_link_libraries(raccoon_runner PRIVATE ws2_32 winmm)
+  # A video as the camera's source, decoded by Media Foundation; and the
+  # tool the tests make one with.
+  target_sources(raccoon_runner PRIVATE src/camera_video_win.cc)
+  target_link_libraries(raccoon_runner PRIVATE mfplat mfreadwrite mfuuid ole32)
+  add_executable(raccoon_test_video test/make_test_video.cc)
+  target_compile_definitions(raccoon_test_video PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_link_libraries(raccoon_test_video PRIVATE mfplat mfreadwrite mfuuid ole32)
 endif()
 
 # The GPU renderer, one per host; without it the runner rasterizes in

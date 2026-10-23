@@ -1428,6 +1428,130 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  // raccoon_test_video writes a third of a second of H.264: red and green
+  // over blue and yellow, the same in every frame.
+  final testVideo = switch (binary) {
+    final binary? => p.join(p.dirname(binary), 'raccoon_test_video.exe'),
+    null => '',
+  };
+
+  /// Runs example/camera with [source] as the camera's source; its CAMERA:
+  /// lines, and the runner's stderr.
+  Future<({List<String> lines, List<String> said})> runCamera(
+    Directory temp,
+    String source,
+  ) async {
+    final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+    final runner = await RunnerProcess.start(
+      RunnerLaunch(
+        runnerBinary: binary ?? '',
+        engineDir: engineDir ?? '',
+        assets: cameraAssets,
+        icuData: icu ?? '',
+        endpoint: endpoint,
+        cameraSource: source,
+      ),
+    );
+    final said = <String>[];
+    runner.stderr.listen(said.add);
+    final lines = <String>[];
+    final done = Completer<void>();
+    runner.stdout.listen((line) {
+      final at = line.indexOf('CAMERA:');
+      if (at < 0) return;
+      final step = line.substring(at + 'CAMERA:'.length);
+      lines.add(step);
+      if ((step == 'done' || step.startsWith('error')) && !done.isCompleted) {
+        done.complete();
+      }
+    });
+    final client = await RunnerClient.connect(endpoint);
+    try {
+      await done.future.timeout(const Duration(seconds: 30));
+    } finally {
+      client.shutdown();
+      await client.close();
+      expect(await _exitCode(runner), 0);
+    }
+    final picture = _pictureLine.firstMatch(
+      lines.firstWhere((l) => l.startsWith('picture'), orElse: () => ''),
+    );
+    if (picture?[4] case final path?) File(path).deleteSync();
+    return (lines: lines, said: said);
+  }
+
+  test(
+    'the camera plays a video given as its source, in a loop',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final video = p.join(temp.path, 'source.mp4');
+      final made = await Process.run(testVideo, [video]);
+      expect(made.exitCode, 0, reason: '${made.stderr}');
+      final (:lines, said: _) = await runCamera(temp, video);
+      // Each channel within 16 of the video's, as H.264 and then JPEG keep
+      // them; the top half is red and green, so neither half is flipped.
+      void near(String what, String? seen, List<int> want) {
+        final got = (seen ?? '0,0,0').split(',').map(int.parse).toList();
+        final close = [
+          for (var i = 0; i < 3; i++) (got[i] - want[i]).abs() <= 16,
+        ].every((each) => each);
+        expect(close, isTrue, reason: '$what $seen, not $want');
+      }
+
+      final colours = RegExp(r'left=(\S+) right=(\S+)');
+      final picture = colours.firstMatch(
+        lines.firstWhere((l) => l.startsWith('picture')),
+      );
+      near('picture left', picture?[1], [220, 20, 30]);
+      near('picture right', picture?[2], [20, 200, 40]);
+      // The streams run past the video's end, so their later frames come
+      // after it started again.
+      final yuv = lines.firstWhere((l) => l.startsWith('stream yuv420'));
+      expect(double.parse(yuv.split('fps=').last), inInclusiveRange(20, 40));
+      for (final format in ['bgra8888', 'jpeg']) {
+        final seen = colours.firstMatch(
+          lines.firstWhere((l) => l.startsWith('stream $format')),
+        );
+        near('$format left', seen?[1], [220, 20, 30]);
+        near('$format right', seen?[2], [20, 200, 40]);
+      }
+      expect(lines.last, 'done');
+    },
+    skip:
+        !Platform.isWindows
+            ? 'videos play on Windows only for now'
+            : ready &&
+                Directory(cameraAssets).existsSync() &&
+                File(testVideo).existsSync()
+            ? false
+            : 'build the runner, raccoon_test_video and example/camera first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'elsewhere a video source is refused and the pattern stays',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final video = File(p.join(temp.path, 'source.mp4'))
+        ..writeAsBytesSync([0, 0, 0, 0]);
+      final (:lines, :said) = await runCamera(temp, video.path);
+      expect(
+        lines,
+        contains(startsWith('stream bgra8888 planes=1 raw=1111970369 bars ok')),
+      );
+      expect(said, contains(contains('videos play on Windows only for now')));
+    },
+    skip:
+        Platform.isWindows
+            ? 'Windows plays videos'
+            : ready && Directory(cameraAssets).existsSync()
+            ? false
+            : 'build the runner and example/camera first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   test(
     'keys reach the framework and typed characters reach a text field',
     () async {

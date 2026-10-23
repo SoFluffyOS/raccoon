@@ -43,7 +43,7 @@ final class RunnerLaunch {
   final String? plugins;
 
   /// A PNG or JPEG the app's camera shows in place of the runner's test
-  /// pattern.
+  /// pattern; on Windows a video too, played in a loop.
   final String? cameraSource;
 
   List<String> get arguments => [
