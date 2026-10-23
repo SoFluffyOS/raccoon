@@ -12,4 +12,10 @@ abstract final class RaccoonEcho {
   /// A texture of one colour, orange, registered by the plugin; its id for
   /// a [Texture] widget. Fails where the host takes no texture.
   static Future<int?> texture() => _channel.invokeMethod<int>('texture');
+
+  /// A modal dialog that closes itself after [milliseconds], as a user
+  /// would; it answers once the dialog is gone. Windows only: while it is
+  /// up its own message loop holds the platform thread's.
+  static Future<bool?> modal(int milliseconds) =>
+      _channel.invokeMethod<bool>('modal', milliseconds);
 }

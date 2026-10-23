@@ -30,6 +30,14 @@ struct Pending {
   std::unique_ptr<flutter::MethodResult<EncodableValue>> result;
 };
 
+constexpr wchar_t kModalTitle[] = L"raccoon_echo modal";
+
+// The `modal` method's timer: closes its message box, as a user would.
+void CALLBACK CloseModal(HWND, UINT, UINT_PTR timer, DWORD) {
+  KillTimer(nullptr, timer);
+  if (HWND box = FindWindowW(nullptr, kModalTitle)) PostMessageW(box, WM_CLOSE, 0, 0);
+}
+
 class RaccoonEchoPlugin : public flutter::Plugin {
  public:
   explicit RaccoonEchoPlugin(flutter::PluginRegistrarWindows* registrar)
@@ -66,6 +74,18 @@ class RaccoonEchoPlugin : public flutter::Plugin {
         pending->result->Error("echo", "no window to post to");
         delete pending;
       }
+      return;
+    }
+    if (call.method_name() == "modal") {
+      // A message box, closed by a thread timer after the given time: its
+      // own message loop dispatches the timer, as it holds the platform
+      // thread's until then.
+      const auto* milliseconds = std::get_if<int32_t>(call.arguments());
+      SetTimer(nullptr, 0, milliseconds == nullptr ? 2000 : *milliseconds, CloseModal);
+      flutter::FlutterView* view = registrar_->GetView();
+      MessageBoxW(view == nullptr ? nullptr : view->GetNativeWindow(), L"raccoon_echo",
+                  kModalTitle, MB_OK);
+      result->Success(EncodableValue(true));
       return;
     }
     if (call.method_name() == "texture") {

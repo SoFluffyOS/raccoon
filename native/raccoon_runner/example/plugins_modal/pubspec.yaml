@@ -1,0 +1,12 @@
+name: plugins_modal
+description: Animates, and asks the raccoon_echo native plugin for a modal dialog that closes itself, printing MODAL:start and MODAL:done around it, for the test that frames keep coming while a plugin's modal loop runs.
+publish_to: "none"
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  raccoon_echo:
+    path: ../plugins/echo

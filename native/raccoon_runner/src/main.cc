@@ -875,7 +875,11 @@ int Serve(const Options& options) {
                options.socket.c_str());
   std::fflush(stdout);
 
-  while (!stop && g_stop == 0) {
+  // One turn of the loop's work: platform tasks, vsync, and what goes to
+  // the client. The loop below takes one between waits; on Windows a
+  // plugin's modal dialog takes them while its own message loop holds
+  // ours (MessagePump).
+  auto Turn = [&]() {
     host.platform().RunDueTasks();
     host.ServiceVsync();
     SendLogs();
@@ -984,6 +988,15 @@ int Serve(const Options& options) {
       std::fprintf(stderr, "raccoon_runner: parent %d is gone; stopping\n", gone);
       stop = true;
     }
+  };
+#if RACCOON_HAS_PLUGINS && defined(_WIN32)
+  if (plugins) plugins->SetModalTurn([&] {
+    Turn();
+    loop.RunOnce(0);
+  });
+#endif
+  while (!stop && g_stop == 0) {
+    Turn();
     loop.RunOnce(NextWait(host, ExpireReplies(1000)));
   }
 

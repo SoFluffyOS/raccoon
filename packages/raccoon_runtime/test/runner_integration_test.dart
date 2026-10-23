@@ -840,6 +840,80 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  // example/plugins_modal animates, then asks the echo plugin for a message
+  // box that closes itself after two seconds.
+  final pluginsModalAssets = p.join(
+    p.dirname(p.dirname(p.dirname(assets))),
+    'plugins_modal',
+    'build',
+    'flutter_assets',
+  );
+  test(
+    'frames keep coming while a plugin\'s modal dialog runs its own loop',
+    () async {
+      // On Windows a modal dialog's message loop holds the runner's until it
+      // closes; the runner takes its turns from a timer meanwhile.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final manifest = File(p.join(temp.path, 'plugins.json'))
+        ..writeAsStringSync(
+          jsonEncode({
+            'plugins': [
+              _pluginEntry('raccoon_echo', pluginLibrary, 'RaccoonEchoPlugin'),
+            ],
+          }),
+        );
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: pluginsModalAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          plugins: manifest.path,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint);
+      var modal = false;
+      var during = 0;
+      final done = Completer<String>();
+      runner.stdout.listen((line) {
+        if (line.contains('MODAL:start')) modal = true;
+        if (line.contains('MODAL:done') || line.contains('MODAL:error')) {
+          modal = false;
+          if (!done.isCompleted) done.complete(line);
+        }
+      });
+      final frames = client.frames.listen((_) {
+        if (modal) during++;
+      });
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        expect(
+          await done.future.timeout(const Duration(seconds: 20)),
+          contains('MODAL:done'),
+        );
+        // Two seconds at 60 Hz are 120 frames; a held loop sends none.
+        expect(during, greaterThan(30));
+      } finally {
+        await frames.cancel();
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        !Platform.isWindows
+            ? 'the modal dialog is the echo plugin\'s on Windows'
+            : ready &&
+                File(pluginLibrary).existsSync() &&
+                Directory(pluginsModalAssets).existsSync()
+            ? false
+            : 'build the runner with plugins and example/plugins_modal first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   test(
     'an FFI plugin\'s framework is opened for Dart and reported loaded',
     () async {
