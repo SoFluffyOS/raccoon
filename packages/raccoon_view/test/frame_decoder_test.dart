@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:fixnum/fixnum.dart';
@@ -37,4 +38,34 @@ void main() {
       ]);
     },
   );
+
+  // #106: what protobuf hands over, a view into the message's bytes.
+  test('decodes pixels that come as a view into a larger buffer', () async {
+    final buffer = Uint8List.fromList([
+      0, 0, 0, 0, // before the frame
+      0xE5, 0x88, 0x1E, 0xFF, 0x35, 0x39, 0xE5, 0xFF,
+    ]);
+    final frame = rc.Frame(
+      sequence: Int64(1),
+      width: 2,
+      height: 1,
+      rowBytes: 8,
+      format: rc.PixelFormat.PIXEL_FORMAT_BGRA8888,
+      pixels: Uint8List.sublistView(buffer, 4),
+    );
+
+    final image = await decodeFrame(frame);
+    final rgba = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+
+    expect(rgba?.buffer.asUint8List(), [
+      0x1E,
+      0x88,
+      0xE5,
+      0xFF,
+      0xE5,
+      0x39,
+      0x35,
+      0xFF,
+    ]);
+  });
 }

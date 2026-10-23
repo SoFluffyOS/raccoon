@@ -11,8 +11,14 @@ Future<ui.Image> decodeFrame(rc.Frame frame) {
     rc.PixelFormat.PIXEL_FORMAT_RGBA8888 => ui.PixelFormat.rgba8888,
     _ => ui.PixelFormat.bgra8888,
   };
+  // decodeImageFromPixels copies the pixels itself; protobuf hands them over
+  // as a Uint8List already, so they go on as they are (#106).
+  final pixels = switch (frame.pixels) {
+    final Uint8List bytes => bytes,
+    final bytes => Uint8List.fromList(bytes),
+  };
   ui.decodeImageFromPixels(
-    Uint8List.fromList(frame.pixels),
+    pixels,
     frame.width,
     frame.height,
     format,
