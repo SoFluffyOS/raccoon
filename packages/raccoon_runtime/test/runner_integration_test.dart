@@ -620,7 +620,8 @@ void main() {
       // A desktop embedding tells its app the host's preferred languages
       // and whether it is dark; the runner does the same after the engine
       // starts. On Linux the locales come from the environment, set here;
-      // on macOS from the user's settings, read here the same way.
+      // on macOS and Windows from the user's settings, read here the same
+      // way.
       final temp = Directory.systemTemp.createTempSync('raccoon_test');
       final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
       final runner = await RunnerProcess.start(
@@ -667,6 +668,18 @@ void main() {
           ]);
           final dark = '${style.stdout}'.trim().toLowerCase() == 'dark';
           expect(output, contains('BRIGHTNESS:${dark ? 'dark' : 'light'}'));
+        } else if (Platform.isWindows) {
+          // The display languages and the app mode, from the user's
+          // settings, as Windows apps read them.
+          expect(locales, isNot('LOCALES:'));
+          final mode = await Process.run('reg', [
+            'query',
+            r'HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize',
+            '/v',
+            'AppsUseLightTheme',
+          ]);
+          final dark = RegExp(r'0x0\b').hasMatch('${mode.stdout}');
+          expect(output, contains('BRIGHTNESS:${dark ? 'dark' : 'light'}'));
         } else {
           expect(locales, 'LOCALES:fr_CA,en');
           expect(output, contains('BRIGHTNESS:light'));
@@ -680,9 +693,7 @@ void main() {
       }
     },
     skip:
-        Platform.isWindows
-            ? 'the host\'s settings are read on macOS and Linux'
-            : ready && Directory(channelsAssets).existsSync()
+        ready && Directory(channelsAssets).existsSync()
             ? false
             : 'build the runner and example/channels first',
     timeout: const Timeout(Duration(minutes: 2)),

@@ -91,6 +91,7 @@ add_executable(raccoon_runner
   src/engine_loader.cc
   src/event_loop.cc
   src/host_settings.cc
+  src/host_settings_win.cc
   src/glib_pump.cc
   src/plugins.cc
   src/plugins_linux.cc

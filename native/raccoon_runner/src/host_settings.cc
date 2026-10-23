@@ -34,7 +34,7 @@ HostLocale ParseLocale(const std::string& tag) {
   return locale;
 }
 
-#if !defined(__APPLE__)
+#if !defined(__APPLE__) && !defined(_WIN32)
 HostSettings ReadHostSettings() {
   HostSettings settings;
   // LANGUAGE is a preference list; the others name one locale, in the order

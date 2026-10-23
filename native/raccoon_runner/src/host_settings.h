@@ -21,8 +21,9 @@ struct HostSettings {
 };
 
 // The host's settings now: on macOS NSLocale's preferred languages, the
-// interface style and the current locale's hour cycle; on Linux the locales
-// of LANGUAGE, LC_ALL, LC_MESSAGES and LANG, light, 12-hour.
+// interface style and the current locale's hour cycle; on Windows the
+// preferred display languages, the app mode and the time format; on Linux
+// the locales of LANGUAGE, LC_ALL, LC_MESSAGES and LANG, light, 12-hour.
 HostSettings ReadHostSettings();
 
 // "en-US", "zh-Hans-CN" or "en_US.UTF-8" in parts; an empty language for
