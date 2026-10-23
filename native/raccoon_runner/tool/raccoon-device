@@ -956,6 +956,12 @@ case "$verb" in
     : > "$log"
     manifest="$APPS/$key/plugins/manifest.json"
     [ -f "$manifest" ] || manifest=""
+    # Without a size of the device's own, the size the board last gave this
+    # app (raccoon_runtime's AppSizes), so it opens as it was left (#89).
+    if [ -z "$SIZE" ] && [ -f "$DATA/$key/size" ]; then
+      saved="$(tr -d '[:space:]' < "$DATA/$key/size")"
+      if [[ "$saved" =~ ^[0-9]+x[0-9]+(@[0-9]+(\.[0-9]+)?)?$ ]]; then SIZE="$saved"; fi
+    fi
     size_args=""
     if [ -n "$SIZE" ]; then
       w="${SIZE%%x*}"; rest="${SIZE#*x}"; h="${rest%%@*}"; r="${rest#*@}"

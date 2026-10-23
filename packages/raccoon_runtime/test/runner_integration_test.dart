@@ -213,6 +213,65 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
   test(
+    'an app starts at the size the board saved for it',
+    () async {
+      // A device that names no size: the helper reads AppSizes, so the app
+      // opens as the board left it (#89).
+      final temp = Directory.systemTemp.createTempSync('raccoon_size');
+      final helper = p.join(runnerDir, 'tool', 'raccoon-device');
+      final data = p.join(temp.path, 'data');
+      final helperEnvironment = {
+        'RACCOON_RUNNER': binary!,
+        if (sdk != null) 'FLUTTER_ROOT': sdk,
+        'XDG_DATA_HOME': data,
+        'XDG_RUNTIME_DIR': temp.path,
+        'TMPDIR': '${temp.path}/',
+      };
+      final install = await Process.run(helper, [
+        'install',
+        assets,
+        'saved',
+      ], environment: helperEnvironment);
+      expect(install.exitCode, 0, reason: '${install.stderr}');
+      AppSizes.forHost(
+        helperEnvironment,
+      ).save('saved', width: 200, height: 150, pixelRatio: 2);
+      final run = await Process.start(helper, [
+        'run',
+        'saved',
+      ], environment: helperEnvironment);
+      final socket = File(p.join(temp.path, 'raccoon', 'saved.sock'));
+      try {
+        final deadline = DateTime.now().add(const Duration(seconds: 30));
+        while (!socket.existsSync() && DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        final client = await RunnerClient.connect(
+          UnixSocketEndpoint(socket.path),
+        );
+        try {
+          final frame = await client.frames.first.timeout(
+            const Duration(seconds: 15),
+          );
+          expect((frame.width, frame.height), (400, 300));
+        } finally {
+          client.shutdown();
+          await client.close();
+        }
+      } finally {
+        run.kill();
+        await run.exitCode;
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((ready, Platform.isWindows)) {
+      (false, _) => 'build the runner and example first',
+      (_, true) => 'the helper runs in Git Bash on Windows',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+  test(
     'on macOS a plugin whose pod needs a cached plugin\'s pod builds',
     () async {
       // plugin_b's pod depends on plugin_a's. The first install builds and

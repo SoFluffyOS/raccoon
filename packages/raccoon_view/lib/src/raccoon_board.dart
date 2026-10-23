@@ -85,16 +85,20 @@ final class RaccoonBoardFrame {
     return '${size.width.round()} × ${size.height.round()} · ${ratio}x';
   }
 
-  /// What the frame's title says: `Raccoon Tablet · wonders · 820 × 1180 · 2x`.
-  String get title => '$device · $project · $label';
+  /// What the frame's title says: `Raccoon Tablet · wonders`. The size has
+  /// a chip of its own beside it.
+  String get title => '$device · $project';
 
-  RaccoonBoardFrame copyWith({Offset? position, Size? size}) =>
-      RaccoonBoardFrame(
-        name: name,
-        position: position ?? this.position,
-        size: size ?? this.size,
-        pixelRatio: pixelRatio,
-      );
+  RaccoonBoardFrame copyWith({
+    Offset? position,
+    Size? size,
+    double? pixelRatio,
+  }) => RaccoonBoardFrame(
+    name: name,
+    position: position ?? this.position,
+    size: size ?? this.size,
+    pixelRatio: pixelRatio ?? this.pixelRatio,
+  );
 
   Map<String, Object?> toJson() => {
     'name': name,
@@ -110,11 +114,18 @@ final class RaccoonBoardFrame {
 /// between launches: [toJson] after [didChange], [replaceAll] with
 /// [parse]'s frames on load.
 class RaccoonBoardLayout extends ChangeNotifier {
-  RaccoonBoardLayout({Iterable<RaccoonBoardFrame> frames = const []}) {
+  RaccoonBoardLayout({
+    Iterable<RaccoonBoardFrame> frames = const [],
+    this.sizes,
+  }) {
     for (final frame in frames) {
       _frames[frame.name] = frame;
     }
   }
+
+  /// Where an app's size is kept for its next run, so it starts as the
+  /// board left it (#89); null keeps none.
+  final AppSizes? sizes;
 
   final _frames = <String, RaccoonBoardFrame>{};
 
@@ -150,6 +161,31 @@ class RaccoonBoardLayout extends ChangeNotifier {
     _frames[name] = frame.copyWith(size: clamped);
     notifyListeners();
     didChange();
+  }
+
+  /// Gives the frame a device's size and pixel ratio, as the size menu does,
+  /// and keeps it for the app's next run.
+  void setSize(String name, Size size, double pixelRatio) {
+    final frame = _frames[name];
+    if (frame == null) return;
+    _frames[name] = frame.copyWith(size: size, pixelRatio: pixelRatio);
+    notifyListeners();
+    didChange();
+    saveSize(name);
+  }
+
+  /// Keeps the frame's size for the app's next run, in [sizes]; the board
+  /// calls it once a resize ends.
+  void saveSize(String name) {
+    final frame = _frames[name];
+    final sizes = this.sizes;
+    if (frame == null || sizes == null) return;
+    sizes.save(
+      name,
+      width: frame.size.width.round(),
+      height: frame.size.height.round(),
+      pixelRatio: frame.pixelRatio,
+    );
   }
 
   /// Takes a saved layout's frames in place of the current ones.
@@ -205,8 +241,11 @@ final class RaccoonBoardSession {
 /// pans, Ctrl (or Cmd) and scroll zooms about the pointer, dragging the
 /// empty board pans.
 ///
-/// Hosts pass their own ink colour and title style, and what to show while
-/// nothing runs.
+/// Each frame's title carries its size; tap it for the devices' sizes. The
+/// app resizes as it is picked, and starts at it next time.
+///
+/// Hosts pass their own ink colour, title style and menu colour, and what
+/// to show while nothing runs.
 class RaccoonBoard extends StatefulWidget {
   const RaccoonBoard({
     super.key,
@@ -214,6 +253,7 @@ class RaccoonBoard extends StatefulWidget {
     required this.layout,
     this.ink = const Color(0xFF808080),
     this.titleStyle,
+    this.menuColor = const Color(0xFF242424),
     this.empty,
     this.spacing = 24,
   });
@@ -228,6 +268,9 @@ class RaccoonBoard extends StatefulWidget {
   /// The titles' style; the colour comes from [ink] unless given.
   final TextStyle? titleStyle;
 
+  /// The size menu's fill.
+  final Color menuColor;
+
   /// Shown in the middle while there is no session.
   final Widget? empty;
 
@@ -241,6 +284,9 @@ class RaccoonBoard extends StatefulWidget {
       ValueKey('board-resize-$name');
   static ValueKey<String> closeKey(String name) =>
       ValueKey('board-close-$name');
+  static ValueKey<String> sizeKey(String name) => ValueKey('board-size-$name');
+  static ValueKey<String> sizeOptionKey(String name, String device) =>
+      ValueKey('board-size-$name-$device');
 
   static const titleHeight = 28.0;
   static const handleSize = 16.0;
@@ -258,6 +304,13 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
   Offset _pan = Offset.zero;
   double _zoom = 1;
   bool _altHeld = false;
+
+  /// The session whose size menu is open, if any.
+  String? _sizeMenu;
+
+  /// The chip and its menu tap as one: a tap on the chip doesn't close the
+  /// menu as a tap outside it, only to open it again.
+  static String _sizeGroup(String name) => 'raccoon-board-size-$name';
 
   @override
   void initState() {
@@ -410,6 +463,28 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    TapRegion(
+                      groupId: _sizeGroup(session.name),
+                      child: GestureDetector(
+                        key: RaccoonBoard.sizeKey(session.name),
+                        onTap:
+                            () => setState(
+                              () =>
+                                  _sizeMenu = switch (_sizeMenu ==
+                                      session.name) {
+                                    true => null,
+                                    false => session.name,
+                                  },
+                            ),
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            child: Text('${frame.label} ▾', style: titleStyle),
+                          ),
+                        ),
+                      ),
+                    ),
                     if (session.onClose case final onClose?)
                       GestureDetector(
                         key: RaccoonBoard.closeKey(session.name),
@@ -465,6 +540,7 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
                     behavior: HitTestBehavior.opaque,
                     dragStartBehavior: DragStartBehavior.down,
                     onPanUpdate: (details) => resizeBy(details.delta),
+                    onPanEnd: (_) => widget.layout.saveSize(session.name),
                     child: MouseRegion(
                       cursor: SystemMouseCursors.resizeDownRight,
                       child: CustomPaint(
@@ -474,6 +550,32 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
                     ),
                   ),
                 ),
+                if (_sizeMenu == session.name)
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: TapRegion(
+                      groupId: _sizeGroup(session.name),
+                      onTapOutside: (_) => setState(() => _sizeMenu = null),
+                      child: _SizeMenu(
+                        name: session.name,
+                        current: frame,
+                        color: widget.menuColor,
+                        style: titleStyle,
+                        onPick: (device) {
+                          setState(() => _sizeMenu = null);
+                          widget.layout.setSize(
+                            session.name,
+                            Size(
+                              device.width!.toDouble(),
+                              device.height!.toDouble(),
+                            ),
+                            device.pixelRatio ?? 1,
+                          );
+                        },
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -481,6 +583,71 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
       ),
     );
   }
+}
+
+/// The devices' sizes for a frame, the current one marked.
+class _SizeMenu extends StatelessWidget {
+  const _SizeMenu({
+    required this.name,
+    required this.current,
+    required this.color,
+    required this.style,
+    required this.onPick,
+  });
+
+  final String name;
+  final RaccoonBoardFrame current;
+  final Color color;
+  final TextStyle style;
+  final ValueChanged<RaccoonDevice> onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: color,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: IntrinsicWidth(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final device in RaccoonDevice.presets)
+                GestureDetector(
+                  key: RaccoonBoard.sizeOptionKey(name, device.key),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => onPick(device),
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      child: Text(
+                        '${_isCurrent(device) ? '✓ ' : '   '}'
+                        '${device.label.replaceFirst('Raccoon ', '')}  '
+                        '${device.width} × ${device.height} · '
+                        '${_ratio(device.pixelRatio ?? 1)}x',
+                        style: style,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  bool _isCurrent(RaccoonDevice device) =>
+      current.size.width == device.width &&
+      current.size.height == device.height &&
+      current.pixelRatio == (device.pixelRatio ?? 1);
+
+  static String _ratio(double ratio) =>
+      ratio == ratio.roundToDouble() ? '${ratio.round()}' : '$ratio';
 }
 
 /// The grid in screen space: it moves with the pan and spreads with the

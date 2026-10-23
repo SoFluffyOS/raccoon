@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
@@ -44,7 +45,8 @@ void main() {
       expect(frame.pixelRatio, 2);
       expect(frame.device, 'Raccoon Tablet');
       expect(frame.project, 'wonders');
-      expect(frame.title, 'Raccoon Tablet · wonders · 820 × 1180 · 2x');
+      expect(frame.title, 'Raccoon Tablet · wonders');
+      expect(frame.label, '820 × 1180 · 2x');
     });
 
     test('a plain name gets a phone-sized frame', () {
@@ -192,15 +194,69 @@ void main() {
         height: 2360,
         pixelRatio: 2.0,
       ));
-      expect(find.text('Raccoon · counter · 390 × 844 · 2x'), findsOneWidget);
-      expect(
-        find.text('Raccoon Tablet · wonders · 820 × 1180 · 2x'),
-        findsOneWidget,
-      );
+      expect(find.text('Raccoon · counter'), findsOneWidget);
+      expect(find.text('390 × 844 · 2x ▾'), findsOneWidget);
+      expect(find.text('Raccoon Tablet · wonders'), findsOneWidget);
       final first = tester.getTopLeft(find.byType(RaccoonView).first);
       final second = tester.getTopLeft(find.byType(RaccoonView).last);
       expect(second.dx, first.dx + 390 + RaccoonBoardFrame.gap);
       expect(second.dy, first.dy);
+    });
+
+    testWidgets('the size chip picks a device size, live and for next time', (
+      tester,
+    ) async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_board');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      layout = RaccoonBoardLayout(sizes: AppSizes(temp.path));
+      final connections = await pumpBoard(tester, ['counter']);
+
+      await tester.tap(find.byKey(RaccoonBoard.sizeKey('counter')));
+      await tester.pump();
+      expect(
+        find.byKey(RaccoonBoard.sizeOptionKey('counter', 'tablet')),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(RaccoonBoard.sizeOptionKey('counter', 'tablet')),
+      );
+      await tester.pump();
+
+      expect(layout.frameFor('counter').size, const Size(820, 1180));
+      expect(layout.frameFor('counter').pixelRatio, 2);
+      expect(connections['counter']!.resizes.last, (
+        width: 1640,
+        height: 2360,
+        pixelRatio: 2.0,
+      ));
+      expect(find.text('820 × 1180 · 2x ▾'), findsOneWidget);
+      expect(
+        find.byKey(RaccoonBoard.sizeOptionKey('counter', 'tablet')),
+        findsNothing,
+      );
+      expect(AppSizes(temp.path).read('counter'), (
+        width: 820,
+        height: 1180,
+        pixelRatio: 2.0,
+      ));
+    });
+
+    testWidgets('a resize by the handle is kept for next time', (tester) async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_board');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      layout = RaccoonBoardLayout(sizes: AppSizes(temp.path));
+      await pumpBoard(tester, ['counter']);
+      await tester.drag(
+        find.byKey(RaccoonBoard.resizeKey('counter')),
+        const Offset(100, 50),
+      );
+      await tester.pump();
+      final size = layout.frameFor('counter').size;
+      expect(AppSizes(temp.path).read('counter'), (
+        width: size.width.round(),
+        height: size.height.round(),
+        pixelRatio: 2.0,
+      ));
     });
 
     testWidgets('dragging the title moves the frame', (tester) async {

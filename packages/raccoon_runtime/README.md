@@ -21,14 +21,19 @@ each channel belongs to when the plugin report says it cannot work here.
 It waits a moment for a frame (`startupGrace`), and once a frame arrives it
 stays null: from then on the app's own error handling rules.
 
-The devices `raccoon_device setup` registers with the Flutter tool, each a
-custom device the helper keeps apart by an instance key (`RaccoonDevice`):
-`raccoon` (the host's own size), `raccoon-2` (a second run of the same
-project), and the sized ones that start the runner at their logical size
-and pixel ratio, `raccoon-phone` (390×844 @3x), `raccoon-tablet`
-(820×1180 @2x) and `raccoon-desktop` (1280×800 @1x). `flutter run -d
-raccoon-tablet` runs a project on the tablet; a host that shows the app
-opens it at that size.
+`raccoon_device setup` registers one device with the Flutter tool,
+`raccoon`. The size belongs to the run, not the device: a host's board
+picks it (Phone, Tablet, Desktop, or the frame dragged to any size), the
+app resizes live, and `AppSizes` keeps it so the next run starts there.
+
+More devices are only for running copies side by side, since the Flutter
+tool runs a project once per device. `raccoon_device add
+phone|tablet|desktop|<name>` adds one, each a custom device the helper keeps
+apart by an instance key (`RaccoonDevice`): `raccoon-2` (a second run of the
+same project), and the sized ones that start at their logical size and pixel
+ratio, `raccoon-phone` (390×844 @3x), `raccoon-tablet` (820×1180 @2x) and
+`raccoon-desktop` (1280×800 @1x). `raccoon_device remove <name>` takes one
+away.
 
 The same holds on Linux, macOS and Windows. On every host the runner is
 reached through a Unix socket in the host's socket folder, which
