@@ -1,5 +1,7 @@
 #include "camera_source.h"
 
+#include "camera_recorder.h"
+
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -49,6 +51,12 @@ std::unique_ptr<CameraSource> OpenCameraSource(const std::string& path, std::str
 #if !defined(_WIN32)
 std::unique_ptr<CameraSource> OpenCameraVideo(const std::string&, std::string* error) {
   *error = "videos play on Windows only for now; give a PNG or JPEG";
+  return nullptr;
+}
+
+std::unique_ptr<CameraRecorder> StartCameraRecorder(const std::string&, size_t, size_t, int,
+                                                    std::string* error) {
+  *error = "Raccoon's camera records video on Windows only for now";
   return nullptr;
 }
 #endif

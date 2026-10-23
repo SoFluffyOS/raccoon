@@ -213,6 +213,10 @@ CodecValue CameraChannels::Call(const MethodCall& call, bool* known, std::string
     if (Camera* camera = Find(args)) StopPreview(id, *camera);
     cameras_.erase(id);
     if (id == stream_camera_) streaming_ = false;
+    if (recording_ && recording_->camera == id) {
+      std::string ignored;
+      FinishRecording(&ignored);
+    }
     return CodecValue();
   }
   if (method == "takePicture") return TakePicture(args.Get("cameraId").int_value(), error);
@@ -230,8 +234,19 @@ CodecValue CameraChannels::Call(const MethodCall& call, bool* known, std::string
     return CodecValue();
   }
   if (method == "prepareForVideoRecording") return CodecValue();
-  if (method == "startVideoRecording" || method == "setDescriptionWhileRecording") {
-    *error = "unsupported: Raccoon's test camera records no video yet";
+  if (method == "startVideoRecording") return StartRecording(args, error);
+  if (method == "stopVideoRecording") return StopRecording(error);
+  if (method == "pauseVideoRecording" || method == "resumeVideoRecording") {
+    const bool pause = method == "pauseVideoRecording";
+    if (recording_ && recording_->paused != pause) {
+      if (pause) recording_->paused_at_micros = Now();
+      if (!pause) recording_->paused_micros += Now() - recording_->paused_at_micros;
+      recording_->paused = pause;
+    }
+    return CodecValue();
+  }
+  if (method == "setDescriptionWhileRecording") {
+    *error = "unsupported: Raccoon's camera can't switch cameras while recording";
     return CodecValue();
   }
   if (method == "setJpegImageQuality") {
@@ -289,25 +304,85 @@ CodecValue CameraChannels::TakePicture(int64_t id, std::string* error) {
     return CodecValue();
   }
   const Camera& camera = found->second;
-  const std::vector<uint8_t> pixels = Frame(camera.width, camera.height, now_micros_);
+  const std::vector<uint8_t> pixels = Frame(camera.width, camera.height, Now());
   const std::vector<uint8_t> jpeg =
       EncodeJpeg(pixels.data(), camera.width, camera.height, camera.width * 4, jpeg_quality_);
+  const std::string path = NewFilePath(".jpg");
+  std::ofstream file(std::filesystem::u8path(path), std::ios::binary | std::ios::trunc);
+  file.write(reinterpret_cast<const char*>(jpeg.data()), static_cast<std::streamsize>(jpeg.size()));
+  file.close();
+  if (!file) {
+    *error = "IOError: could not write " + path;
+    return CodecValue();
+  }
+  return CodecValue::String(path);
+}
+
+std::string CameraChannels::NewFilePath(const char* extension) {
   std::error_code code;
   const std::filesystem::path directory = pictures_.empty()
                                               ? std::filesystem::temp_directory_path(code)
                                               : std::filesystem::u8path(pictures_);
   std::filesystem::create_directories(directory, code);
-  const std::filesystem::path path =
-      directory / ("raccoon_camera_" + std::to_string(ProcessId()) + "_" +
-                   std::to_string(++pictures_taken_) + ".jpg");
-  std::ofstream file(path, std::ios::binary | std::ios::trunc);
-  file.write(reinterpret_cast<const char*>(jpeg.data()), static_cast<std::streamsize>(jpeg.size()));
-  file.close();
-  if (!file) {
-    *error = "IOError: could not write " + path.u8string();
+  return (directory / ("raccoon_camera_" + std::to_string(ProcessId()) + "_" +
+                       std::to_string(++pictures_taken_) + extension))
+      .u8string();
+}
+
+CodecValue CameraChannels::StartRecording(const CodecValue& args, std::string* error) {
+  const int64_t id = args.Get("cameraId").int_value();
+  const auto found = cameras_.find(id);
+  if (found == cameras_.end() || !found->second.initialized) {
+    *error = "CameraNotInitialized: the camera is not initialized";
     return CodecValue();
   }
-  return CodecValue::String(path.u8string());
+  if (recording_) {
+    *error = "videoRecordingFailed: a recording is already under way";
+    return CodecValue();
+  }
+  const Camera& camera = found->second;
+  const CodecValue& output = args.Get("videoOutputPath");
+  const std::string path = output.type() == CodecValue::Type::kString ? output.string_value()
+                                                                      : NewFilePath(".mp4");
+  std::string why;
+  std::unique_ptr<CameraRecorder> recorder =
+      StartCameraRecorder(path, camera.width, camera.height, camera.fps, &why);
+  if (!recorder) {
+    *error = "videoRecordingFailed: " + why;
+    return CodecValue();
+  }
+  recording_ = std::make_unique<Recording>();
+  recording_->camera = id;
+  recording_->recorder = std::move(recorder);
+  recording_->path = path;
+  recording_->started_micros = Now();
+  recording_->next_frame_micros = recording_->started_micros;
+  if (args.Get("enableStream").bool_value()) {
+    stream_camera_ = id;
+    streaming_ = true;
+    next_frame_micros_ = 0;
+  }
+  return CodecValue();
+}
+
+CodecValue CameraChannels::StopRecording(std::string* error) {
+  if (!recording_) {
+    *error = "videoRecordingFailed: no recording under way";
+    return CodecValue();
+  }
+  const std::string path = FinishRecording(error);
+  if (path.empty()) return CodecValue();
+  return CodecValue::String(path);
+}
+
+std::string CameraChannels::FinishRecording(std::string* error) {
+  std::unique_ptr<Recording> recording = std::move(recording_);
+  std::string why;
+  if (!recording->recorder->Finish(&why)) {
+    *error = "videoRecordingFailed: " + why;
+    return std::string();
+  }
+  return recording->path;
 }
 
 CodecValue CameraChannels::StreamFrame(const Camera& camera, uint64_t now_micros) {
@@ -374,11 +449,11 @@ CodecValue CameraChannels::StreamFrame(const Camera& camera, uint64_t now_micros
 }
 
 void CameraChannels::Service(uint64_t now_micros) {
-  now_micros_ = now_micros;
   if (!send_) return;
   for (auto& [channel, message] : pending_) send_(channel, std::move(message));
   pending_.clear();
   for (auto& [id, camera] : cameras_) ServicePreview(id, camera, now_micros);
+  ServiceRecording(now_micros);
   if (!streaming_ || !listening_) return;
   const auto found = cameras_.find(stream_camera_);
   if (found == cameras_.end()) return;
@@ -420,6 +495,18 @@ std::shared_ptr<const CameraChannels::Preview> CameraChannels::PreviewOf(int64_t
   return found == previews_.end() ? nullptr : found->second;
 }
 
+void CameraChannels::ServiceRecording(uint64_t now_micros) {
+  if (!recording_ || recording_->paused || now_micros < recording_->next_frame_micros) return;
+  const auto found = cameras_.find(recording_->camera);
+  if (found == cameras_.end()) return;
+  const Camera& camera = found->second;
+  const uint64_t elapsed = now_micros - recording_->started_micros - recording_->paused_micros;
+  recording_->next_frame_micros = NextDue(recording_->next_frame_micros, now_micros,
+                                          1000000 / static_cast<uint64_t>(camera.fps));
+  const std::vector<uint8_t> pixels = Frame(camera.width, camera.height, now_micros);
+  recording_->recorder->Write(pixels.data(), elapsed);
+}
+
 int CameraChannels::MillisUntilDue(uint64_t now_micros) const {
   if (!pending_.empty()) return 0;
   uint64_t due = std::numeric_limits<uint64_t>::max();
@@ -429,6 +516,7 @@ int CameraChannels::MillisUntilDue(uint64_t now_micros) const {
   if (streaming_ && listening_ && cameras_.count(stream_camera_) != 0) {
     due = std::min(due, next_frame_micros_);
   }
+  if (recording_ && !recording_->paused) due = std::min(due, recording_->next_frame_micros);
   if (due == std::numeric_limits<uint64_t>::max()) return -1;
   if (due <= now_micros) return 0;
   return static_cast<int>((due - now_micros + 999) / 1000);

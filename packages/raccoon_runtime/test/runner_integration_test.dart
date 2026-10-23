@@ -1278,6 +1278,13 @@ void main() {
     'build',
     'flutter_assets',
   );
+  // raccoon_test_video writes a third of a second of H.264, red and green
+  // over blue and yellow, the same in every frame; with --probe it says what
+  // a video holds.
+  final testVideo = switch (binary) {
+    final binary? => p.join(p.dirname(binary), 'raccoon_test_video.exe'),
+    null => '',
+  };
   test(
     'the runner answers the camera plugin from a test pattern',
     () async {
@@ -1349,6 +1356,31 @@ void main() {
           lines,
           contains(startsWith('stream jpeg planes=1 raw=256 bars ok')),
         );
+        // 600 ms recorded, 400 paused, 400 more: a second of video on
+        // Windows, the pattern in it; refused elsewhere.
+        final video = lines.firstWhere((l) => l.startsWith('video '));
+        if (Platform.isWindows) {
+          final path = video.substring('video '.length);
+          final probe = await Process.run(testVideo, ['--probe', path]);
+          final held = RegExp(
+            r'frames=(\d+) size=(\S+) duration_ms=(\d+) left=(\S+) right=(\S+)',
+          ).firstMatch('${probe.stdout}');
+          expect(held, isNotNull, reason: '${probe.stdout}${probe.stderr}');
+          expect(int.parse(held?[1] ?? '0'), inInclusiveRange(25, 36));
+          expect(held?[2], '352x288');
+          expect(int.parse(held?[3] ?? '0'), inInclusiveRange(850, 1250));
+          final left = (held?[4] ?? '').split(',').map(int.parse);
+          final right = (held?[5] ?? '').split(',').map(int.parse).toList();
+          expect(left.every((c) => c > 230), isTrue, reason: 'left $left');
+          expect(
+            right[0] < 30 && right[1] < 30 && right[2] > 220,
+            isTrue,
+            reason: 'right $right',
+          );
+          File(path).deleteSync();
+        } else {
+          expect(video, 'video refused videoRecordingFailed');
+        }
         expect(lines.last, 'done');
         expect(forwarded, isEmpty);
       } finally {
@@ -1441,13 +1473,6 @@ void main() {
             : 'build the runner and example/camera first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
-
-  // raccoon_test_video writes a third of a second of H.264: red and green
-  // over blue and yellow, the same in every frame.
-  final testVideo = switch (binary) {
-    final binary? => p.join(p.dirname(binary), 'raccoon_test_video.exe'),
-    null => '',
-  };
 
   /// Runs example/camera with [source] as the camera's source; its CAMERA:
   /// lines.

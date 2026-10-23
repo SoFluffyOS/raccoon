@@ -8,10 +8,11 @@
 // cameras (one back, one front), pictures (the current frame as a JPEG in
 // the temp directory) and image streams (frames in the format the app asked
 // for). The camera sees a test pattern, or a picture or video given as its
-// source. A camera's 'initialized' event and the stream's frames go to the app
-// from the loop, through Service. The preview is a Texture by camera id,
-// filled through the renderer's external textures when it has them; video
-// recording is refused.
+// source. Video recordings encode what it shows to an MP4, on Windows (see
+// camera_recorder.h). A camera's events and the stream's and recording's
+// frames go out from the loop, through Service. The preview is a Texture by
+// camera id, filled through the renderer's external textures when it has
+// them.
 //
 // Channels: plugins.flutter.io/camera, plugins.flutter.io/camera/imageStream
 // (the event channel's listen and cancel).
@@ -26,6 +27,7 @@
 #include <utility>
 #include <vector>
 
+#include "camera_recorder.h"
 #include "camera_source.h"
 #include "standard_codec.h"
 
@@ -34,6 +36,9 @@ namespace raccoon {
 class CameraChannels {
  public:
   using Send = std::function<void(const std::string& channel, std::vector<uint8_t> message)>;
+
+  // Microseconds on the engine's clock, which Service is given too.
+  using Clock = std::function<uint64_t()>;
 
   // Where messages to the app go, from Service.
   void SetSend(Send send) { send_ = std::move(send); }
@@ -58,6 +63,9 @@ class CameraChannels {
 
   // Where previews go; without, a camera has none.
   void SetTextures(Textures textures) { textures_ = std::move(textures); }
+  // What time it is when a call comes: a recording paused or started, a
+  // picture taken.
+  void SetClock(Clock clock) { clock_ = std::move(clock); }
   // Where pictures go; the system's temp directory until set.
   void SetPictureDirectory(std::string directory) { pictures_ = std::move(directory); }
   // Shows the PNG, JPEG or video at |path| in place of the test pattern;
@@ -106,12 +114,22 @@ class CameraChannels {
   CodecValue Call(const MethodCall& call, bool* known, std::string* error);
   CodecValue Create(const CodecValue& args);
   CodecValue TakePicture(int64_t id, std::string* error);
+  CodecValue StartRecording(const CodecValue& args, std::string* error);
+  CodecValue StopRecording(std::string* error);
+  // Writes the recording's next frame when it is due.
+  void ServiceRecording(uint64_t now_micros);
+  // Ends the recording and returns its path; empty with |error| set when it
+  // could not be finished.
+  std::string FinishRecording(std::string* error);
+  // A new file for |extension| in the pictures' directory.
+  std::string NewFilePath(const char* extension);
   // The stream's frame at |now_micros| in its camera's format.
   CodecValue StreamFrame(const Camera& camera, uint64_t now_micros);
   Camera* Find(const CodecValue& args);
   // Makes camera |id|'s preview at |now_micros| when one is due.
   void ServicePreview(int64_t id, Camera& camera, uint64_t now_micros);
   void StopPreview(int64_t id, Camera& camera);
+  uint64_t Now() const { return clock_ ? clock_() : 0; }
 
   Send send_;
   std::string pictures_;
@@ -127,6 +145,19 @@ class CameraChannels {
   std::map<int64_t, std::shared_ptr<const Preview>> previews_;
   uint64_t previews_made_ = 0;
   uint64_t pictures_taken_ = 0;
+  // The recording under way: the camera's frames into |recorder|, on a grid
+  // at the camera's fps, its times less the time spent paused.
+  struct Recording {
+    int64_t camera = 0;
+    std::unique_ptr<CameraRecorder> recorder;
+    std::string path;
+    uint64_t started_micros = 0;
+    uint64_t paused_micros = 0;
+    uint64_t paused_at_micros = 0;
+    bool paused = false;
+    uint64_t next_frame_micros = 0;
+  };
+  std::unique_ptr<Recording> recording_;
   int jpeg_quality_ = 90;
   std::map<int64_t, Camera> cameras_;
   // Messages for the app, channel and bytes, sent on the next Service.
@@ -137,8 +168,7 @@ class CameraChannels {
   bool listening_ = false;
   int64_t stream_camera_ = 0;
   uint64_t next_frame_micros_ = 0;
-  // The clock the pattern moves by: microseconds since the first call.
-  uint64_t now_micros_ = 0;
+  Clock clock_;
 };
 
 }  // namespace raccoon

@@ -49,7 +49,10 @@ Design notes: `docs/internal_docs/raccoon/`.
   `RACCOON_CAMERA_SOURCE=qr.png flutter run -d raccoon`. `takePicture` writes the
   current frame as a JPEG to the temp directory. Image streams run at up to
   30 fps, as I420 (`yuv420`), BGRA (`bgra8888`, the default) or JPEG.
-  Video recording is refused for now. The preview is a `Texture` by camera
+  On Windows, video recordings encode what the camera shows to an H.264 MP4
+  with Media Foundation, at the camera's size and fps. Pause and resume
+  leave the paused time out, and `enableStream` streams while recording.
+  Other hosts refuse to record for now. The preview is a `Texture` by camera
   id, filled at the camera's frame rate through the GL or Metal renderer's
   external textures. It is the camera's size turned to portrait (288×352
   for `low`), because `CameraPreview` draws a portrait box while the device
@@ -61,7 +64,8 @@ Design notes: `docs/internal_docs/raccoon/`.
   implementation reports no streaming. `CameraPlatform.instance.
   onStreamedFrameAvailable` streams without that check. `example/camera`
   takes a picture and streams each format: 352×288 frames at 30.0 fps,
-  each format's colours checked.
+  each format's colours checked. It then records 600 ms, pauses for 400 ms
+  and records 400 ms more, which gives 31 frames and 1033 ms of video.
 - Tells the app the host's locales and appearance after the engine starts,
   as a desktop embedding does: on macOS the preferred languages, light or
   dark, and the locale's 12- or 24-hour clock; on Linux the locales of

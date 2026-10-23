@@ -42,6 +42,7 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
                    source.c_str(), why.c_str());
     }
   }
+  camera_.SetClock([this] { return NowMicros(); });
   camera_.SetSend([this](const std::string& channel, std::vector<uint8_t> message) {
     SendPlatformMessage(channel, message.data(), message.size());
   });

@@ -7,13 +7,13 @@ import 'package:camera_platform_interface/camera_platform_interface.dart';
 import 'package:flutter/widgets.dart';
 
 /// Uses the camera plugin as an app does, against the runner's test camera:
-/// lists the cameras, takes a picture and decodes it, then streams frames in
-/// each format. The test pattern's top three quarters are colour bars, white
-/// first and blue last, so a picture or a frame is checked by its colour at
-/// those two places; a picture given as the source is reported by its colours
-/// there. Shows the preview meanwhile, paused while the first stream's rate
-/// is measured. Prints a CAMERA: line per step, then CAMERA:done, or
-/// CAMERA:error and why.
+/// lists the cameras, takes a picture and decodes it, streams frames in
+/// each format, then records a video. The test pattern's top three quarters
+/// are colour bars, white first and blue last, so a picture or a frame is
+/// checked by its colour at those two places; a picture given as the source
+/// is reported by its colours there. Shows the preview meanwhile, paused
+/// while the first stream's rate is measured. Prints a CAMERA: line per
+/// step, then CAMERA:done, or CAMERA:error and why.
 ///
 /// Frames are streamed through the platform interface: the method channel
 /// implementation says it does not stream, so CameraController's
@@ -82,6 +82,28 @@ Future<void> main() async {
       );
       await other.dispose();
     }
+
+    // A recording of 600 ms, a 400 ms pause, then 400 ms more: a second of
+    // video where the runner records, and why not elsewhere.
+    final recorder = CameraController(
+      cameras.first,
+      ResolutionPreset.low,
+      enableAudio: false,
+    );
+    await recorder.initialize();
+    try {
+      await recorder.startVideoRecording();
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      await recorder.pauseVideoRecording();
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      await recorder.resumeVideoRecording();
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      final video = await recorder.stopVideoRecording();
+      _say('video ${video.path}');
+    } on CameraException catch (error) {
+      _say('video refused ${error.code}');
+    }
+    await recorder.dispose();
     _say('done');
   } catch (error) {
     _say('error $error');
