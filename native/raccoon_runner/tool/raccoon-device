@@ -972,7 +972,7 @@ for path in (config, os.path.join(project, 'pubspec.lock'), os.path.join(project
              os.path.join(root_project, 'pubspec.lock'), os.path.join(root_project, 'pubspec.yaml'),
              os.path.join(sdk, 'bin', 'cache', 'engine.stamp')):
     if os.path.isfile(path):
-        digest.update(path.encode())
+        digest.update(path.encode('utf-8', 'surrogateescape'))
         digest.update(open(path, 'rb').read())
 roots = {}
 for package in json.load(open(config)).get('packages', []):
@@ -1008,13 +1008,18 @@ for name in sorted(scanned):
     seen = set()
     for directory, names, files in os.walk(root, followlinks=True):
         real = os.path.realpath(directory)
-        if real in seen:
+        if real in seen or (directory != root and real.startswith(immutable)):
             names[:] = []
             continue
         seen.add(real)
-        # The package's own build output and tool state; .git anywhere.
+        # Left out: hidden folders (.dart_tool, .git, .fvm), the package's
+        # own build output, and packages nested in it, such as an example
+        # app, whose build output changes with every run.
         top = directory == root
-        names[:] = sorted(n for n in names if n != '.git' and not (top and n in ('.dart_tool', 'build')))
+        names[:] = sorted(
+            n for n in names
+            if not n.startswith('.') and not (top and n == 'build')
+            and not os.path.isfile(os.path.join(directory, n, 'pubspec.yaml')))
         for file in sorted(files):
             path = os.path.join(directory, file)
             try:

@@ -428,6 +428,28 @@ void main() {
           nested.parent.deleteSync(recursive: true);
         }
 
+        // A package nested in the hook package, as an example app is, with
+        // build output and tool state that change on every run: not inputs.
+        final example = Directory(
+          p.join(runnerDir, 'example', 'native_add', 'example_probe'),
+        );
+        File(p.join(example.path, 'pubspec.yaml'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('name: example_probe\n');
+        try {
+          await install();
+          expect(await install(), contains('unchanged'));
+          File(p.join(example.path, 'build', 'out'))
+            ..createSync(recursive: true)
+            ..writeAsStringSync('${DateTime.now()}');
+          File(p.join(example.path, '.dart_tool', 'state'))
+            ..createSync(recursive: true)
+            ..writeAsStringSync('${DateTime.now()}');
+          expect(await install(), contains('unchanged'));
+        } finally {
+          example.deleteSync(recursive: true);
+        }
+
         // A folder linked into the package counts through the link.
         final outside = Directory(p.join(temp.path, 'linked_sources'))
           ..createSync();
