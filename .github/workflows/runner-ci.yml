@@ -17,6 +17,11 @@ on:
       - 'packages/raccoon_runtime/**'
       - '.github/workflows/runner-ci.yml'
 
+# A newer push to the same branch or PR cancels the run it replaces.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   FLUTTER_VERSION: 3.47.7
   PROTOC_VERSION: "21.12"
@@ -57,6 +62,24 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v5
+
+      # The plugin prebuild takes minutes (six on macOS x64) and only checks
+      # that the release's plugins still build, so it runs when what they
+      # build with changed. A base we can't fetch runs it. The release
+      # workflow always does.
+      - name: Check what the plugin prebuild depends on
+        id: plugins
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          changed=true
+          if git fetch -q --depth=1 origin "$BASE" 2>/dev/null; then
+            files="$(git diff --name-only "$BASE" HEAD -- tool/raccoon-device tool/engine_dir.sh \
+              tool/package_scope.dart tool/plugins_windows.dart tool/plugins third_party VERSION \
+              ../../.github/workflows/runner-ci.yml)"
+            [ -n "$files" ] || changed=false
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
 
       - name: Install CMake and Ninja
         if: runner.os == 'Linux'
@@ -114,7 +137,7 @@ jobs:
       # Libraries on Linux, frameworks on macOS: at least one, or it fails.
       # No native plugins on Windows yet (#36).
       - name: Prebuild the common plugins
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && steps.plugins.outputs.changed == 'true'
         run: tool/raccoon-device prebuild tool/plugins build/plugins-test.tar.gz && tar tzf build/plugins-test.tar.gz | grep -c -E '\.so$|\.framework/$'
 
       - name: Render a frame of example/hello
