@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
+import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:raccoon/raccoon.dart' as rc;
 import 'package:raccoon_view/src/frame_decoder.dart';
@@ -72,7 +73,9 @@ class _RaccoonViewState extends State<RaccoonView> {
   HostedTextInput? _text;
   HostedMouseCursor? _mouseCursor;
   MouseCursor _cursor = MouseCursor.defer;
-  ui.Image? _image;
+  // The latest read-back frame. A frame rebuilds only the image that shows
+  // it, not the view around it, and repaints nothing beside the view (#107).
+  final _image = ValueNotifier<ui.Image?>(null);
   rc.Frame? _pending;
   bool _decoding = false;
   bool _lost = false;
@@ -104,7 +107,8 @@ class _RaccoonViewState extends State<RaccoonView> {
     _unsubscribeGpu();
     _unsubscribeCursor();
     _focus.dispose();
-    _image?.dispose();
+    _image.value?.dispose();
+    _image.dispose();
     super.dispose();
   }
 
@@ -291,10 +295,9 @@ class _RaccoonViewState extends State<RaccoonView> {
           image.dispose();
           return;
         }
-        setState(() {
-          _image?.dispose();
-          _image = image;
-        });
+        final previous = _image.value;
+        _image.value = image;
+        previous?.dispose();
       }
     } finally {
       _decoding = false;
@@ -345,51 +348,108 @@ class _RaccoonViewState extends State<RaccoonView> {
   Widget build(BuildContext context) {
     final pixelRatio =
         widget.pixelRatio ?? MediaQuery.devicePixelRatioOf(context);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final size = constraints.biggest;
-        if (size.isFinite && !size.isEmpty) _sendSize(size, pixelRatio);
-        return Focus(
-          focusNode: _focus,
-          autofocus: widget.autofocus,
-          onKeyEvent: _onKey,
-          child: MouseRegion(
-            // What the app asks for (see HostedMouseCursor).
-            cursor: _cursor,
-            child: Listener(
-              onPointerDown: _onPointer,
-              onPointerMove: _onPointer,
-              onPointerUp: _onPointer,
-              onPointerHover: _onPointer,
-              onPointerCancel: _onPointer,
-              onPointerSignal: _onPointer,
-              onPointerPanZoomStart: _onPointer,
-              onPointerPanZoomUpdate: _onPointer,
-              onPointerPanZoomEnd: _onPointer,
-              behavior: HitTestBehavior.opaque,
-              child: SizedBox.expand(
-                child: Stack(
-                  // No text direction needed: hosts need not provide one.
-                  alignment: Alignment.topLeft,
-                  fit: StackFit.expand,
-                  children: [
-                    switch ((_gpuLive, _textureId, _gpu)) {
+    // The size goes to the runner from layout. A LayoutBuilder would lay the
+    // view out again for every frame, and repaint what is around it (#107).
+    return _SizeReport(
+      pixelRatio: pixelRatio,
+      onSize: _sendSize,
+      child: Focus(
+        focusNode: _focus,
+        autofocus: widget.autofocus,
+        onKeyEvent: _onKey,
+        child: MouseRegion(
+          // What the app asks for (see HostedMouseCursor).
+          cursor: _cursor,
+          child: Listener(
+            onPointerDown: _onPointer,
+            onPointerMove: _onPointer,
+            onPointerUp: _onPointer,
+            onPointerHover: _onPointer,
+            onPointerCancel: _onPointer,
+            onPointerSignal: _onPointer,
+            onPointerPanZoomStart: _onPointer,
+            onPointerPanZoomUpdate: _onPointer,
+            onPointerPanZoomEnd: _onPointer,
+            behavior: HitTestBehavior.opaque,
+            child: SizedBox.expand(
+              child: Stack(
+                // No text direction needed: hosts need not provide one.
+                alignment: Alignment.topLeft,
+                fit: StackFit.expand,
+                children: [
+                  RepaintBoundary(
+                    child: switch ((_gpuLive, _textureId, _gpu)) {
                       // A texture that starts at the bottom left (GL's do)
                       // is drawn the other way up.
                       (true, final id?, final gpu?) => Transform.flip(
                         flipY: gpu.bottomUp,
                         child: Texture(textureId: id),
                       ),
-                      _ => RaccoonFrameView(frame: _image, fit: BoxFit.fill),
+                      _ => ValueListenableBuilder(
+                        valueListenable: _image,
+                        builder:
+                            (context, image, _) => RaccoonFrameView(
+                              frame: image,
+                              fit: BoxFit.fill,
+                            ),
+                      ),
                     },
-                    if (_lost) const DisconnectedOverlay(),
-                  ],
-                ),
+                  ),
+                  if (_lost) const DisconnectedOverlay(),
+                ],
               ),
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
+  }
+}
+
+/// Reports the biggest size its constraints allow, when finite and not
+/// empty, after a layout; lays out again only when the constraints or the
+/// pixel ratio change.
+class _SizeReport extends SingleChildRenderObjectWidget {
+  const _SizeReport({
+    required this.pixelRatio,
+    required this.onSize,
+    super.child,
+  });
+
+  final double pixelRatio;
+  final void Function(Size size, double pixelRatio) onSize;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderSizeReport(pixelRatio, onSize);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderSizeReport renderObject,
+  ) {
+    renderObject
+      ..pixelRatio = pixelRatio
+      ..onSize = onSize;
+  }
+}
+
+class _RenderSizeReport extends RenderProxyBox {
+  _RenderSizeReport(this._pixelRatio, this.onSize);
+
+  double _pixelRatio;
+  void Function(Size size, double pixelRatio) onSize;
+
+  set pixelRatio(double value) {
+    if (value == _pixelRatio) return;
+    _pixelRatio = value;
+    markNeedsLayout();
+  }
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    final biggest = constraints.biggest;
+    if (biggest.isFinite && !biggest.isEmpty) onSize(biggest, _pixelRatio);
   }
 }

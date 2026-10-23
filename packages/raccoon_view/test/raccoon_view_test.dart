@@ -31,6 +31,29 @@ class _FakeConnection implements RunnerConnection {
   void sendKey(rc.KeyEvent event) => keys.add(event);
 }
 
+/// Counts how often it paints, to tell whether a repaint reached it.
+class _PaintCounter extends LeafRenderObjectWidget {
+  const _PaintCounter(this.paints);
+
+  final List<int> paints;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderPaintCounter(paints);
+}
+
+class _RenderPaintCounter extends RenderBox {
+  _RenderPaintCounter(this.paints);
+
+  final List<int> paints;
+
+  @override
+  void performLayout() => size = constraints.biggest;
+
+  @override
+  void paint(PaintingContext context, Offset offset) => paints[0]++;
+}
+
 rc.Frame _solidFrame(int width, int height) => rc.Frame(
   sequence: Int64(1),
   width: width,
@@ -99,6 +122,38 @@ void main() {
     expect(image, isNotNull);
     expect(image?.width, 4);
     expect(image?.height, 3);
+  });
+
+  // #107: a frame repaints the view, not what sits around it.
+  testWidgets('a frame does not repaint the widgets beside the view', (
+    tester,
+  ) async {
+    final connection = _FakeConnection();
+    final paints = [0];
+    await tester.runAsync(() async {
+      await tester.pumpWidget(
+        MediaQuery(
+          data: const MediaQueryData(),
+          child: Directionality(
+            textDirection: TextDirection.ltr,
+            child: Row(
+              children: [
+                SizedBox(width: 50, child: _PaintCounter(paints)),
+                Expanded(child: RaccoonView(connection: connection)),
+              ],
+            ),
+          ),
+        ),
+      );
+      for (var i = 0; i < 3; i++) {
+        connection.emit(_solidFrame(4, 3));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await tester.pump();
+      }
+    });
+
+    expect(tester.widget<RawImage>(find.byType(RawImage)).image, isNotNull);
+    expect(paints[0], 1);
   });
 
   testWidgets('forwards taps as down and up in frame pixels', (tester) async {
