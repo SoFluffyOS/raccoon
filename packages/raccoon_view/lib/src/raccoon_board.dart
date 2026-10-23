@@ -5,6 +5,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:raccoon_runtime/raccoon_runtime.dart';
+import 'package:raccoon_view/src/dot_grid.dart';
 import 'package:raccoon_view/src/raccoon_view.dart';
 
 /// One device on the board: where its frame sits, how big it is in logical
@@ -669,14 +670,7 @@ class _GridPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final step = spacing * zoom;
     if (step < 6) return;
-    final paint = Paint()..color = ink;
-    final startX = pan.dx % step;
-    final startY = pan.dy % step;
-    for (var x = startX; x <= size.width; x += step) {
-      for (var y = startY; y <= size.height; y += step) {
-        canvas.drawCircle(Offset(x, y), 1, paint);
-      }
-    }
+    paintDotGrid(canvas, size, pan, step, ink);
   }
 
   @override

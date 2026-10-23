@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart';
+import 'package:raccoon_view/src/dot_grid.dart';
 
 /// A hosted app at a fixed logical size, on a canvas: a quiet dot grid
 /// behind it, a one-pixel edge around it, and its size in a corner, so the
@@ -107,16 +108,9 @@ class _DotGridPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = ink;
     // Dots on a lattice anchored at the centre, so the grid stays put
     // around the app when the canvas is resized.
-    final originX = (size.width / 2) % spacing;
-    final originY = (size.height / 2) % spacing;
-    for (var x = originX; x <= size.width; x += spacing) {
-      for (var y = originY; y <= size.height; y += spacing) {
-        canvas.drawCircle(Offset(x, y), 1, paint);
-      }
-    }
+    paintDotGrid(canvas, size, size.center(Offset.zero), spacing, ink);
   }
 
   @override
