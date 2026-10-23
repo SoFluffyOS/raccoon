@@ -135,6 +135,32 @@ Design notes: `docs/internal_docs/raccoon/`.
   them on `DYLD_FRAMEWORK_PATH`, so Dart finds their symbols whether it
   looks in the process (`DynamicLibrary.process()`, as `flutter_pty2`
   does) or opens `<name>.framework/<name>`.
+- Loads the project's native plugins on Windows as well. A plugin DLL
+  imports the C API of Flutter's Windows embedding from
+  `flutter_windows.dll` (through the C++ client wrapper compiled into it);
+  the runner ships a DLL of that name beside itself, built from the public
+  headers alone (`third_party/flutter_windows`), and opens it before any
+  plugin, so their imports land on it and the engine behind it is this
+  runner: the messenger, a registrar per plugin, a view that is a hidden
+  top-level window (a real `HWND` to parent dialogs to, whose messages
+  reach the plugins' window proc delegates), no textures yet. The manifest
+  names each DLL and its `<PluginClass>RegisterWithRegistrar`.
+  `tool/raccoon-device install` builds the plugins the project resolves
+  (every package with a Windows `pluginClass` or `ffiPlugin`) each in its
+  own CMake project with what Flutter's Windows template gives a plugin,
+  against the SDK's import library and C++ client wrapper, with Visual
+  Studio's own generator, as the Flutter tool builds a Windows app; that
+  half of the helper is `tool/plugins_windows.dart`, run with the SDK's
+  `dart`, since Windows has no python3. Needs Visual Studio with the C++
+  workload, as the Windows target does; cached as on the other hosts.
+  While plugins are loaded the runner waits in `MsgWaitForMultipleObjectsEx`
+  and dispatches the platform thread's messages, so dialogs, COM and
+  messages posted to windows work; a modal dialog's own loop holds the
+  runner's while it is open. FFI plugins' DLLs go on the runner's PATH.
+  The runner carries a version resource, which `package_info_plus` reads.
+  On a Ryzen 9 7945HX: the eleven of `tool/plugins` with Windows code in
+  88 s cold, 2 s from the cache, all loaded; `connectivity_plus`,
+  `url_launcher` and `flutter_secure_storage` answer from the runner.
 - Builds native assets (packages with build hooks, such as `objective_c`
   under `path_provider_foundation`) for macOS. The tool builds the bundle
   for the Linux device it believes Raccoon to be, whose manifest names no
