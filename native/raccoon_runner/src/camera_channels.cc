@@ -76,26 +76,35 @@ std::vector<uint8_t> CameraChannels::Pattern(size_t width, size_t height,
   static constexpr uint8_t kBars[7][3] = {{255, 255, 255}, {0, 255, 255}, {255, 255, 0},
                                           {0, 255, 0},     {255, 0, 255}, {0, 0, 255},
                                           {255, 0, 0}};
-  std::vector<uint8_t> pixels(width * height * 4);
+  const size_t row_bytes = width * 4;
+  std::vector<uint8_t> pixels(row_bytes * height);
+  if (pixels.empty()) return pixels;
   const size_t bars_end = height * 3 / 4;
+  // Every row of bars is the same, and so is every row below them: each is
+  // drawn once and copied down (#109).
+  std::vector<uint8_t> row(row_bytes);
+  for (size_t x = 0; x < width; ++x) {
+    const uint8_t* bar = kBars[std::min<size_t>(x * 7 / width, 6)];
+    uint8_t* pixel = row.data() + x * 4;
+    pixel[0] = bar[0];
+    pixel[1] = bar[1];
+    pixel[2] = bar[2];
+    pixel[3] = 255;
+  }
+  for (size_t y = 0; y < bars_end; ++y) {
+    std::copy(row.begin(), row.end(), pixels.begin() + y * row_bytes);
+  }
   // The block crosses the frame once every two seconds.
   const size_t block = std::max<size_t>(width / 8, 1);
   const size_t block_x = static_cast<size_t>((time_micros / 1000) % 2000 * (width + block) / 2000);
-  for (size_t y = 0; y < height; ++y) {
-    uint8_t* row = pixels.data() + y * width * 4;
-    for (size_t x = 0; x < width; ++x) {
-      uint8_t* pixel = row + x * 4;
-      if (y < bars_end) {
-        const uint8_t* bar = kBars[std::min<size_t>(x * 7 / width, 6)];
-        pixel[0] = bar[0];
-        pixel[1] = bar[1];
-        pixel[2] = bar[2];
-      } else {
-        const bool lit = x + block >= block_x && x < block_x;
-        pixel[0] = pixel[1] = pixel[2] = lit ? 255 : 0;
-      }
-      pixel[3] = 255;
-    }
+  for (size_t x = 0; x < width; ++x) {
+    const uint8_t lit = x + block >= block_x && x < block_x ? 255 : 0;
+    uint8_t* pixel = row.data() + x * 4;
+    pixel[0] = pixel[1] = pixel[2] = lit;
+    pixel[3] = 255;
+  }
+  for (size_t y = bars_end; y < height; ++y) {
+    std::copy(row.begin(), row.end(), pixels.begin() + y * row_bytes);
   }
   return pixels;
 }
