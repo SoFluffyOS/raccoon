@@ -21,6 +21,7 @@ final class RunnerLaunch {
     this.pixelRatio = 1.0,
     this.dataDir,
     this.plugins,
+    this.cameraSource,
   });
 
   final String runnerBinary;
@@ -41,6 +42,10 @@ final class RunnerLaunch {
   /// writes one: `{"plugins": [{"name", "library", "symbol"}]}`.
   final String? plugins;
 
+  /// A PNG or JPEG the app's camera shows in place of the runner's test
+  /// pattern.
+  final String? cameraSource;
+
   List<String> get arguments => [
     'serve',
     '--engine-dir',
@@ -53,6 +58,7 @@ final class RunnerLaunch {
     endpoint.path,
     if (dataDir case final dir?) ...['--data-dir', dir],
     if (plugins case final manifest?) ...['--plugins', manifest],
+    if (cameraSource case final source?) ...['--camera-source', source],
     '--width',
     '$width',
     '--height',

@@ -18,6 +18,62 @@ const _red = (r: 0xE5, g: 0x39, b: 0x35);
 const _green = (r: 0x43, g: 0xA0, b: 0x47);
 const _purple = (r: 0x8E, g: 0x24, b: 0xAA);
 
+/// example/camera's picture line: the verdict on the test pattern's bars,
+/// the colours seen where they are, and the picture's path.
+final _pictureLine = RegExp(
+  r'^picture (bars \w+) left=(\S+) right=(\S+) (.*)$',
+);
+
+/// A PNG of [width] x [height], 8-bit RGB, each pixel [rgb] of its position.
+Uint8List _png(int width, int height, List<int> Function(int x, int y) rgb) {
+  final crcTable = List<int>.generate(256, (n) {
+    var c = n;
+    for (var k = 0; k < 8; k++) {
+      c = c & 1 == 1 ? 0xEDB88320 ^ (c >> 1) : c >> 1;
+    }
+    return c;
+  });
+  List<int> chunk(String type, List<int> data) {
+    final body = [...ascii.encode(type), ...data];
+    var crc = 0xFFFFFFFF;
+    for (final byte in body) {
+      crc = crcTable[(crc ^ byte) & 0xFF] ^ (crc >> 8);
+    }
+    crc ^= 0xFFFFFFFF;
+    List<int> word(int v) => [
+      v >> 24 & 0xFF,
+      v >> 16 & 0xFF,
+      v >> 8 & 0xFF,
+      v & 0xFF,
+    ];
+    return [...word(data.length), ...body, ...word(crc)];
+  }
+
+  final rows = <int>[
+    for (var y = 0; y < height; y++) ...[
+      0, // no filter
+      for (var x = 0; x < width; x++) ...rgb(x, y),
+    ],
+  ];
+  return Uint8List.fromList([
+    0x89,
+    0x50,
+    0x4E,
+    0x47,
+    0x0D,
+    0x0A,
+    0x1A,
+    0x0A,
+    ...chunk('IHDR', [
+      ...[0, 0, width >> 8, width & 0xFF],
+      ...[0, 0, height >> 8, height & 0xFF],
+      8, 2, 0, 0, 0, // 8 bits, RGB, deflate, no filter, no interlace
+    ]),
+    ...chunk('IDAT', zlib.encode(rows)),
+    ...chunk('IEND', []),
+  ]);
+}
+
 /// The colour at ([x], [y]), whichever byte order the host rasters in.
 ({int r, int g, int b}) _pixel(Frame frame, int x, int y) {
   final offset = y * frame.rowBytes + x * 4;
@@ -1257,9 +1313,11 @@ void main() {
         await done.future.timeout(const Duration(seconds: 30));
         expect(lines, contains('cameras back,front'));
         expect(lines, contains('initialized 352x288'));
-        final picture = lines.firstWhere((l) => l.startsWith('picture'));
-        expect(picture, startsWith('picture bars ok '));
-        final file = File(picture.substring('picture bars ok '.length));
+        final picture = _pictureLine.firstMatch(
+          lines.firstWhere((l) => l.startsWith('picture')),
+        );
+        expect(picture?[1], 'bars ok');
+        final file = File(picture?[4] ?? '');
         expect(file.readAsBytesSync().take(2), [0xFF, 0xD8]);
         file.deleteSync();
         // Video range: white is 235, blue 41.
@@ -1269,11 +1327,93 @@ void main() {
         expect(fps, inInclusiveRange(20, 40));
         expect(
           lines,
-          contains('stream bgra8888 planes=1 raw=1111970369 bars ok'),
+          contains(
+            startsWith('stream bgra8888 planes=1 raw=1111970369 bars ok'),
+          ),
         );
-        expect(lines, contains('stream jpeg planes=1 raw=256 bars ok'));
+        expect(
+          lines,
+          contains(startsWith('stream jpeg planes=1 raw=256 bars ok')),
+        );
         expect(lines.last, 'done');
         expect(forwarded, isEmpty);
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready && Directory(cameraAssets).existsSync()
+            ? false
+            : 'build the runner and example/camera first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'the camera shows a picture given as its source',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      // Red on the left half, green on the right: whatever the camera's
+      // aspect crops, the bars' places fall in one half each.
+      final source = File(p.join(temp.path, 'source.png'))..writeAsBytesSync(
+        _png(160, 120, (x, y) => x < 80 ? [220, 20, 30] : [20, 200, 40]),
+      );
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: cameraAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          cameraSource: source.path,
+        ),
+      );
+      final lines = <String>[];
+      final done = Completer<void>();
+      runner.stdout.listen((line) {
+        final at = line.indexOf('CAMERA:');
+        if (at < 0) return;
+        final said = line.substring(at + 'CAMERA:'.length);
+        lines.add(said);
+        if ((said == 'done' || said.startsWith('error')) && !done.isCompleted) {
+          done.complete();
+        }
+      });
+      final client = await RunnerClient.connect(endpoint);
+      // Each channel within 12 of the source's, as JPEG keeps it.
+      bool near(String seen, List<int> want) {
+        final got = seen.split(',').map(int.parse).toList();
+        return [
+          for (var i = 0; i < 3; i++) (got[i] - want[i]).abs() <= 12,
+        ].every((close) => close);
+      }
+
+      try {
+        await done.future.timeout(const Duration(seconds: 30));
+        final picture = _pictureLine.firstMatch(
+          lines.firstWhere((l) => l.startsWith('picture')),
+        );
+        expect(picture, isNotNull, reason: lines.join('\n'));
+        expect(
+          near(picture?[2] ?? '0,0,0', [220, 20, 30]),
+          isTrue,
+          reason: 'left ${picture?[2]}',
+        );
+        expect(
+          near(picture?[3] ?? '0,0,0', [20, 200, 40]),
+          isTrue,
+          reason: 'right ${picture?[3]}',
+        );
+        File(picture?[4] ?? '').deleteSync();
+        final bgra = RegExp(
+          r'left=(\S+) right=(\S+)',
+        ).firstMatch(lines.firstWhere((l) => l.startsWith('stream bgra8888')));
+        expect(bgra?[1], '220,20,30');
+        expect(bgra?[2], '20,200,40');
+        expect(lines.last, 'done');
       } finally {
         client.shutdown();
         await client.close();

@@ -39,7 +39,12 @@ Design notes: `docs/internal_docs/raccoon/`.
   desktop implementation, so the app falls back to its method channel one.
   There are two cameras, back and front; the resolution preset picks the
   size, up to 1920×1080. Colour bars cover the top three quarters, and a white
-  block moves along the bottom quarter. `takePicture` writes the
+  block moves along the bottom quarter. `--camera-source` or
+  `RACCOON_CAMERA_SOURCE` names a PNG or JPEG to show instead. It is decoded
+  once with the vendored stb_image (`third_party/stb`), scaled to cover the
+  camera's size and cropped to its centre. A file that doesn't decode is
+  reported, and the pattern stays. The variable works from a terminal too:
+  `RACCOON_CAMERA_SOURCE=qr.png flutter run -d raccoon`. `takePicture` writes the
   current frame as a JPEG to the temp directory. Image streams run at up to
   30 fps, as I420 (`yuv420`), BGRA (`bgra8888`, the default) or JPEG.
   Video recording is refused for now. The preview is a `Texture` by camera

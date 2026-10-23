@@ -10,7 +10,8 @@ import 'package:flutter/widgets.dart';
 /// lists the cameras, takes a picture and decodes it, then streams frames in
 /// each format. The test pattern's top three quarters are colour bars, white
 /// first and blue last, so a picture or a frame is checked by its colour at
-/// those two places. Shows the preview meanwhile. Prints a CAMERA: line per
+/// those two places; a picture given as the source is reported by its colours
+/// there. Shows the preview meanwhile. Prints a CAMERA: line per
 /// step, then CAMERA:done, or CAMERA:error and why.
 ///
 /// Frames are streamed through the platform interface: the method channel
@@ -107,8 +108,9 @@ Future<ui.Image> _fromBgra(CameraImageData frame) {
   return done.future;
 }
 
-/// 'bars ok' when the first bar is white and the last blue, else the two
-/// colours seen.
+/// 'bars ok' when the first bar is white and the last blue, 'bars bad'
+/// otherwise; then the colours seen there, as left= and right=, for a
+/// picture given as the camera's source.
 Future<String> _bars(ui.Image image) async {
   final data = await image.toByteData();
   if (data == null) return 'bars unreadable';
@@ -123,7 +125,8 @@ Future<String> _bars(ui.Image image) async {
       blue[0] < 30 &&
       blue[1] < 30 &&
       blue[2] > 220;
-  return ok ? 'bars ok' : 'bars bad white=$white blue=$blue';
+  return '${ok ? 'bars ok' : 'bars bad'} '
+      'left=${white.join(',')} right=${blue.join(',')}';
 }
 
 /// [count] frames of the camera's image stream, and how many came a second.

@@ -7,7 +7,7 @@
 // camera_platform_interface's method channel one, which these answer: the
 // cameras (one back, one front), pictures (the current frame as a JPEG in
 // the temp directory) and image streams (frames in the format the app asked
-// for). A camera's 'initialized' event and the stream's frames go to the app
+// for). The camera sees a test pattern, or a picture given as its source. A camera's 'initialized' event and the stream's frames go to the app
 // from the loop, through Service. The preview is a Texture by camera id that
 // nothing fills yet; video recording is refused.
 //
@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "camera_source.h"
 #include "standard_codec.h"
 
 namespace raccoon {
@@ -34,6 +35,9 @@ class CameraChannels {
   void SetSend(Send send) { send_ = std::move(send); }
   // Where pictures go; the system's temp directory until set.
   void SetPictureDirectory(std::string directory) { pictures_ = std::move(directory); }
+  // Shows the PNG or JPEG at |path| in place of the test pattern; false with
+  // |error| set when it does not load.
+  bool SetSource(const std::string& path, std::string* error);
 
   // Answers a message on one of the camera channels into |reply| and returns
   // true; returns false for any other channel. An empty reply is a method the
@@ -62,15 +66,22 @@ class CameraChannels {
     bool initialized = false;
   };
 
+  // What the camera sees at |time_micros|, at |width| x |height|: the
+  // source picture when there is one, the test pattern otherwise.
+  std::vector<uint8_t> Frame(size_t width, size_t height, uint64_t time_micros);
   CodecValue Call(const MethodCall& call, bool* known, std::string* error);
   CodecValue Create(const CodecValue& args);
   CodecValue TakePicture(int64_t id, std::string* error);
   // The stream's frame at |now_micros| in its camera's format.
-  CodecValue StreamFrame(const Camera& camera, uint64_t now_micros) const;
+  CodecValue StreamFrame(const Camera& camera, uint64_t now_micros);
   Camera* Find(const CodecValue& args);
 
   Send send_;
   std::string pictures_;
+  bool has_source_ = false;
+  CameraPicture source_;
+  // The source fitted to each size asked for.
+  std::map<std::pair<size_t, size_t>, std::vector<uint8_t>> fitted_;
   int64_t next_id_ = 1;
   uint64_t pictures_taken_ = 0;
   int jpeg_quality_ = 90;

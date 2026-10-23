@@ -48,6 +48,9 @@ struct EngineOptions {
   // Metal on macOS) and falls back to the software renderer; "gl" or
   // "metal" insists; "software" never tries.
   std::string renderer = "auto";
+  // A PNG or JPEG the camera shows in place of its test pattern; empty
+  // takes RACCOON_CAMERA_SOURCE, and without that the pattern.
+  std::string camera_source;
 };
 
 // One engine: start, metrics, input, shutdown. Rasterizes on the GPU where

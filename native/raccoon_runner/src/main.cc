@@ -89,7 +89,7 @@ void Usage() {
                " --icu FILE --socket PATH\n"
                "       raccoon_runner --version\n"
                "common: [--width N] [--height N] [--dpr X] [--data-dir DIR] [--renderer auto|gl|metal|vulkan|software]"
-               " [--plugins MANIFEST]"
+               " [--plugins MANIFEST] [--camera-source PNG|JPEG]"
                " [-- engine switches...]\n");
 }
 
@@ -117,6 +117,7 @@ bool ParseOptions(int argc, char** argv, Options* options) {
     else if (arg == "--data-dir") options->engine.data_dir = v;
     else if (arg == "--plugins") options->plugins = v;
     else if (arg == "--renderer") options->engine.renderer = v;
+    else if (arg == "--camera-source") options->engine.camera_source = v;
     else if (arg == "--out") options->out = v;
     else if (arg == "--socket") options->socket = v;
     else if (arg == "--frames") options->frames = std::strtoul(v, nullptr, 10);

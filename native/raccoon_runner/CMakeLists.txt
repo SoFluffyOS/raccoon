@@ -88,6 +88,7 @@ target_link_libraries(raccoon_proto PUBLIC libprotobuf-lite)
 add_executable(raccoon_runner
   src/main.cc
   src/camera_channels.cc
+  src/camera_source.cc
   src/engine_host.cc
   src/engine_loader.cc
   src/event_loop.cc
@@ -110,6 +111,7 @@ add_executable(raccoon_runner
   src/window_channels.cc
 )
 target_include_directories(raccoon_runner PRIVATE ${RACCOON_EMBEDDER_INCLUDE_DIR} src)
+target_include_directories(raccoon_runner SYSTEM PRIVATE third_party/stb)
 target_compile_definitions(raccoon_runner PRIVATE RACCOON_RUNNER_VERSION="${RACCOON_RUNNER_VERSION}")
 if(MSVC)
   target_compile_options(raccoon_runner PRIVATE /W3 /utf-8)

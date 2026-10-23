@@ -93,6 +93,22 @@ std::vector<uint8_t> CameraChannels::Pattern(size_t width, size_t height,
   return pixels;
 }
 
+bool CameraChannels::SetSource(const std::string& path, std::string* error) {
+  CameraPicture picture;
+  if (!LoadCameraPicture(path, &picture, error)) return false;
+  source_ = std::move(picture);
+  has_source_ = true;
+  fitted_.clear();
+  return true;
+}
+
+std::vector<uint8_t> CameraChannels::Frame(size_t width, size_t height, uint64_t time_micros) {
+  if (!has_source_) return Pattern(width, height, time_micros);
+  auto [found, added] = fitted_.try_emplace({width, height});
+  if (added) found->second = FitCameraPicture(source_, width, height);
+  return found->second;
+}
+
 bool CameraChannels::Handle(const std::string& channel, const uint8_t* data, size_t size,
                             std::vector<uint8_t>* reply) {
   if (channel != kCamera && channel != kImageStream) return false;
@@ -251,7 +267,7 @@ CodecValue CameraChannels::TakePicture(int64_t id, std::string* error) {
     return CodecValue();
   }
   const Camera& camera = found->second;
-  const std::vector<uint8_t> pixels = Pattern(camera.width, camera.height, now_micros_);
+  const std::vector<uint8_t> pixels = Frame(camera.width, camera.height, now_micros_);
   const std::vector<uint8_t> jpeg =
       EncodeJpeg(pixels.data(), camera.width, camera.height, camera.width * 4, jpeg_quality_);
   std::error_code code;
@@ -272,10 +288,10 @@ CodecValue CameraChannels::TakePicture(int64_t id, std::string* error) {
   return CodecValue::String(path.u8string());
 }
 
-CodecValue CameraChannels::StreamFrame(const Camera& camera, uint64_t now_micros) const {
+CodecValue CameraChannels::StreamFrame(const Camera& camera, uint64_t now_micros) {
   const size_t width = camera.width;
   const size_t height = camera.height;
-  const std::vector<uint8_t> bgra = Pattern(width, height, now_micros);
+  const std::vector<uint8_t> bgra = Frame(width, height, now_micros);
   int64_t raw = kRawBgra;
   std::vector<CodecValue> planes;
   if (camera.format == "yuv420") {

@@ -31,6 +31,17 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   on_log_ = std::move(on_log);
   on_wake_ = std::move(on_wake);
   assets_ = options.assets;
+  {
+    std::string source = options.camera_source;
+    if (const char* env = std::getenv("RACCOON_CAMERA_SOURCE"); source.empty() && env != nullptr) {
+      source = env;
+    }
+    std::string why;
+    if (!source.empty() && !camera_.SetSource(source, &why)) {
+      std::fprintf(stderr, "🦝 camera source %s: %s; the camera shows its test pattern\n",
+                   source.c_str(), why.c_str());
+    }
+  }
   camera_.SetSend([this](const std::string& channel, std::vector<uint8_t> message) {
     SendPlatformMessage(channel, message.data(), message.size());
   });
