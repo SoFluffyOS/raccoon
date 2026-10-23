@@ -46,3 +46,23 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+
+  # A macOS app on raccoon_view links with either plugin integration.
+  raccoon_view_macos:
+    name: raccoon_view macOS host (${{ matrix.plugins }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        plugins: [pods, spm]
+    defaults:
+      run:
+        working-directory: packages/raccoon_view
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: tool/build_macos_host.sh ${{ matrix.plugins }}

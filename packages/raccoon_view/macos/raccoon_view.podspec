@@ -20,8 +20,11 @@ the runner's GPU socket, so frames show without a copy.
   s.frameworks       = 'CoreVideo', 'IOSurface'
 
   s.platform = :osx, '10.15'
+  # The FlutterMacOS pod is a placeholder: a plugin links the framework
+  # through the module it imports, and Objective-C++ imports no modules.
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
+    'OTHER_LDFLAGS' => '$(inherited) -framework FlutterMacOS',
   }
 end
