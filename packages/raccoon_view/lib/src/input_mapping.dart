@@ -39,13 +39,21 @@ rc.PointerEvent? toRunnerPointer(PointerEvent event, double pixelRatio) {
       (localPan * pixelRatio, scale, rotation),
     _ => (Offset.zero, 1.0, 0.0),
   };
+  // The engine keeps one pointer per id, hovering where it last was. A
+  // mouse or a trackpad is one device: event.pointer is new for every click
+  // and every pan, which would leave a pointer behind hovering at each
+  // (#88). Each finger is a pointer of its own.
+  final pointerId = switch (event.kind) {
+    PointerDeviceKind.touch => event.pointer,
+    _ => event.device,
+  };
   return rc.PointerEvent(
     phase: phase,
     x: event.localPosition.dx * pixelRatio,
     y: event.localPosition.dy * pixelRatio,
     buttons: Int64(event.buttons),
     device: device,
-    pointerId: event.pointer,
+    pointerId: pointerId,
     timestampMicros: Int64(event.timeStamp.inMicroseconds),
     scrollDeltaX: scroll.dx,
     scrollDeltaY: scroll.dy,
