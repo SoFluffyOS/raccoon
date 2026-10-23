@@ -1,6 +1,7 @@
 #include "engine_host.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <nlohmann/json.hpp>
@@ -177,6 +178,19 @@ void EngineHost::SendHostSettings() {
 }
 
 void EngineHost::Resize(size_t width, size_t height, double pixel_ratio) {
+  // A frame too large for the GPU (Metal aborts past 16,384 pixels a side,
+  // GL drivers stop sooner) is scaled down to fit, its pixel ratio with it:
+  // the app keeps its logical size at a lower resolution, and the host shows
+  // the frame stretched as it does any (#117). 8,192 is wider than any
+  // display.
+  constexpr size_t kMaxSide = 8192;
+  const size_t longest = std::max(width, height);
+  if (longest > kMaxSide) {
+    const double scale = static_cast<double>(kMaxSide) / static_cast<double>(longest);
+    width = std::max<size_t>(1, static_cast<size_t>(std::lround(width * scale)));
+    height = std::max<size_t>(1, static_cast<size_t>(std::lround(height * scale)));
+    pixel_ratio *= scale;
+  }
   FlutterWindowMetricsEvent metrics{};
   metrics.struct_size = sizeof(FlutterWindowMetricsEvent);
   metrics.width = width;

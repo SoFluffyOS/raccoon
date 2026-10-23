@@ -1385,6 +1385,47 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  // #117: Metal aborted on a side over 16,384 pixels. A frame too large is
+  // scaled down to fit, its pixel ratio with it, and the app goes on.
+  test(
+    'a resize past the GPU\'s limit is scaled down, not fatal',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.frames.first.timeout(const Duration(seconds: 15));
+        client.resize(16000, 400, 1);
+        // 8192 / 16000 of each side: 8192 by 205.
+        final scaled = await client.frames
+            .firstWhere((f) => f.width == 8192)
+            .timeout(const Duration(seconds: 15));
+        expect(scaled.height, 205);
+        expect(_pixel(scaled, 3, 3), _blue);
+        client.resize(395, 870, 1);
+        await client.frames
+            .firstWhere((f) => f.width == 395 && f.height == 870)
+            .timeout(const Duration(seconds: 10));
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   // example/channels calls desktop_window, window_manager, window_size and
   // shared_preferences_foundation at startup and shows a green box only when
   // every answer was right.
