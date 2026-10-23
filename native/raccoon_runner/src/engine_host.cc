@@ -479,6 +479,7 @@ void OnReply(const uint8_t* data, size_t size, void* user_data) {
   delete context;
 }
 
+#if !defined(__APPLE__)
 // The first code point of a UTF-8 string, 0 for none.
 uint32_t FirstCodePoint(const std::string& utf8) {
   if (utf8.empty()) return 0;
@@ -501,6 +502,7 @@ uint32_t FirstCodePoint(const std::string& utf8) {
   }
   return code;
 }
+#endif
 
 }  // namespace
 

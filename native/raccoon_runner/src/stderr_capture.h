@@ -46,10 +46,12 @@ class StderrCapture {
   int saved_fd_ = -1;
   int stop_read_fd_ = -1;
   int stop_write_fd_ = -1;
-  // Windows: no poll on a pipe, so Stop says so here and cancels the
-  // thread's read until it has finished.
+#if defined(_WIN32)
+  // No poll on a pipe, so Stop says so here and cancels the thread's read
+  // until it has finished.
   std::atomic<bool> stopping_{false};
   std::atomic<bool> finished_{false};
+#endif
 };
 
 }  // namespace raccoon
