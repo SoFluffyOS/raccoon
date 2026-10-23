@@ -1008,17 +1008,18 @@ for name in sorted(scanned):
     seen = set()
     for directory, names, files in os.walk(root, followlinks=True):
         real = os.path.realpath(directory)
-        if real in seen or (directory != root and real.startswith(immutable)):
+        if real in seen or (directory != root and (real.startswith(immutable) or real + os.sep in immutable)):
             names[:] = []
             continue
         seen.add(real)
         # Left out: hidden folders (.dart_tool, .git, .fvm), the package's
-        # own build output, and packages nested in it, such as an example
-        # app, whose build output changes with every run.
+        # own build output, Flutter's generated ephemeral folders, and
+        # packages nested in it, such as an example app, whose build output
+        # changes with every run.
         top = directory == root
         names[:] = sorted(
             n for n in names
-            if not n.startswith('.') and not (top and n == 'build')
+            if not n.startswith('.') and n != 'ephemeral' and not (top and n == 'build')
             and not os.path.isfile(os.path.join(directory, n, 'pubspec.yaml')))
         for file in sorted(files):
             path = os.path.join(directory, file)

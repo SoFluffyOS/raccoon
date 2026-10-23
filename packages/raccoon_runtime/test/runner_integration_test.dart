@@ -450,6 +450,32 @@ void main() {
           example.deleteSync(recursive: true);
         }
 
+        // Flutter's generated ephemeral folders are not inputs either.
+        final ephemeral = File(
+          p.join(
+            runnerDir,
+            'example',
+            'native_add',
+            'linux',
+            'flutter',
+            'ephemeral',
+            'generated',
+          ),
+        );
+        try {
+          ephemeral
+            ..createSync(recursive: true)
+            ..writeAsStringSync('1');
+          await install();
+          expect(await install(), contains('unchanged'));
+          ephemeral.writeAsStringSync('2');
+          expect(await install(), contains('unchanged'));
+        } finally {
+          Directory(
+            p.join(runnerDir, 'example', 'native_add', 'linux'),
+          ).deleteSync(recursive: true);
+        }
+
         // A folder linked into the package counts through the link.
         final outside = Directory(p.join(temp.path, 'linked_sources'))
           ..createSync();
