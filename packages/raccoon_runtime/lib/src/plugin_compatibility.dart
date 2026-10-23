@@ -43,6 +43,7 @@ final class PluginCompatibility {
   static const Set<String> defaultServedByRaccoon = {
     'url_launcher_linux',
     'url_launcher_macos',
+    'url_launcher_windows',
   };
 
   /// The tool's name for the host this process runs on.

@@ -16,6 +16,9 @@ const _sample = '''
     "macos": [
       {"name": "path_provider_foundation", "native_build": true},
       {"name": "url_launcher_macos", "native_build": true}
+    ],
+    "windows": [
+      {"name": "url_launcher_windows", "native_build": true}
     ]
   }
 }
@@ -41,6 +44,7 @@ void main() {
       'path_provider_linux': PluginSupport.works,
       'url_launcher_linux': PluginSupport.servedByRaccoon,
       'url_launcher_macos': PluginSupport.notForThisPlatform,
+      'url_launcher_windows': PluginSupport.notForThisPlatform,
     });
   });
 
@@ -57,10 +61,11 @@ void main() {
     expect(report['url_launcher_linux'], PluginSupport.notForThisPlatform);
   });
 
-  test('serves url_launcher by default on both desktops', () {
+  test('serves url_launcher by default on every desktop', () {
     for (final (platform, plugin) in [
       ('linux', 'url_launcher_linux'),
       ('macos', 'url_launcher_macos'),
+      ('windows', 'url_launcher_windows'),
     ]) {
       final report = PluginCompatibility(platform: platform).parse(_sample);
       expect(

@@ -61,6 +61,36 @@ void main() {
     },
   );
 
+  test('windows answers a bool for both, and an error for no url', () async {
+    final channels = IdeUrlLauncherChannels(
+      canLaunch: (url) async => url.scheme == 'https',
+      launch: (url) async => url.host == 'lumide.dev',
+    );
+
+    expect(
+      reply(
+        await channels.handleWindowsCanLaunch(request('https://lumide.dev')),
+      ),
+      [true],
+    );
+    expect(
+      reply(await channels.handleWindowsCanLaunch(request('gopher://x'))),
+      [false],
+    );
+    expect(
+      reply(await channels.handleWindowsLaunch(request('https://lumide.dev'))),
+      [true],
+    );
+    expect(
+      reply(await channels.handleWindowsLaunch(request('https://nope.test'))),
+      [false],
+    );
+    expect(
+      reply(await channels.handleWindowsLaunch(request('::not a url::'))),
+      ['bad-url', 'not a url', null],
+    );
+  });
+
   test("macos replies with the plugin's result type", () async {
     final channels = IdeUrlLauncherChannels(
       canLaunch: (url) async => url.scheme == 'https',

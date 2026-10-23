@@ -4,10 +4,11 @@ import 'package:raccoon_view/src/url_launcher_macos_codec.dart';
 import 'package:url_launcher/url_launcher.dart' as launcher;
 
 /// Opens the hosted app's URLs with this process's launcher. Serves the
-/// Pigeon channels of `url_launcher_linux` and `url_launcher_macos`, so the
-/// plugin's Dart side works in the runtime without its native half. The two
-/// APIs differ only in their replies: Linux answers a bool and an error
-/// string, macOS a result object.
+/// Pigeon channels of `url_launcher_linux`, `url_launcher_macos` and
+/// `url_launcher_windows`, so the plugin's Dart side works in the runtime
+/// without its native half. The APIs differ only in their replies: Linux
+/// answers a bool and an error string, macOS a result object, Windows a
+/// bool both times.
 final class IdeUrlLauncherChannels {
   IdeUrlLauncherChannels({
     Future<bool> Function(Uri url)? canLaunch,
@@ -28,6 +29,10 @@ final class IdeUrlLauncherChannels {
       'dev.flutter.pigeon.url_launcher_macos.UrlLauncherApi.canLaunchUrl';
   static const String macosLaunchChannel =
       'dev.flutter.pigeon.url_launcher_macos.UrlLauncherApi.launchUrl';
+  static const String windowsCanLaunchChannel =
+      'dev.flutter.pigeon.url_launcher_windows.UrlLauncherApi.canLaunchUrl';
+  static const String windowsLaunchChannel =
+      'dev.flutter.pigeon.url_launcher_windows.UrlLauncherApi.launchUrl';
 
   static const _invalidUrl = UrlLauncherMacosResult(false, invalidUrl: true);
 
@@ -41,7 +46,9 @@ final class IdeUrlLauncherChannels {
       ..registerChannel(linuxCanLaunchChannel, handleLinuxCanLaunch)
       ..registerChannel(linuxLaunchChannel, handleLinuxLaunch)
       ..registerChannel(macosCanLaunchChannel, handleMacosCanLaunch)
-      ..registerChannel(macosLaunchChannel, handleMacosLaunch);
+      ..registerChannel(macosLaunchChannel, handleMacosLaunch)
+      ..registerChannel(windowsCanLaunchChannel, handleWindowsCanLaunch)
+      ..registerChannel(windowsLaunchChannel, handleWindowsLaunch);
   }
 
   Future<Uint8List?> handleLinuxCanLaunch(Uint8List data) async {
@@ -73,6 +80,22 @@ final class IdeUrlLauncherChannels {
     final url = _url(data);
     if (url == null) return _reply(_macosCodec, [_invalidUrl]);
     return _reply(_macosCodec, [UrlLauncherMacosResult(await _launch(url))]);
+  }
+
+  Future<Uint8List?> handleWindowsCanLaunch(Uint8List data) =>
+      _windowsReply(data, _canLaunch);
+
+  /// Pigeon's launchUrl on Windows returns whether it launched.
+  Future<Uint8List?> handleWindowsLaunch(Uint8List data) =>
+      _windowsReply(data, _launch);
+
+  Future<Uint8List?> _windowsReply(
+    Uint8List data,
+    Future<bool> Function(Uri url) answer,
+  ) async {
+    final url = _url(data);
+    if (url == null) return _reply(_linuxCodec, ['bad-url', 'not a url', null]);
+    return _reply(_linuxCodec, [await answer(url)]);
   }
 
   Uri? _url(Uint8List data) {
