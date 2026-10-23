@@ -35,38 +35,39 @@ Design notes: `docs/internal_docs/raccoon/`.
   executable: with `--data-dir` the runner points `XDG_DATA_HOME` and
   `XDG_CACHE_HOME` into it, so apps do not share one.
   `example/channels` checks the answers.
-- Answers the `camera` plugin from a test pattern: `camera` ships no
-  desktop implementation, so the app falls back to its method channel one.
-  There are two cameras, back and front; the resolution preset picks the
-  size, up to 1920×1080. Colour bars cover the top three quarters, and a white
-  block moves along the bottom quarter. `--camera-source` or
-  `RACCOON_CAMERA_SOURCE` names a PNG or JPEG to show instead. It is decoded
-  once with the vendored stb_image (`third_party/stb`), scaled to cover the
-  camera's size and cropped to its centre. On Windows the source can also be
-  a video, such as an MP4. Media Foundation decodes it a frame at a time as
-  each comes due, and it plays in a loop. Other hosts refuse a video for now.
-  A file that doesn't decode is reported, and the pattern stays. The variable works from a terminal too:
-  `RACCOON_CAMERA_SOURCE=qr.png flutter run -d raccoon`. `takePicture` writes the
-  current frame as a JPEG to the temp directory. Image streams run at up to
-  30 fps, as I420 (`yuv420`), BGRA (`bgra8888`, the default) or JPEG.
-  On Windows, video recordings encode what the camera shows to an H.264 MP4
-  with Media Foundation, at the camera's size and fps. Pause and resume
-  leave the paused time out, and `enableStream` streams while recording.
-  Other hosts refuse to record for now. The preview is a `Texture` by camera
-  id, filled at the camera's frame rate through the GL or Metal renderer's
-  external textures. It is the camera's size turned to portrait (288×352
-  for `low`), because `CameraPreview` draws a portrait box while the device
-  is portrait up. `pausePreview` stops it, and while nothing draws the texture it drops to a
-  probe four times a second, so a camera nobody shows keeps no app drawing. Camera ids start at 2^48 + 1, so
-  they stay clear of plugins' textures. The software and Vulkan renderers
-  take no external textures, so the preview is blank there, which includes
-  Windows. `CameraController`'s
-  `startImageStream` asserts in a debug build, because the method channel
-  implementation reports no streaming. `CameraPlatform.instance.
-  onStreamedFrameAvailable` streams without that check. `example/camera`
-  takes a picture and streams each format: 352×288 frames at 30.0 fps,
-  each format's colours checked. It then records 600 ms, pauses for 400 ms
-  and records 400 ms more, which gives 31 frames and 1033 ms of video.
+- Answers the `camera` plugin from a test pattern: `camera` ships no desktop
+  implementation, so the app falls back to its method channel one. There are
+  two cameras, back and front; the resolution preset picks the size, up to
+  1920×1080. Colour bars cover the top three quarters, and a white block moves
+  along the bottom quarter. `--camera-source` or `RACCOON_CAMERA_SOURCE` names
+  a PNG or JPEG to show instead. It is decoded once with the vendored
+  stb_image (`third_party/stb`), scaled to cover the camera's size and cropped
+  to its centre. On Windows the source can also be a video, such as an MP4.
+  Media Foundation decodes it a frame at a time as each comes due, and it
+  plays in a loop. Other hosts refuse a video for now. A file that doesn't
+  decode is reported, and the pattern stays. The variable works from a
+  terminal too: `RACCOON_CAMERA_SOURCE=qr.png flutter run -d raccoon`.
+  `takePicture` writes the current frame as a JPEG to the temp directory.
+  Image streams run at up to 30 fps, as I420 (`yuv420`), BGRA (`bgra8888`, the
+  default) or JPEG. On Windows, video recordings encode what the camera shows
+  to an H.264 MP4 with Media Foundation, at the camera's size and fps. Pause
+  and resume leave the paused time out, and `enableStream` streams while
+  recording. Other hosts refuse to record for now. The preview is a `Texture`
+  by camera id, filled at the camera's frame rate through the GL or Metal
+  renderer's external textures. It is the camera's size turned to portrait
+  (288×352 for `low`), because `CameraPreview` draws a portrait box while the
+  device is portrait up. `pausePreview` stops it, and while nothing draws the
+  texture it drops to a probe four times a second, so a camera nobody shows
+  keeps no app drawing. Camera ids start at 2^48 + 1, so they stay clear of
+  plugins' textures. The software and Vulkan renderers take no external
+  textures, so the preview is blank there, which includes Windows.
+  `CameraController`'s `startImageStream` asserts in a debug build, because
+  the method channel implementation reports no streaming.
+  `CameraPlatform.instance. onStreamedFrameAvailable` streams without that
+  check. `example/camera` takes a picture and streams each format: 352×288
+  frames at 30.0 fps, each format's colours checked. It then records 600 ms,
+  pauses for 400 ms and records 400 ms more, which gives 31 frames and 1033 ms
+  of video.
 - Tells the app the host's locales and appearance after the engine starts,
   as a desktop embedding does: on macOS the preferred languages, light or
   dark, and the locale's 12- or 24-hour clock; on Linux the locales of
