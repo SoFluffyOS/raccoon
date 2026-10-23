@@ -56,7 +56,8 @@ Design notes: `docs/internal_docs/raccoon/`.
   id, filled at the camera's frame rate through the GL or Metal renderer's
   external textures. It is the camera's size turned to portrait (288×352
   for `low`), because `CameraPreview` draws a portrait box while the device
-  is portrait up. `pausePreview` stops it. Camera ids start at 2^48 + 1, so
+  is portrait up. `pausePreview` stops it, and while nothing draws the texture it drops to a
+  probe four times a second, so a camera nobody shows keeps no app drawing. Camera ids start at 2^48 + 1, so
   they stay clear of plugins' textures. The software and Vulkan renderers
   take no external textures, so the preview is blank there, which includes
   Windows. `CameraController`'s
