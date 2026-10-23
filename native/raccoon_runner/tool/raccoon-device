@@ -71,6 +71,19 @@ case "$(uname -s)" in
   *) echo "unsupported system $(uname -s)" >&2; exit 1 ;;
 esac
 
+# A copy-on-write clone where the file system has one, so an install
+# writes no bytes (#115): APFS, btrfs, XFS. A plain copy otherwise.
+clone_tree() {
+  local flag=""
+  case "$(uname -s)" in
+    Darwin) flag=-c ;;
+    Linux) flag=--reflink=auto ;;
+  esac
+  if [ -n "$flag" ] && cp "$flag" -R "$1" "$2" 2>/dev/null; then return 0; fi
+  rm -rf "$2"
+  cp -r "$1" "$2"
+}
+
 sdk_root() {
   if [ -n "${FLUTTER_ROOT:-}" ] && [ -d "$FLUTTER_ROOT/bin/cache" ]; then
     echo "$FLUTTER_ROOT"
@@ -240,6 +253,19 @@ build_plugins_linux() {
 import glob, hashlib, json, os, re, shutil, subprocess, sys, tarfile, time, urllib.request
 started = time.time()
 from urllib.parse import unquote, urlparse
+
+def clone(source, target):
+    # A copy-on-write clone where the file system has one, so an install
+    # writes no bytes (#115); a plain copy otherwise.
+    flag = {'darwin': '-c', 'linux': '--reflink=auto'}.get(sys.platform)
+    if flag and subprocess.run(['cp', flag, '-R', source, target],
+                               stderr=subprocess.DEVNULL).returncode == 0:
+        return
+    if os.path.isdir(source) and not os.path.islink(source):
+        shutil.rmtree(target, ignore_errors=True)
+        shutil.copytree(source, target, symlinks=True)
+    else:
+        shutil.copy2(source, target)
 
 config, out, lib, headers, virtual, cache, runner_version, arch, prebuilt_url = sys.argv[1:10]
 virtual = set(virtual.split())
@@ -427,7 +453,7 @@ for plugin in wanted:
         libs = sorted(glob.glob(os.path.join(cached, '*.so')))
         built.append(name)
     for so in libs:
-        shutil.copy2(so, os.path.join(out, 'lib'))
+        clone(so, os.path.join(out, 'lib'))
     if plugin['symbol'] is not None:
         # The plugin's own library is the one named after it.
         main = [so for so in libs if os.path.basename(so) == 'lib%s_plugin.so' % name] or libs
@@ -475,6 +501,19 @@ build_plugins_macos() {
 import hashlib, json, os, re, shutil, subprocess, sys, tarfile, time, urllib.request
 started = time.time()
 from urllib.parse import unquote, urlparse
+
+def clone(source, target):
+    # A copy-on-write clone where the file system has one, so an install
+    # writes no bytes (#115); a plain copy otherwise.
+    flag = {'darwin': '-c', 'linux': '--reflink=auto'}.get(sys.platform)
+    if flag and subprocess.run(['cp', flag, '-R', source, target],
+                               stderr=subprocess.DEVNULL).returncode == 0:
+        return
+    if os.path.isdir(source) and not os.path.islink(source):
+        shutil.rmtree(target, ignore_errors=True)
+        shutil.copytree(source, target, symlinks=True)
+    else:
+        shutil.copy2(source, target)
 
 config, out, virtual, cache, runner_version, arch, engine_dir, prebuilt_url, project = sys.argv[1:10]
 virtual = set(virtual.split())
@@ -882,10 +921,7 @@ for plugin in wanted:
         target = os.path.join(out, 'frameworks', f)
         if os.path.exists(target):
             continue
-        if f.endswith('.dylib'):
-            shutil.copy2(os.path.join(cached, f), target)
-        else:
-            shutil.copytree(os.path.join(cached, f), target, symlinks=True)
+        clone(os.path.join(cached, f), target)
     library = os.path.join(out, 'frameworks', name + '.framework', name)
     if plugin['class'] is None:
         entries.append({'name': name, 'library': library, 'ffi': True})
@@ -1070,13 +1106,27 @@ PY
     [ -n "$inputs" ] && echo "$inputs" > "$stamp"
   fi
   python3 - "$manifest" "$built" "$app" "$started" "$unchanged" <<'PY'
-import json, os, shutil, sys, time
+import json, os, shutil, subprocess, sys, time
 manifest_path, built, app, started, unchanged = sys.argv[1:6]
+
+def clone(source, target):
+    # A copy-on-write clone where the file system has one, so an install
+    # writes no bytes (#115); a plain copy otherwise.
+    flag = {'darwin': '-c', 'linux': '--reflink=auto'}.get(sys.platform)
+    if flag and subprocess.run(['cp', flag, '-R', source, target],
+                               stderr=subprocess.DEVNULL).returncode == 0:
+        return
+    if os.path.isdir(source) and not os.path.islink(source):
+        shutil.rmtree(target, ignore_errors=True)
+        shutil.copytree(source, target, symlinks=True)
+    else:
+        shutil.copy2(source, target)
+
 manifest = json.load(open(manifest_path))
 installed = os.path.join(app, 'native_assets')
 shutil.rmtree(installed, ignore_errors=True)
 if os.path.isdir(built):
-    shutil.copytree(built, installed, symlinks=True)
+    clone(built, installed)
 count = 0
 for assets in manifest.get('native-assets', {}).values():
     for asset, path in assets.items():
@@ -1118,7 +1168,7 @@ case "$verb" in
     local_path="$1"; key="$(app_key "$2")"
     rm -rf "$APPS/$key"
     mkdir -p "$APPS/$key"
-    cp -r "$local_path" "$APPS/$key/flutter_assets"
+    clone_tree "$local_path" "$APPS/$key/flutter_assets"
     # The project is two levels above its bundle; its native plugins are
     # built for this host and loaded into the runner.
     build_plugins "$(cd "$local_path/../.." && pwd)" "$APPS/$key/plugins"
