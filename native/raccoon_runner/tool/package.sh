@@ -56,6 +56,15 @@ if [ -f "$ROOT/build/libflutter_linux_gtk.so" ]; then
   cp "$ROOT/third_party/flutter_linux/LICENSE" "$STAGE/LICENSE.flutter"
   CONTENTS="$CONTENTS libflutter_linux_gtk.so include LICENSE.flutter"
 fi
+# Windows: the runner's flutter_windows.dll, which plugins load on (built
+# from Flutter's vendored headers), and the Dart half of the helper that
+# builds them.
+if [ -f "$ROOT/build/flutter_windows.dll" ]; then
+  cp "$ROOT/build/flutter_windows.dll" "$STAGE/"
+  cp "$ROOT/tool/plugins_windows.dart" "$STAGE/tool/"
+  cp "$ROOT/third_party/flutter_windows/LICENSE" "$STAGE/LICENSE.flutter"
+  CONTENTS="$CONTENTS flutter_windows.dll LICENSE.flutter"
+fi
 # shellcheck disable=SC2086
 COPYFILE_DISABLE=1 tar -C "$STAGE" -czf "$OUT/$NAME.tar.gz" $CONTENTS
 echo "$OUT/$NAME.tar.gz"
