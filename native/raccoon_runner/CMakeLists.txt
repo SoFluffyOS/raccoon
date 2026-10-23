@@ -154,6 +154,19 @@ if(APPLE)
   target_link_libraries(raccoon_runner PRIVATE
     "-framework Metal" "-framework IOSurface" "-framework Foundation")
   message(STATUS "Metal renderer: on")
+  # A video as the camera's source, and its recordings, by AVFoundation; and
+  # the tool the tests make a video with, as on Windows.
+  target_sources(raccoon_runner PRIVATE src/camera_video_mac.mm src/camera_recorder_mac.mm)
+  set_source_files_properties(src/camera_video_mac.mm src/camera_recorder_mac.mm
+    PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+  target_link_libraries(raccoon_runner PRIVATE
+    "-framework AVFoundation" "-framework CoreMedia")
+  add_executable(raccoon_test_video test/make_test_video_mac.mm)
+  set_target_properties(raccoon_test_video PROPERTIES
+    OBJCXX_STANDARD 17 OBJCXX_STANDARD_REQUIRED ON)
+  target_compile_options(raccoon_test_video PRIVATE -fobjc-arc)
+  target_link_libraries(raccoon_test_video PRIVATE
+    "-framework AVFoundation" "-framework CoreMedia" "-framework CoreVideo" "-framework Foundation")
   # Native plugins: the protocols of FlutterMacOS.framework, implemented here
   # from its headers alone (third_party/flutter_macos); the framework itself
   # is opened at run time from the Flutter SDK, before the plugins.

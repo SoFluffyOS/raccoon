@@ -1278,11 +1278,16 @@ void main() {
     'build',
     'flutter_assets',
   );
+  // Windows and macOS play and record videos; Linux not yet.
+  final hostHasVideo = Platform.isWindows || Platform.isMacOS;
   // raccoon_test_video writes a third of a second of H.264, red and green
   // over blue and yellow, the same in every frame; with --probe it says what
   // a video holds.
   final testVideo = switch (binary) {
-    final binary? => p.join(p.dirname(binary), 'raccoon_test_video.exe'),
+    final binary? => p.join(
+      p.dirname(binary),
+      Platform.isWindows ? 'raccoon_test_video.exe' : 'raccoon_test_video',
+    ),
     null => '',
   };
   test(
@@ -1357,9 +1362,9 @@ void main() {
           contains(startsWith('stream jpeg planes=1 raw=256 bars ok')),
         );
         // 600 ms recorded, 400 paused, 400 more: a second of video on
-        // Windows, the pattern in it; refused elsewhere.
+        // Windows and macOS, the pattern in it; refused elsewhere.
         final video = lines.firstWhere((l) => l.startsWith('video '));
-        if (Platform.isWindows) {
+        if (hostHasVideo) {
           final path = video.substring('video '.length);
           final probe = await Process.run(testVideo, ['--probe', path]);
           final held = RegExp(
@@ -1553,8 +1558,8 @@ void main() {
       expect(lines.last, 'done');
     },
     skip:
-        !Platform.isWindows
-            ? 'videos play on Windows only for now'
+        !hostHasVideo
+            ? 'videos play on Windows and macOS only for now'
             : ready &&
                 Directory(cameraAssets).existsSync() &&
                 File(testVideo).existsSync()
@@ -1579,8 +1584,8 @@ void main() {
       );
     },
     skip:
-        Platform.isWindows
-            ? 'Windows plays videos'
+        hostHasVideo
+            ? 'this host plays videos'
             : ready && Directory(cameraAssets).existsSync()
             ? false
             : 'build the runner and example/camera first',

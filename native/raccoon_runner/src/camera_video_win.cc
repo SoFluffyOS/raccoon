@@ -27,7 +27,7 @@ std::string Hresult(const char* what, HRESULT result) {
   return what + std::string(text);
 }
 
-class VideoSource : public CameraSource {
+class VideoSource : public LoopingVideo {
  public:
   ~VideoSource() override {
     reader_.Reset();
@@ -80,52 +80,27 @@ class VideoSource : public CameraSource {
     PropVariantInit(&duration);
     if (SUCCEEDED(reader_->GetPresentationAttribute(
             static_cast<DWORD>(MF_SOURCE_READER_MEDIASOURCE), MF_PD_DURATION, &duration))) {
-      duration_ = static_cast<int64_t>(duration.uhVal.QuadPart);
+      duration_micros_ = static_cast<int64_t>(duration.uhVal.QuadPart) / 10;
     }
     PropVariantClear(&duration);
-    if (width_ == 0 || height_ == 0 || !ReadNext(&current_, &current_time_)) {
+    if (width_ == 0 || height_ == 0 || !Begin()) {
       *error = "no frame in it";
       return false;
     }
-    has_next_ = ReadNext(&next_, &next_time_);
     return true;
   }
 
-  const CameraPicture* FrameAt(uint64_t time_micros, uint64_t* number) override {
-    if (!opened_at_set_) {
-      opened_at_ = time_micros;
-      opened_at_set_ = true;
-    }
-    // In Media Foundation's 100 ns units, within one pass of the video.
-    int64_t position = static_cast<int64_t>(time_micros - opened_at_) * 10;
-    if (duration_ > 0) position %= duration_;
-    if (position < last_position_) Rewind();
-    last_position_ = position;
-    while (has_next_ && next_time_ <= position) {
-      std::swap(current_, next_);
-      current_time_ = next_time_;
-      ++frame_number_;
-      has_next_ = ReadNext(&next_, &next_time_);
-    }
-    *number = frame_number_;
-    return &current_;
-  }
-
  private:
-  // Back to the start, for the next pass.
-  void Rewind() {
+  void Restart() override {
     PROPVARIANT start;
     PropVariantInit(&start);
     start.vt = VT_I8;
     start.hVal.QuadPart = 0;
     reader_->SetCurrentPosition(GUID_NULL, start);
     PropVariantClear(&start);
-    if (ReadNext(&current_, &current_time_)) ++frame_number_;
-    has_next_ = ReadNext(&next_, &next_time_);
   }
 
-  // The next decoded frame and its time; false at the end or on an error.
-  bool ReadNext(CameraPicture* frame, int64_t* time) {
+  bool ReadNext(CameraPicture* frame, int64_t* time_micros) override {
     for (;;) {
       DWORD flags = 0;
       LONGLONG timestamp = 0;
@@ -156,7 +131,8 @@ class VideoSource : public CameraSource {
       buffer->Unlock();
       // RGB32 leaves the fourth byte undefined.
       for (size_t i = 3; i < frame->bgra.size(); i += 4) frame->bgra[i] = 255;
-      *time = timestamp;
+      // Media Foundation counts in 100 ns.
+      *time_micros = timestamp / 10;
       return true;
     }
   }
@@ -167,16 +143,6 @@ class VideoSource : public CameraSource {
   size_t width_ = 0;
   size_t height_ = 0;
   bool bottom_up_ = false;
-  int64_t duration_ = 0;
-  CameraPicture current_;
-  int64_t current_time_ = 0;
-  CameraPicture next_;
-  int64_t next_time_ = 0;
-  bool has_next_ = false;
-  uint64_t frame_number_ = 1;
-  uint64_t opened_at_ = 0;
-  bool opened_at_set_ = false;
-  int64_t last_position_ = 0;
 };
 
 }  // namespace
