@@ -15,6 +15,13 @@
 // environment. Every DLL lands flat in <out>/lib, which run puts on the
 // PATH for the FFI ones; <out>/manifest.json names each plugin's DLL and
 // its <PluginClass>RegisterWithRegistrar for the runner.
+//
+// A plugin built as a static library (FlutterFire's) is linked into an app's
+// .exe, which the runner has none of to give it. The app's static plugins
+// are built together in one project, a plugin after those whose targets it
+// links, and linked into one DLL that exports their registrars
+// (raccoon_static_plugins.dll): one module, as in the .exe, so plugins that
+// share state, such as firebase_core's app, keep sharing it (#104).
 
 import 'dart:convert';
 import 'dart:io';
@@ -126,9 +133,9 @@ Future<void> main(List<String> arguments) async {
       }
       continue;
     }
-    if (!File('${package.root}\\windows\\CMakeLists.txt').existsSync()) {
-      continue;
-    }
+    final cmake = File('${package.root}\\windows\\CMakeLists.txt');
+    if (!cmake.existsSync()) continue;
+    final cmakeText = cmake.readAsStringSync();
     wanted.add(
       _Plugin(
         name: package.name,
@@ -139,6 +146,9 @@ Future<void> main(List<String> arguments) async {
         key:
             '${_versionKey(package.name, package.root, pubCaches)}'
             '-$runnerVersion',
+        cmake: cmakeText,
+        isStatic: RegExp(r'add_library\(\s*\$\{PLUGIN_NAME\}\s+STATIC\b')
+            .hasMatch(cmakeText),
       ),
     );
   }
@@ -154,7 +164,19 @@ Future<void> main(List<String> arguments) async {
   final entries = <Map<String, String>>[];
   Map<String, String>? toolchain;
   String? noToolchain;
+  Future<Map<String, String>?> needToolchain() async {
+    if (toolchain == null && noToolchain == null) {
+      try {
+        toolchain = await _msvcEnvironment();
+      } on _NoToolchain catch (error) {
+        noToolchain = error.message;
+      }
+    }
+    return toolchain;
+  }
+
   for (final plugin in wanted) {
+    if (plugin.isStatic) continue;
     // Whatever else goes wrong fails this plugin, not the install: the
     // helper runs under set -e, and native assets build after (#141).
     try {
@@ -171,14 +193,7 @@ Future<void> main(List<String> arguments) async {
         });
         continue;
       } else {
-        if (toolchain == null && noToolchain == null) {
-          try {
-            toolchain = await _msvcEnvironment();
-          } on _NoToolchain catch (error) {
-            noToolchain = error.message;
-          }
-        }
-        final environment = toolchain;
+        final environment = await needToolchain();
         if (environment == null) {
           failed.add('${plugin.name} ($noToolchain)');
           status.add({
@@ -281,6 +296,132 @@ Future<void> main(List<String> arguments) async {
     } on Exception catch (error) {
       failed.add('${plugin.name} ($error)');
       status.add({'name': plugin.name, 'state': 'failed', 'detail': '$error'});
+    }
+  }
+
+  final statics = _linkOrder(wanted.where((p) => p.isStatic).toList());
+  if (statics.isNotEmpty) {
+    final names = statics.map((p) => p.name).toList();
+    // The group stands as one plugin for the cache and its kept failures,
+    // by all its plugins' keys together.
+    final group = _Plugin(
+      name: 'raccoon_static_plugins',
+      root: '',
+      symbol: null,
+      key: _hash(
+        'raccoon_static_plugins',
+        (statics.map((p) => p.key).toList()..sort()).join('\n'),
+      ),
+      cmake: '',
+      isStatic: true,
+    );
+    String? whyNot;
+    var dlls = const <File>[];
+    try {
+      final cached = Directory('$cache\\${group.key}');
+      dlls = _dllsIn(cached);
+      if (dlls.isNotEmpty) {
+        fromCache.addAll(names);
+      } else if (cachedOnly) {
+        skipped.addAll(names);
+        for (final name in names) {
+          status.add({'name': name, 'state': 'skipped', 'detail': _skipped});
+        }
+      } else {
+        final environment = await needToolchain();
+        if (environment == null) {
+          whyNot = '$noToolchain; native plugins need Visual Studio';
+        } else if (_keptFailure(cache, group, environment) case final why?) {
+          whyNot = why;
+        } else {
+          final project = Directory('$out\\build\\raccoon_static_plugins')
+            ..createSync(recursive: true);
+          final def = File('${project.path}\\raccoon_static_plugins.def')
+            ..writeAsStringSync(
+              'LIBRARY raccoon_static_plugins\nEXPORTS\n'
+              '${[for (final plugin in statics)
+                if (plugin.symbol case final symbol?) '  $symbol\n'].join()}',
+            );
+          File('${project.path}\\CMakeLists.txt').writeAsStringSync(
+            '${_preamble(engine)}'
+            '${statics.map((plugin) => 'add_subdirectory("${_cmakePath('${plugin.root}\\windows')}" "${plugin.name}")\n').join()}'
+            '# One module for them all, as the .exe they were made for; the\n'
+            '# .def file exports their registrars from the static libraries.\n'
+            'file(WRITE "\${CMAKE_BINARY_DIR}/raccoon_static_plugins.cc" "")\n'
+            'add_library(raccoon_static_plugins SHARED '
+            '"\${CMAKE_BINARY_DIR}/raccoon_static_plugins.cc" '
+            '"${_cmakePath(def.path)}")\n'
+            'target_link_libraries(raccoon_static_plugins PRIVATE '
+            '${statics.map((plugin) => '${plugin.name}_plugin').join(' ')})\n'
+            'set_target_properties(raccoon_static_plugins PROPERTIES '
+            'RUNTIME_OUTPUT_DIRECTORY "\${CMAKE_BINARY_DIR}/plugin")\n'
+            'file(WRITE "\${CMAKE_BINARY_DIR}/bundled.txt" '
+            '"${statics.map((plugin) => '\${${plugin.name}_bundled_libraries}').join(';')}")\n',
+          );
+          final log = File('${project.path}\\build.log');
+          final ok =
+              await _run(environment, log, [
+                '-S',
+                project.path,
+                '-B',
+                '${project.path}\\out',
+                '-A',
+                'x64',
+              ]) &&
+              await _run(environment, log, [
+                '--build',
+                '${project.path}\\out',
+                '--config',
+                'Release',
+                '--target',
+                'raccoon_static_plugins',
+              ]);
+          final made = [
+            ..._dllsIn(Directory('${project.path}\\out\\plugin')),
+            ..._bundled(File('${project.path}\\out\\bundled.txt')),
+          ];
+          if (!ok || made.isEmpty) {
+            whyNot = _keepFailure(
+              cache,
+              group,
+              environment,
+              'did not build; see ${log.path}',
+              log,
+            );
+          } else {
+            final staging = Directory('${cached.path}.partial-$pid')
+              ..createSync(recursive: true);
+            for (final dll in made) {
+              dll.copySync('${staging.path}\\${_basename(dll.path)}');
+            }
+            _settle(staging, cached);
+            dlls = _dllsIn(cached);
+            if (dlls.isEmpty) dlls = made;
+            built.addAll(names);
+          }
+        }
+      }
+    } on Exception catch (error) {
+      whyNot = '$error';
+    }
+    if (whyNot != null) {
+      failed.add('${names.join(', ')} ($whyNot)');
+      for (final name in names) {
+        status.add({'name': name, 'state': 'failed', 'detail': whyNot});
+      }
+    } else if (dlls.isNotEmpty) {
+      for (final dll in dlls) {
+        dll.copySync('${lib.path}\\${_basename(dll.path)}');
+      }
+      for (final plugin in statics) {
+        final symbol = plugin.symbol;
+        if (symbol == null) continue;
+        entries.add({
+          'name': plugin.name,
+          'library': '${lib.path}\\raccoon_static_plugins.dll',
+          'symbol': symbol,
+        });
+      }
     }
   }
 
@@ -397,6 +538,8 @@ final class _Plugin {
     required this.root,
     required this.symbol,
     required this.key,
+    required this.cmake,
+    required this.isStatic,
   });
 
   final String name;
@@ -407,6 +550,35 @@ final class _Plugin {
 
   /// Its directory in the cache: plugin version and runner version.
   final String key;
+
+  /// Its windows/CMakeLists.txt.
+  final String cmake;
+
+  /// Whether that builds it as a static library, for an .exe to link.
+  final bool isStatic;
+}
+
+/// [plugins] with each after the others whose `<name>_plugin` target it
+/// links: firebase_core before the FlutterFire plugins built on it.
+List<_Plugin> _linkOrder(List<_Plugin> plugins) {
+  final ordered = <_Plugin>[];
+  final placed = <String>{};
+  void place(_Plugin plugin, Set<String> visiting) {
+    if (placed.contains(plugin.name) || !visiting.add(plugin.name)) return;
+    for (final other in plugins) {
+      if (other.name != plugin.name &&
+          plugin.cmake.contains('${other.name}_plugin')) {
+        place(other, visiting);
+      }
+    }
+    placed.add(plugin.name);
+    ordered.add(plugin);
+  }
+
+  for (final plugin in plugins) {
+    place(plugin, <String>{});
+  }
+  return ordered;
 }
 
 final class _NoToolchain implements Exception {
@@ -525,14 +697,18 @@ String _versionKey(String name, String root, List<String> pubCaches) {
 
     walk(Directory(root), true);
   }
-  // FNV-1a, 64 bits: dart: has no hash of its own to offer here.
+  final kind = cache == null ? 'path' : 'git';
+  return _hash('$name-$kind', shape.toString());
+}
+
+/// [prefix] and a hash of [text]: FNV-1a, 64 bits, as dart: has no hash of
+/// its own to offer here.
+String _hash(String prefix, String text) {
   var hash = 0xcbf29ce484222325;
-  for (final unit in utf8.encode(shape.toString())) {
+  for (final unit in utf8.encode(text)) {
     hash = ((hash ^ unit) * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF;
   }
-  final digest = hash.toUnsigned(64).toRadixString(16).padLeft(16, '0');
-  final kind = cache == null ? 'path' : 'git';
-  return '$name-$kind-$digest';
+  return '$prefix-${hash.toUnsigned(64).toRadixString(16).padLeft(16, '0')}';
 }
 
 /// What Flutter's Windows template gives a plugin: the root's UNICODE, the

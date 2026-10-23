@@ -1,0 +1,14 @@
+name: plugins_static
+description: "Sets a value through one static-library Windows plugin and reads it through another built on it, printing STATIC:<value>, for the test that an app's static plugins share one module (raccoon#104)."
+publish_to: "none"
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  raccoon_static_core:
+    path: ../plugins/static_core
+  raccoon_static_user:
+    path: ../plugins/static_user
