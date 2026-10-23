@@ -3,14 +3,15 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 /// The host's native side for GPU buffers: a Flutter texture fed from the
-/// runner's GPU socket. See `linux/raccoon_view_plugin.cc` and
-/// `macos/raccoon_view/Sources/raccoon_view/RaccoonViewPlugin.mm`.
+/// runner's GPU socket. See `linux/raccoon_view_plugin.cc`,
+/// `macos/raccoon_view/Sources/raccoon_view/RaccoonViewPlugin.mm` and
+/// `windows/raccoon_view_plugin.cpp`.
 abstract interface class HostGpuTextures {
   /// The implementation for this host, null where there is none.
   static HostGpuTextures? forHost() => switch (Platform.operatingSystem) {
-    // GL textures start at the bottom left; Metal's at the top.
+    // GL textures start at the bottom left; Metal's and D3D11's at the top.
     'linux' => const MethodChannelGpuTextures(bottomUp: true),
-    'macos' => const MethodChannelGpuTextures(bottomUp: false),
+    'macos' || 'windows' => const MethodChannelGpuTextures(bottomUp: false),
     _ => null,
   };
 

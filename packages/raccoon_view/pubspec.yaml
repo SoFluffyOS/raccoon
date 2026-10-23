@@ -23,6 +23,8 @@ flutter:
         pluginClass: RaccoonViewPlugin
       macos:
         pluginClass: RaccoonViewPlugin
+      windows:
+        pluginClass: RaccoonViewPlugin
 
 dev_dependencies:
   flutter_test:
