@@ -84,6 +84,19 @@ clone_tree() {
   cp -r "$1" "$2"
 }
 
+# The engine revision of the SDK in use, which keys the plugin cache: the
+# SDK's stamp, read in place, or tool/engine_dir.sh's answer when there is
+# none. Every install needs it; only a run needs the engine itself.
+engine_revision() {
+  local stamp
+  stamp="$(sdk_root 2>/dev/null)/bin/cache/engine.stamp"
+  if [ -f "$stamp" ]; then
+    tr -d '[:space:]' < "$stamp"
+    return 0
+  fi
+  basename "$(dirname "$("$ROOT/tool/engine_dir.sh")")"
+}
+
 sdk_root() {
   if [ -n "${FLUTTER_ROOT:-}" ] && [ -d "$FLUTTER_ROOT/bin/cache" ]; then
     echo "$FLUTTER_ROOT"
@@ -217,7 +230,7 @@ build_plugins_windows() {
     echo "🦝 this runner has no flutter_windows.dll; native plugins skipped" >&2
     return 0
   fi
-  engine="$(basename "$(dirname "$("$ROOT/tool/engine_dir.sh")")")"
+  engine="$(engine_revision)"
   version="$(tr -d '[:space:]' < "$ROOT/VERSION")"
   cache="${RACCOON_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/$engine}"
   sdk="$(sdk_root)"
@@ -244,13 +257,13 @@ build_plugins_linux() {
     echo "🦝 this runner has no plugin library; native plugins skipped" >&2
     return 0
   fi
-  engine="$(basename "$(dirname "$("$ROOT/tool/engine_dir.sh")")")"
+  engine="$(engine_revision)"
   version="$(tr -d '[:space:]' < "$ROOT/VERSION")"
   cache="${RACCOON_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/$engine}"
   python3 - "$config" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS" \
     "$cache" "$version" "$(uname -m)" \
     "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-$engine-linux-$(uname -m).tar.gz}" <<'PY'
-import glob, hashlib, json, os, re, shutil, subprocess, sys, tarfile, time, urllib.request
+import glob, hashlib, json, os, re, shutil, subprocess, sys, tarfile, time
 started = time.time()
 from urllib.parse import unquote, urlparse
 
@@ -336,6 +349,8 @@ def fetch_prebuilt():
     os.makedirs(cache, exist_ok=True)
     try:
         archive = os.path.join(cache, 'prebuilt-%s.tar.gz' % runner_version)
+        # Only when downloading: importing it costs every install 20 ms.
+        import urllib.request
         urllib.request.urlretrieve(prebuilt_url, archive)
         with tarfile.open(archive) as tar:
             members = [m for m in tar.getmembers()
@@ -491,14 +506,14 @@ PY
 build_plugins_macos() {
   local project="$1" out="$2" config="$3" sdk engine version cache
   sdk="$(sdk_root)"
-  engine="$(basename "$(dirname "$("$ROOT/tool/engine_dir.sh")")")"
+  engine="$(engine_revision)"
   version="$(tr -d '[:space:]' < "$ROOT/VERSION")"
   cache="${RACCOON_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/$engine}"
   python3 - "$config" "$out" "$VIRTUAL_PLUGINS_MACOS" \
     "$cache" "$version" "$(uname -m)" "$sdk/bin/cache/artifacts/engine/darwin-x64" \
     "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-$engine-macos-$(uname -m).tar.gz}" \
     "$project" <<'PY'
-import hashlib, json, os, re, shutil, subprocess, sys, tarfile, time, urllib.request
+import hashlib, json, os, re, shutil, subprocess, sys, tarfile, time
 started = time.time()
 from urllib.parse import unquote, urlparse
 
@@ -592,6 +607,8 @@ def fetch_prebuilt():
     os.makedirs(cache, exist_ok=True)
     try:
         archive = os.path.join(cache, 'prebuilt-%s.tar.gz' % runner_version)
+        # Only when downloading: importing it costs every install 20 ms.
+        import urllib.request
         urllib.request.urlretrieve(prebuilt_url, archive)
         with tarfile.open(archive) as tar:
             # Frameworks, with their symlinks; nothing that would land or
