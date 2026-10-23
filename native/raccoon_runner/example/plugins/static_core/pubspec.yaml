@@ -1,0 +1,18 @@
+name: raccoon_static_core
+description: A Windows plugin built as a static library, as FlutterFire's are, holding one value that raccoon_static_user reads. The runner's test of static plugins sharing one module (raccoon#104).
+publish_to: "none"
+version: 0.1.0
+
+environment:
+  sdk: ^3.6.0
+  flutter: ">=3.3.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      windows:
+        pluginClass: RaccoonStaticCorePlugin
