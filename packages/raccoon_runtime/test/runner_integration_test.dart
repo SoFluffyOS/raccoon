@@ -2112,6 +2112,89 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  // example/plugins_static sets a value through a static-library plugin and
+  // reads it through another linked on it, as FlutterFire's are built (#104).
+  final pluginsStaticDir = p.join(runnerDir, 'example', 'plugins_static');
+  test(
+    'an app\'s static-library plugins build into one module and share its state',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final out = p.join(temp.path, 'plugins');
+      final built = await Process.run(
+        p.join(sdk ?? '', 'bin', 'cache', 'dart-sdk', 'bin', 'dart.exe'),
+        [
+          p.join(runnerDir, 'tool', 'plugins_windows.dart'),
+          p.join(pluginsStaticDir, '.dart_tool', 'package_config.json'),
+          out,
+          'desktop_window window_manager window_size screen_retriever',
+          p.join(temp.path, 'cache'),
+          File(p.join(runnerDir, 'VERSION')).readAsStringSync().trim(),
+          p.join(
+            sdk ?? '',
+            'bin',
+            'cache',
+            'artifacts',
+            'engine',
+            'windows-x64',
+          ),
+        ],
+      );
+      expect(
+        '${built.stderr}',
+        contains('2 built: raccoon_static_core, raccoon_static_user'),
+      );
+      final manifest =
+          jsonDecode(File(p.join(out, 'manifest.json')).readAsStringSync())
+              as Map;
+      final libraries = {
+        for (final entry in manifest['plugins'] as List)
+          p.basename('${(entry as Map)['library']}'),
+      };
+      expect(libraries, {'raccoon_static_plugins.dll'});
+
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: p.join(pluginsStaticDir, 'build', 'flutter_assets'),
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          plugins: p.join(out, 'manifest.json'),
+        ),
+      );
+      final said = Completer<String>();
+      runner.stdout.listen((line) {
+        final at = line.indexOf('STATIC:');
+        if (at >= 0 && !said.isCompleted) said.complete(line.substring(at));
+      });
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        // 42 from one module; 0 if each plugin had its own copy of the
+        // core's state.
+        expect(
+          await said.future.timeout(const Duration(seconds: 20)),
+          'STATIC:42',
+        );
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+      }
+    },
+    skip:
+        !Platform.isWindows
+            ? 'static plugins are built this way on Windows'
+            : ready &&
+                Directory(
+                  p.join(pluginsStaticDir, 'build', 'flutter_assets'),
+                ).existsSync()
+            ? false
+            : 'build the runner and example/plugins_static first',
+    timeout: const Timeout(Duration(minutes: 10)),
+  );
+
   // example/plugins_modal animates, then asks the echo plugin for a message
   // box that closes itself after two seconds.
   final pluginsModalAssets = p.join(

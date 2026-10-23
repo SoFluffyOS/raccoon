@@ -1,0 +1,20 @@
+name: raccoon_static_user
+description: A Windows plugin built as a static library on raccoon_static_core, reading the value that one keeps, as firebase_auth reads firebase_core's app. The runner's test of static plugins sharing one module (raccoon#104).
+publish_to: "none"
+version: 0.1.0
+
+environment:
+  sdk: ^3.6.0
+  flutter: ">=3.3.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  raccoon_static_core:
+    path: ../static_core
+
+flutter:
+  plugin:
+    platforms:
+      windows:
+        pluginClass: RaccoonStaticUserPlugin

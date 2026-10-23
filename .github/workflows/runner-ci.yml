@@ -130,7 +130,7 @@ jobs:
 
       - name: Build the example bundles
         run: |
-          for example in hello spin channels camera plugins_app plugins_modal no_plugin no_plugin_late; do
+          for example in hello spin channels camera plugins_app plugins_modal plugins_static no_plugin no_plugin_late; do
             (cd "example/$example" && flutter build bundle --target-platform=${{ matrix.target }})
           done
 
