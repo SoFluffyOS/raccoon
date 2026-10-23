@@ -20,6 +20,7 @@ import 'dart:convert';
 import 'dart:io';
 
 Future<void> main(List<String> arguments) async {
+  final watch = Stopwatch()..start();
   if (arguments.length != 6) {
     stderr.writeln(
       'usage: plugins_windows.dart <package_config.json> <out> <virtual> '
@@ -80,9 +81,9 @@ Future<void> main(List<String> arguments) async {
     // names hosts too, with nothing under them (#92).
     final plugin = package.pubspec.substring(found.end);
     final block = _windowsBlock(plugin);
-    final pluginClass = RegExp(
-      r'pluginClass:\s*(\w+)',
-    ).firstMatch(block)?.group(1);
+    final pluginClass = RegExp(r'pluginClass:\s*(\w+)')
+        .firstMatch(block)
+        ?.group(1);
     final ffi = RegExp(r'ffiPlugin:\s*true').hasMatch(block);
     if (pluginClass == null && !ffi) {
       // An app-facing plugin with no Windows at all: the app's calls to it
@@ -160,7 +161,8 @@ Future<void> main(List<String> arguments) async {
       // Visual Studio's own generator, CMake's default here, as the Flutter
       // tool builds Windows apps: some plugins hand MSBuild a NuGet
       // package's .targets file, which no other generator reads.
-      final ok = await _run(environment, log, [
+      final ok =
+          await _run(environment, log, [
             '-S',
             project.path,
             '-B',
@@ -223,11 +225,9 @@ Future<void> main(List<String> arguments) async {
   }
 
   File('$out\\manifest.json').writeAsStringSync(
-    const JsonEncoder.withIndent(' ').convert({
-      'plugins': entries,
-      'status': status,
-      'library_path': lib.path,
-    }),
+    const JsonEncoder.withIndent(
+      ' ',
+    ).convert({'plugins': entries, 'status': status, 'library_path': lib.path}),
   );
   final parts = [
     if (built.isNotEmpty) '${built.length} built: ${built.join(', ')}',
@@ -237,7 +237,8 @@ Future<void> main(List<String> arguments) async {
     if (failed.isNotEmpty) '${failed.length} failed: ${failed.join('; ')}',
   ];
   stderr.writeln(
-    'raccoon-device: native plugins, '
+    '🦝 native plugins ready in '
+    '${(watch.elapsedMilliseconds / 1000).toStringAsFixed(1)} s: '
     '${parts.isEmpty ? 'none to build' : parts.join('; ')}',
   );
 }
@@ -289,12 +290,12 @@ String _windowsBlock(String pubspec) {
 /// the shape of its windows/ directory, so an edit rebuilds it.
 String _versionKey(String name, String root) {
   final segments = root.split(RegExp(r'[\\/]'));
-  if (segments.contains('hosted')) return segments.lastWhere((s) => s.isNotEmpty);
+  if (segments.contains('hosted'))
+    return segments.lastWhere((s) => s.isNotEmpty);
   final windows = Directory('$root\\windows');
   final shape = StringBuffer();
-  final files =
-      windows.listSync(recursive: true).whereType<File>().toList()
-        ..sort((a, b) => a.path.compareTo(b.path));
+  final files = windows.listSync(recursive: true).whereType<File>().toList()
+    ..sort((a, b) => a.path.compareTo(b.path));
   for (final file in files) {
     final stat = file.statSync();
     shape.writeln(
@@ -348,8 +349,7 @@ target_include_directories(flutter_wrapper_plugin PUBLIC "$wrapper/include")
 Future<Map<String, String>> _msvcEnvironment() async {
   final programs =
       Platform.environment['ProgramFiles(x86)'] ?? r'C:\Program Files (x86)';
-  final vswhere =
-      '$programs\\Microsoft Visual Studio\\Installer\\vswhere.exe';
+  final vswhere = '$programs\\Microsoft Visual Studio\\Installer\\vswhere.exe';
   if (!File(vswhere).existsSync()) {
     throw const _NoToolchain('no Visual Studio');
   }
@@ -367,15 +367,23 @@ Future<Map<String, String>> _msvcEnvironment() async {
     throw const _NoToolchain('no Visual Studio with the C++ tools');
   }
   final vcvars = '$install\\VC\\Auxiliary\\Build\\vcvars64.bat';
-  final set = await Process.run('cmd', ['/c', 'call', vcvars, '>nul', '&&', 'set']);
+  final set = await Process.run('cmd', [
+    '/c',
+    'call',
+    vcvars,
+    '>nul',
+    '&&',
+    'set',
+  ]);
   if (set.exitCode != 0) throw const _NoToolchain('vcvars64.bat failed');
   final environment = <String, String>{};
   for (final line in const LineSplitter().convert('${set.stdout}')) {
     final at = line.indexOf('=');
     if (at <= 0) continue;
     final name = line.substring(0, at);
-    environment[name.toUpperCase() == 'PATH' ? 'PATH' : name] =
-        line.substring(at + 1);
+    environment[name.toUpperCase() == 'PATH' ? 'PATH' : name] = line.substring(
+      at + 1,
+    );
   }
   return environment;
 }
@@ -393,11 +401,7 @@ Future<bool> _run(
       .where((directory) => directory.isNotEmpty)
       .map((directory) => '$directory\\cmake.exe')
       .firstWhere((path) => File(path).existsSync(), orElse: () => 'cmake');
-  final result = await Process.run(
-    cmake,
-    arguments,
-    environment: environment,
-  );
+  final result = await Process.run(cmake, arguments, environment: environment);
   log.writeAsStringSync(
     '\$ cmake ${arguments.join(' ')}\n${result.stdout}${result.stderr}',
     mode: FileMode.append,
@@ -420,7 +424,8 @@ List<File> _bundled(File list) {
   if (!list.existsSync()) return const [];
   return [
     for (final path in list.readAsStringSync().split(';'))
-      if (path.trim().toLowerCase().endsWith('.dll') && File(path.trim()).existsSync())
+      if (path.trim().toLowerCase().endsWith('.dll') &&
+          File(path.trim()).existsSync())
         File(path.trim()),
   ];
 }

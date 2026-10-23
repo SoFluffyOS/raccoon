@@ -76,7 +76,7 @@ bool UserDefaultsChannels::Handle(const std::string& channel,
     return true;
   }
   if (std::getenv("RACCOON_TRACE") != nullptr) {
-    std::fprintf(stderr, "raccoon_runner: shared_preferences %s.%s\n",
+    std::fprintf(stderr, "🦝 shared_preferences %s.%s\n",
                  api.c_str(), method.c_str());
   }
   Load();
@@ -205,7 +205,7 @@ void UserDefaultsChannels::Load() {
   CodecValue saved;
   if (!DecodeValue(bytes.data(), bytes.size(), &saved) ||
       saved.type() != CodecValue::Type::kMap) {
-    std::fprintf(stderr, "raccoon_runner: ignoring unreadable %s\n",
+    std::fprintf(stderr, "🦝 ignoring unreadable %s\n",
                  path_.c_str());
     return;
   }
@@ -236,13 +236,13 @@ void UserDefaultsChannels::Save() const {
     out.write(reinterpret_cast<const char*>(bytes.data()),
               static_cast<std::streamsize>(bytes.size()));
     if (!out) {
-      std::fprintf(stderr, "raccoon_runner: could not write %s\n", temp.c_str());
+      std::fprintf(stderr, "🦝 could not write %s\n", temp.c_str());
       return;
     }
   }
   std::filesystem::rename(temp, path, error);
   if (error) {
-    std::fprintf(stderr, "raccoon_runner: could not replace %s: %s\n",
+    std::fprintf(stderr, "🦝 could not replace %s: %s\n",
                  path_.c_str(), error.message().c_str());
   }
 }

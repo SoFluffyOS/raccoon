@@ -28,7 +28,7 @@ PluginHost::PluginHost(Bridge bridge) : bridge_(std::move(bridge)) {
   registrar_ = fl_plugin_registrar_new(nullptr, messenger_, textures_);
   // Plugins that open dialogs want GTK up; without a display that is a no.
   if (!gtk_init_check(nullptr, nullptr)) {
-    std::fprintf(stderr, "raccoon_runner: no display for GTK; plugins that open windows will not\n");
+    std::fprintf(stderr, "🦝 no display for GTK; plugins that open windows will not\n");
   }
 }
 
@@ -87,7 +87,7 @@ bool PluginHost::PopulateTexture(int64_t texture_id, size_t width, size_t height
                                           static_cast<uint32_t>(height), out, &error);
   }
   if (!ok && error != nullptr) {
-    std::fprintf(stderr, "raccoon_runner: texture %ld: %s\n", static_cast<long>(texture_id),
+    std::fprintf(stderr, "🦝 texture %ld: %s\n", static_cast<long>(texture_id),
                  error->message);
   }
   return ok;

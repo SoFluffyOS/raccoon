@@ -79,7 +79,7 @@ class EngineHost {
   // Answers with nothing, which the app sees as no plugin
   // (MissingPluginException, or Pigeon's channel-error), and says so on
   // stderr the first time |channel| goes unanswered for |why|:
-  // "raccoon_runner: nothing answered CHANNEL (WHY); the app sees no
+  // "🦝 nothing answered CHANNEL (WHY); the app sees no
   // plugin". Hosts and the tool's output name the channel from that line.
   // A message that expects no reply (|handle| null) is let go quietly, and
   // so are the engine's own flutter/ channels.

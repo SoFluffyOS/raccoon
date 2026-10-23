@@ -153,7 +153,7 @@ using raccoon::PluginHost;
     @try {
       handler(data, reply);
     } @catch (NSException* exception) {
-      std::fprintf(stderr, "raccoon_runner: %s threw %s: %s\n", channel.UTF8String,
+      std::fprintf(stderr, "🦝 %s threw %s: %s\n", channel.UTF8String,
                    exception.name.UTF8String, exception.reason.UTF8String);
       reply(nil);
     }
@@ -229,7 +229,7 @@ struct TextureFrame {
     _textures[@(textureId)] = texture;
   }
   if (_cache == nullptr || !_bridge->register_texture(textureId)) {
-    std::fprintf(stderr, "raccoon_runner: texture %lld: %s\n", static_cast<long long>(textureId),
+    std::fprintf(stderr, "🦝 texture %lld: %s\n", static_cast<long long>(textureId),
                  _cache == nullptr ? "textures need the Metal renderer"
                                    : "the engine took no texture");
   }
@@ -303,7 +303,7 @@ struct TextureFrame {
       color_space = kBT601FullRange;
     }
   } else {
-    std::fprintf(stderr, "raccoon_runner: texture %lld: pixel format %u not drawn\n",
+    std::fprintf(stderr, "🦝 texture %lld: pixel format %u not drawn\n",
                  static_cast<long long>(textureId), static_cast<unsigned>(format));
   }
   const size_t width = CVPixelBufferGetWidth(buffer);
@@ -387,7 +387,7 @@ struct TextureFrame {
 
 - (void)registerViewFactory:(NSObject<FlutterPlatformViewFactory>*)factory
                      withId:(NSString*)factoryId {
-  std::fprintf(stderr, "raccoon_runner: platform view %s not supported\n", factoryId.UTF8String);
+  std::fprintf(stderr, "🦝 platform view %s not supported\n", factoryId.UTF8String);
 }
 
 - (void)publish:(NSObject*)value {
@@ -464,7 +464,7 @@ bool PluginHost::Prepare(const std::string& flutter_framework, std::string* erro
   if (saved >= 0) close(saved);
   if (shared > 0) {
     std::fprintf(stderr,
-                 "raccoon_runner: FlutterMacOS shares %d Objective-C classes with the engine "
+                 "🦝 FlutterMacOS shares %d Objective-C classes with the engine "
                  "library, the same revision; the runtime's warnings are left out\n",
                  shared);
   }

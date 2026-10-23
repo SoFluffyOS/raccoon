@@ -101,8 +101,8 @@ final class RunnerProcess {
   final _stdout = StreamController<String>.broadcast();
   final _stderr = StreamController<String>.broadcast();
 
-  static const _listeningPrefix = 'raccoon_runner: listening on ';
-  static const _rendererPrefix = 'raccoon_runner: renderer ';
+  // The runner's lines start with 🦝 (#94), and did with `raccoon_runner:`.
+  static const _prefixes = ['🦝 ', 'raccoon_runner: '];
   static const _vmServicePrefix = 'The Dart VM service is listening on ';
   String? _renderer;
 
@@ -126,11 +126,17 @@ final class RunnerProcess {
   bool kill() => _process.kill();
 
   void _onStdoutLine(String line) {
-    if (line.startsWith(_listeningPrefix) && !_listening.isCompleted) {
+    final said = switch (_prefixes.where(line.startsWith).firstOrNull) {
+      final prefix? => line.substring(prefix.length),
+      null => null,
+    };
+    if (said != null &&
+        said.startsWith('listening on ') &&
+        !_listening.isCompleted) {
       _listening.complete();
     }
-    if (line.startsWith(_rendererPrefix)) {
-      _renderer = line.substring(_rendererPrefix.length).split(' ').first;
+    if (said != null && said.startsWith('renderer ')) {
+      _renderer = said.substring('renderer '.length).split(' ').first;
     }
     if (line.startsWith(_vmServicePrefix) && !_vmService.isCompleted) {
       _vmService.complete(line.substring(_vmServicePrefix.length).trim());

@@ -266,7 +266,7 @@ void GlRenderer::Release(uint32_t generation, int index, int fence_fd) {
   buffer.fence = fence_fd;
   buffer.busy = false;
   if (kTrace) {
-    std::fprintf(stderr, "raccoon_runner: gl release pool %d%s\n", index,
+    std::fprintf(stderr, "🦝 gl release pool %d%s\n", index,
                  fence_fd >= 0 ? " (fenced)" : "");
   }
 }
@@ -281,7 +281,7 @@ void GlRenderer::ReleaseAll() {
     if (static_cast<int>(i) == current_) continue;
     buffer.busy = false;
   }
-  if (kTrace) std::fprintf(stderr, "raccoon_runner: gl release pool all\n");
+  if (kTrace) std::fprintf(stderr, "🦝 gl release pool all\n");
 }
 
 int GlRenderer::ExportFence() {
@@ -386,7 +386,7 @@ bool GlRenderer::BuildPool(size_t width, size_t height) {
   pool_height_ = height;
   ++generation_;
   if (kTrace) {
-    std::fprintf(stderr, "raccoon_runner: gl pool %zu x %zux%zu generation %u\n",
+    std::fprintf(stderr, "🦝 gl pool %zu x %zux%zu generation %u\n",
                  pool_.size(), width, height, generation_);
   }
   return true;
@@ -405,7 +405,7 @@ uint32_t GlRenderer::Fbo(size_t width, size_t height) {
         if (!BuildPool(width, height)) {
           pool_wanted_ = false;
           std::fprintf(stderr,
-                       "raccoon_runner: no GPU buffers: the pool could not be "
+                       "🦝 no GPU buffers: the pool could not be "
                        "built; frames by readback\n");
         }
       }
@@ -418,14 +418,14 @@ uint32_t GlRenderer::Fbo(size_t width, size_t height) {
         glBindFramebuffer(GL_FRAMEBUFFER, pool_fbo_);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                                GL_TEXTURE_2D, pool_[i].texture, 0);
-        if (kTrace) std::fprintf(stderr, "raccoon_runner: gl fbo -> pool %zu\n", i);
+        if (kTrace) std::fprintf(stderr, "🦝 gl fbo -> pool %zu\n", i);
         fbo = pool_fbo_;
         break;
       }
       // Every buffer is with the client: this frame goes by readback.
     }
     if (fbo == 0) {
-      if (kTrace && pool_wanted_) std::fprintf(stderr, "raccoon_runner: gl fbo -> readback\n");
+      if (kTrace && pool_wanted_) std::fprintf(stderr, "🦝 gl fbo -> readback\n");
       fbo = EnsureSize(width, height) ? fbo_ : 0;
     }
   }
@@ -454,7 +454,7 @@ bool GlRenderer::Present(const FrameCallback& callback) {
     int fence = ExportFence();
     if (fence < 0) glFinish();
     if (kTrace) {
-      std::fprintf(stderr, "raccoon_runner: gl present pool %d%s\n", index,
+      std::fprintf(stderr, "🦝 gl present pool %d%s\n", index,
                    fence >= 0 ? " (fenced)" : "");
     }
     if (gpu_frame_) {

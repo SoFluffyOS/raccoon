@@ -187,7 +187,7 @@ build_plugins() {
     build_plugins_windows "$project" "$out" "$config"
     return 0
   fi
-  command -v python3 >/dev/null || { echo "raccoon-device: no python3; native plugins skipped" >&2; return 0; }
+  command -v python3 >/dev/null || { echo "🦝 no python3; native plugins skipped" >&2; return 0; }
   case "$(uname -s)" in
     Darwin) build_plugins_macos "$project" "$out" "$config" ;;
     *) build_plugins_linux "$project" "$out" "$config" ;;
@@ -201,7 +201,7 @@ build_plugins() {
 build_plugins_windows() {
   local project="$1" out="$2" config="$3" engine version cache sdk
   if [ ! -f "$(dirname "$RUNNER")/flutter_windows.dll" ]; then
-    echo "raccoon-device: this runner has no flutter_windows.dll; native plugins skipped" >&2
+    echo "🦝 this runner has no flutter_windows.dll; native plugins skipped" >&2
     return 0
   fi
   engine="$(basename "$(dirname "$("$ROOT/tool/engine_dir.sh")")")"
@@ -228,7 +228,7 @@ build_plugins_linux() {
   lib="$(plugin_library || true)"
   headers="$(plugin_headers || true)"
   if [ -z "$lib" ] || [ -z "$headers" ]; then
-    echo "raccoon-device: this runner has no plugin library; native plugins skipped" >&2
+    echo "🦝 this runner has no plugin library; native plugins skipped" >&2
     return 0
   fi
   engine="$(basename "$(dirname "$("$ROOT/tool/engine_dir.sh")")")"
@@ -237,7 +237,8 @@ build_plugins_linux() {
   python3 - "$config" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS" \
     "$cache" "$version" "$(uname -m)" \
     "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-$engine-linux-$(uname -m).tar.gz}" <<'PY'
-import glob, hashlib, json, os, re, shutil, subprocess, sys, tarfile, urllib.request
+import glob, hashlib, json, os, re, shutil, subprocess, sys, tarfile, time, urllib.request
+started = time.time()
 from urllib.parse import unquote, urlparse
 
 config, out, lib, headers, virtual, cache, runner_version, arch, prebuilt_url = sys.argv[1:10]
@@ -315,7 +316,7 @@ def fetch_prebuilt():
                        if m.isfile() and m.name.endswith('.so') and '..' not in m.name]
             tar.extractall(cache, members=members)
         os.remove(archive)
-        print('raccoon-device: prebuilt plugins fetched for runner %s' % runner_version, file=sys.stderr)
+        print('🦝 prebuilt plugins fetched for runner %s' % runner_version, file=sys.stderr)
     except Exception:
         pass  # no archive for this version, or no network: build here instead
     open(marker, 'w').close()
@@ -446,7 +447,7 @@ if failed:
     parts.append('%d failed: %s' % (len(failed), '; '.join(failed)))
 if not parts:
     parts.append('none to build')
-print('raccoon-device: native plugins, ' + '; '.join(parts), file=sys.stderr)
+print('🦝 native plugins ready in %.1f s: ' % (time.time() - started) + '; '.join(parts), file=sys.stderr)
 PY
 }
 
@@ -471,7 +472,8 @@ build_plugins_macos() {
     "$cache" "$version" "$(uname -m)" "$sdk/bin/cache/artifacts/engine/darwin-x64" \
     "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-$engine-macos-$(uname -m).tar.gz}" \
     "$project" <<'PY'
-import hashlib, json, os, re, shutil, subprocess, sys, tarfile, urllib.request
+import hashlib, json, os, re, shutil, subprocess, sys, tarfile, time, urllib.request
+started = time.time()
 from urllib.parse import unquote, urlparse
 
 config, out, virtual, cache, runner_version, arch, engine_dir, prebuilt_url, project = sys.argv[1:10]
@@ -563,7 +565,7 @@ def fetch_prebuilt():
                            and not (m.issym() and (m.linkname.startswith('/') or '..' in m.linkname.split('/')[:-1]))]
                 tar.extractall(cache, members=members)
         os.remove(archive)
-        print('raccoon-device: prebuilt plugins fetched for runner %s' % runner_version, file=sys.stderr)
+        print('🦝 prebuilt plugins fetched for runner %s' % runner_version, file=sys.stderr)
     except Exception:
         pass  # no archive for this version, or no network: build here instead
     open(marker, 'w').close()
@@ -903,7 +905,7 @@ if failed:
     parts.append('%d failed: %s' % (len(failed), '; '.join(failed)))
 if not parts:
     parts.append('none to build')
-print('raccoon-device: native plugins, ' + '; '.join(parts), file=sys.stderr)
+print('🦝 native plugins ready in %.1f s: ' % (time.time() - started) + '; '.join(parts), file=sys.stderr)
 PY
 }
 
@@ -954,14 +956,15 @@ for package in json.load(open(config)).get('packages', []):
 sys.exit(1)
 PY
   if [ ! -f "$project/lib/main.dart" ]; then
-    echo "raccoon-device: native assets skipped: no lib/main.dart to build them with" >&2
+    echo "🦝 native assets skipped: no lib/main.dart to build them with" >&2
     return 0
   fi
   log="$app/native_assets.log"
   mkdir -p "$out"
   had_linux=""
   [ -d "$project/linux" ] && had_linux=1
-  local status=0
+  local status=0 started
+  started="$(python3 -c 'import time; print(time.time())')"
   (cd "$project" && "$(sdk_root)/bin/flutter" assemble --no-version-check \
     -dBuildMode=debug -dTargetFile=lib/main.dart --output="$out" \
     "${target[@]}") > "$log" 2>&1 || status=$?
@@ -970,12 +973,12 @@ PY
     rm -rf "$project/linux"
   fi
   if [ "$status" -ne 0 ] || [ ! -f "$manifest" ]; then
-    echo "raccoon-device: native assets did not build; see $log" >&2
+    echo "🦝 native assets did not build; see $log" >&2
     return 0
   fi
-  python3 - "$manifest" "$built" "$app" <<'PY'
-import json, os, shutil, sys
-manifest_path, built, app = sys.argv[1:4]
+  python3 - "$manifest" "$built" "$app" "$started" <<'PY'
+import json, os, shutil, sys, time
+manifest_path, built, app, started = sys.argv[1:5]
 manifest = json.load(open(manifest_path))
 installed = os.path.join(app, 'native_assets')
 shutil.rmtree(installed, ignore_errors=True)
@@ -990,7 +993,7 @@ for assets in manifest.get('native-assets', {}).values():
             assets[asset] = ['absolute', os.path.join(installed, path[1])]
         count += 1
 json.dump(manifest, open(os.path.join(app, 'flutter_assets', 'NativeAssetsManifest.json'), 'w'))
-print('raccoon-device: native assets, %d for this host' % count, file=sys.stderr)
+print('🦝 native assets ready in %.1f s, %d for this host' % (time.time() - float(started), count), file=sys.stderr)
 PY
 }
 
@@ -1011,9 +1014,9 @@ case "$verb" in
       # No AppleDouble ._ files for extended attributes: macOS's tar adds
       # them, and they are no frameworks.
       COPYFILE_DISABLE=1 tar -C "$stage/cache" -czf "$archive" .
-      echo "raccoon-device: $(find "$stage/cache" \( -name '*.so' -o -name '*.framework' \) -prune | wc -l | tr -d ' ') libraries in $archive"
+      echo "🦝 $(find "$stage/cache" \( -name '*.so' -o -name '*.framework' \) -prune | wc -l | tr -d ' ') libraries in $archive"
     else
-      echo "raccoon-device: nothing prebuilt" >&2
+      echo "🦝 nothing prebuilt" >&2
     fi
     rm -rf "$stage"
     ;;
@@ -1104,9 +1107,9 @@ case "$verb" in
     done
     said=""
     if [ "$status" -gt 128 ]; then
-      said="raccoon-device: raccoon_runner died of signal $(kill -l $((status - 128)) 2>/dev/null || echo '?') ($((status - 128)))"
+      said="🦝 raccoon_runner died of signal $(kill -l $((status - 128)) 2>/dev/null || echo '?') ($((status - 128)))"
     elif [ "$status" -ne 0 ]; then
-      said="raccoon-device: raccoon_runner exited with code $status"
+      said="🦝 raccoon_runner exited with code $status"
     fi
     if [ -n "$said" ]; then
       echo "$said" >&2

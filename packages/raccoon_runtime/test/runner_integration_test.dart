@@ -237,7 +237,7 @@ void main() {
         'native_assets_app',
       ], environment: helperEnvironment);
       expect(install.exitCode, 0, reason: '${install.stderr}');
-      expect('${install.stderr}', contains('native assets, 1 for this host'));
+      expect('${install.stderr}', contains('1 for this host'));
       // The Linux target's engine copy goes again.
       expect(
         Directory(p.join(nativeAssetsApp, 'linux')).existsSync(),
@@ -2426,9 +2426,7 @@ void main() {
         // The runner said so under its own name, for the tool's output.
         expect(
           client.startupLog.any(
-            (line) => line.startsWith(
-              'raccoon_runner: nothing answered $pigeonChannel (',
-            ),
+            (line) => line.startsWith('🦝 nothing answered $pigeonChannel ('),
           ),
           isTrue,
         );
@@ -2566,7 +2564,7 @@ void main() {
           output.where(
             (line) =>
                 line ==
-                'raccoon_runner: nothing answered $lateChannel (the client '
+                '🦝 nothing answered $lateChannel (the client '
                     'did not answer in 5 s); the app sees no plugin',
           ),
           hasLength(1),

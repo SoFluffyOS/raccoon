@@ -49,7 +49,7 @@ bool WindowChannels::Handle(const std::string& channel, const uint8_t* data,
     return true;
   }
   if (std::getenv("RACCOON_TRACE") != nullptr) {
-    std::fprintf(stderr, "raccoon_runner: %s.%s\n", channel.c_str(),
+    std::fprintf(stderr, "🦝 %s.%s\n", channel.c_str(),
                  call.method.c_str());
   }
   CodecValue result;

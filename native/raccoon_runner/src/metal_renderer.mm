@@ -168,7 +168,7 @@ bool MetalRenderer::Impl::BuildPool(size_t width, size_t height) {
   pool_height = height;
   ++generation;
   if (kTrace) {
-    std::fprintf(stderr, "raccoon_runner: metal pool %zu x %zux%zu generation %u\n",
+    std::fprintf(stderr, "🦝 metal pool %zu x %zux%zu generation %u\n",
                  pool.size(), width, height, generation);
   }
   return true;
@@ -304,7 +304,7 @@ void MetalRenderer::Release(uint32_t generation, int index, int fence_fd) {
     return;
   }
   m.pool[index].busy = false;
-  if (kTrace) std::fprintf(stderr, "raccoon_runner: metal release pool %d\n", index);
+  if (kTrace) std::fprintf(stderr, "🦝 metal release pool %d\n", index);
 }
 
 void MetalRenderer::ReleaseAll() {
@@ -315,7 +315,7 @@ void MetalRenderer::ReleaseAll() {
     if (static_cast<int>(i) == m.current) continue;
     m.pool[i].busy = false;
   }
-  if (kTrace) std::fprintf(stderr, "raccoon_runner: metal release pool all\n");
+  if (kTrace) std::fprintf(stderr, "🦝 metal release pool all\n");
 }
 
 bool MetalRenderer::NextDrawable(size_t width, size_t height, int64_t* texture_id,
@@ -331,7 +331,7 @@ bool MetalRenderer::NextDrawable(size_t width, size_t height, int64_t* texture_i
       if (!m.BuildPool(width, height)) {
         m.pool_wanted = false;
         std::fprintf(stderr,
-                     "raccoon_runner: no GPU buffers: the pool could not be "
+                     "🦝 no GPU buffers: the pool could not be "
                      "built; frames by readback\n");
       }
     }
@@ -344,11 +344,11 @@ bool MetalRenderer::NextDrawable(size_t width, size_t height, int64_t* texture_i
       m.next = i + 1;
       *texture_id = static_cast<int64_t>(i) + 1;
       *texture = (__bridge const void*)buffer.texture;
-      if (kTrace) std::fprintf(stderr, "raccoon_runner: metal texture -> pool %zu\n", i);
+      if (kTrace) std::fprintf(stderr, "🦝 metal texture -> pool %zu\n", i);
       return true;
     }
     // Every buffer is with the client: this frame goes by readback.
-    if (kTrace) std::fprintf(stderr, "raccoon_runner: metal texture -> readback\n");
+    if (kTrace) std::fprintf(stderr, "🦝 metal texture -> readback\n");
   }
   if (!m.EnsureReadback(width, height)) return false;
   *texture_id = kReadbackTexture;
@@ -383,7 +383,7 @@ bool MetalRenderer::Present(int64_t texture_id, const FrameCallback& callback) {
         std::lock_guard<std::mutex> lock(impl->mutex);
         if (!impl->stopping) frame = impl->gpu_frame;
       }
-      if (kTrace) std::fprintf(stderr, "raccoon_runner: metal present pool %d\n", index);
+      if (kTrace) std::fprintf(stderr, "🦝 metal present pool %d\n", index);
       if (frame) frame(generation, index, width, height, -1);
       {
         std::lock_guard<std::mutex> lock(impl->mutex);

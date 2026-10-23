@@ -9,6 +9,23 @@
 
 namespace raccoon {
 
+namespace {
+
+// The loader's reason, short, for the log; the report keeps it whole.
+// macOS's dlopen error repeats the path and lists every place it tried:
+// what matters is after "dlopen(...): ", up to the line's end.
+std::string ShortReason(const std::string& why) {
+  std::string reason = why;
+  const size_t dlopen = reason.find("dlopen(");
+  const size_t colon = dlopen == std::string::npos ? std::string::npos : reason.find("): ", dlopen);
+  if (colon != std::string::npos) reason = reason.substr(colon + 3);
+  const size_t end = reason.find('\n');
+  if (end != std::string::npos) reason.resize(end);
+  return reason;
+}
+
+}  // namespace
+
 bool PluginHost::LoadManifest(const std::string& path, std::string* error) {
   std::ifstream in(path);
   if (!in) {
@@ -25,7 +42,7 @@ bool PluginHost::LoadManifest(const std::string& path, std::string* error) {
   std::string unprepared;
   const bool prepared = Prepare(manifest.value("flutter_framework", ""), &unprepared);
   if (!prepared) {
-    std::fprintf(stderr, "raccoon_runner: plugins: %s\n", unprepared.c_str());
+    std::fprintf(stderr, "🦝 plugins: %s\n", unprepared.c_str());
   }
   for (const auto& item : manifest.value("plugins", nlohmann::json::array())) {
     PluginEntry entry;
@@ -37,11 +54,11 @@ bool PluginHost::LoadManifest(const std::string& path, std::string* error) {
     entry.ffi = item.value("ffi", false);
     std::string why = unprepared;
     if (prepared && Load(entry, &why)) {
-      std::fprintf(stderr, "raccoon_runner: plugin %s loaded\n", entry.name.c_str());
+      std::fprintf(stderr, "🦝 plugin %s loaded\n", entry.name.c_str());
       statuses_.push_back({entry.name, "loaded", ""});
     } else {
-      std::fprintf(stderr, "raccoon_runner: plugin %s not loaded: %s\n", entry.name.c_str(),
-                   why.c_str());
+      std::fprintf(stderr, "🦝 plugin %s not loaded\n     %s\n", entry.name.c_str(),
+                   ShortReason(why).c_str());
       statuses_.push_back({entry.name, "failed", why});
     }
   }

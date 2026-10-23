@@ -28,7 +28,7 @@ final class StartupFailure {
   /// What the runner prints when it answers a channel with nothing, once
   /// per channel (see `EngineHost::RespondNoPlugin`).
   static final _unanswered = RegExp(
-    r'raccoon_runner: nothing answered (\S+) \(',
+    r'(?:🦝|raccoon_runner:) nothing answered (\S+) \(',
   );
 
   /// The exception's text, such as `PlatformException(channel-error, ...)`;

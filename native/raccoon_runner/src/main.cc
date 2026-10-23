@@ -131,6 +131,9 @@ bool ParseOptions(int argc, char** argv, Options* options) {
   return false;
 }
 
+// When the process started, near enough: before main, as globals are made.
+const auto kLaunched = std::chrono::steady_clock::now();
+
 long MillisBetween(std::chrono::steady_clock::time_point from,
                    std::chrono::steady_clock::time_point to) {
   return static_cast<long>(
@@ -326,15 +329,15 @@ std::unique_ptr<PluginPump> LoadPlugins(raccoon::EngineHost& host, raccoon::Even
   auto pump = std::make_unique<PluginPump>(loop);
   std::string error;
   if (!host.LoadPlugins(manifest, &error)) {
-    std::fprintf(stderr, "raccoon_runner: plugins: %s\n", error.c_str());
+    std::fprintf(stderr, "🦝 plugins: %s\n", error.c_str());
     return nullptr;
   }
-  std::fprintf(stderr, "raccoon_runner: %zu plugins loaded\n", host.plugins_loaded());
+  std::fprintf(stderr, "🦝 %zu plugins loaded\n", host.plugins_loaded());
   return pump;
 #else
   (void)host;
   (void)loop;
-  std::fprintf(stderr, "raccoon_runner: this runner was built without native plugins\n");
+  std::fprintf(stderr, "🦝 this runner was built without native plugins\n");
   return nullptr;
 #endif
 }
@@ -480,7 +483,7 @@ int Render(const Options& options) {
   }
   if (!host.Start(engine, PrintEngineLog, [&loop] { loop.Wake(); },
                   &error)) {
-    std::fprintf(stderr, "raccoon_runner: %s\n", error.c_str());
+    std::fprintf(stderr, "🦝 %s\n", error.c_str());
     return 1;
   }
   const auto plugins = LoadPlugins(host, loop, options.plugins);
@@ -493,7 +496,7 @@ int Render(const Options& options) {
     host.ServiceVsync();
     if (!reported_first && host.frame().FrameCount() > 0) {
       reported_first = true;
-      std::fprintf(stderr, "raccoon_runner: first frame after %ld ms\n",
+      std::fprintf(stderr, "🦝 first frame after %ld ms\n",
                    MillisBetween(host.started(), std::chrono::steady_clock::now()));
     }
     // An idle app posts no tasks, so never wait past the deadline.
@@ -501,14 +504,14 @@ int Render(const Options& options) {
     const int cap = static_cast<int>(remaining < 0 ? 0 : remaining);
     loop.RunOnce(NextWait(host, cap));
   }
-  std::fprintf(stderr, "raccoon_runner: %zu frames presented, %zux%zu\n",
+  std::fprintf(stderr, "🦝 %zu frames presented, %zux%zu\n",
                host.frame().FrameCount(), host.frame().width(),
                host.frame().height());
   int exit_code = 0;
   if (host.frame().WritePpm(options.out, options.bgra)) {
-    std::fprintf(stderr, "raccoon_runner: wrote %s\n", options.out.c_str());
+    std::fprintf(stderr, "🦝 wrote %s\n", options.out.c_str());
   } else {
-    std::fprintf(stderr, "raccoon_runner: no frame written\n");
+    std::fprintf(stderr, "🦝 no frame written\n");
     exit_code = 1;
   }
   host.Shutdown();
@@ -530,7 +533,7 @@ int Serve(const Options& options) {
   LogQueue logs(loop);
   raccoon::StderrCapture capture;
   if (!capture.Start([&logs](const std::string& line) { logs.Push("stderr", line); })) {
-    std::fprintf(stderr, "raccoon_runner: stderr stays the client's blind spot\n");
+    std::fprintf(stderr, "🦝 stderr stays the client's blind spot\n");
   }
 
   raccoon::EngineHost host;
@@ -546,7 +549,7 @@ int Serve(const Options& options) {
     logs.Push(tag, message);
   };
   if (!host.Start(engine, on_log, [&loop] { loop.Wake(); }, &error)) {
-    std::fprintf(stderr, "raccoon_runner: %s\n", error.c_str());
+    std::fprintf(stderr, "🦝 %s\n", error.c_str());
     return 1;
   }
   const auto plugins = LoadPlugins(host, loop, options.plugins);
@@ -666,13 +669,15 @@ int Serve(const Options& options) {
     if (!startup_over && host.frame().FrameCount() > 0) {
       startup_over = true;
       startup_lines.clear();
+      std::fprintf(stderr, "🦝 first frame %ld ms after launch\n",
+                   MillisBetween(kLaunched, std::chrono::steady_clock::now()));
     }
   };
 
   raccoon::RunnerServer::Handler handler;
   handler.on_resize = [&host](const raccoon::v1::Resize& resize) {
     if (std::getenv("RACCOON_TRACE") != nullptr) {
-      std::fprintf(stderr, "raccoon_runner: resize %ux%u @%.2f\n", resize.width(),
+      std::fprintf(stderr, "🦝 resize %ux%u @%.2f\n", resize.width(),
                    resize.height(), resize.pixel_ratio());
     }
     host.Resize(resize.width(), resize.height(),
@@ -682,7 +687,7 @@ int Serve(const Options& options) {
   const bool trace = std::getenv("RACCOON_TRACE") != nullptr;
   handler.on_pointer = [&host, trace](const raccoon::v1::PointerEvent& pointer) {
     if (trace) {
-      std::fprintf(stderr, "raccoon_runner: pointer phase=%d x=%.1f y=%.1f buttons=%lld device=%d\n",
+      std::fprintf(stderr, "🦝 pointer phase=%d x=%.1f y=%.1f buttons=%lld device=%d\n",
                    static_cast<int>(pointer.phase()), pointer.x(), pointer.y(),
                    static_cast<long long>(pointer.buttons()), pointer.pointer_id());
     }
@@ -690,7 +695,7 @@ int Serve(const Options& options) {
   };
   handler.on_key = [&host, trace](const raccoon::v1::KeyEvent& key) {
     if (trace) {
-      std::fprintf(stderr, "raccoon_runner: key kind=%d logical=%llx character=%s\n",
+      std::fprintf(stderr, "🦝 key kind=%d logical=%llx character=%s\n",
                    static_cast<int>(key.kind()),
                    static_cast<unsigned long long>(key.logical()),
                    key.character().c_str());
@@ -735,7 +740,7 @@ int Serve(const Options& options) {
       if (host.EnableGpuBuffers(kGpuRing, &gpu_error)) {
         client_gpu = true;
       } else {
-        std::fprintf(stderr, "raccoon_runner: no GPU buffers: %s; frames by readback\n",
+        std::fprintf(stderr, "🦝 no GPU buffers: %s; frames by readback\n",
                      gpu_error.c_str());
       }
     }
@@ -782,7 +787,7 @@ int Serve(const Options& options) {
     for (const auto& line : startup_lines) server_ptr->Send(line);
     last_sent = 0;
     vm_sent = false;
-    std::fprintf(stderr, "raccoon_runner: client connected\n");
+    std::fprintf(stderr, "🦝 client connected\n");
   };
   handler.on_client_disconnected = [&] {
     host.text_input().SetComposer(false);
@@ -797,13 +802,13 @@ int Serve(const Options& options) {
     host.DisableGpuBuffers();
     client_gpu = false;
     gpu_told = 0;
-    std::fprintf(stderr, "raccoon_runner: client disconnected\n");
+    std::fprintf(stderr, "🦝 client disconnected\n");
   };
 
   raccoon::RunnerServer server(loop, handler);
   server_ptr = &server;
   if (!server.Listen(options.socket, &error)) {
-    std::fprintf(stderr, "raccoon_runner: %s\n", error.c_str());
+    std::fprintf(stderr, "🦝 %s\n", error.c_str());
     return 1;
   }
   // The GPU socket: a native client takes the buffers' descriptors here,
@@ -854,7 +859,7 @@ int Serve(const Options& options) {
         },
         &why);
     if (!started || !host.ShareGpuBuffersByPort()) {
-      std::fprintf(stderr, "raccoon_runner: no surfaces by port (%s); by ID as before\n",
+      std::fprintf(stderr, "🦝 no surfaces by port (%s); by ID as before\n",
                    started ? "no Metal renderer" : why.c_str());
       return;
     }
@@ -868,10 +873,10 @@ int Serve(const Options& options) {
   };
 #endif
   if (!gpu_server.Listen(gpu_socket, &error)) {
-    std::fprintf(stderr, "raccoon_runner: %s\n", error.c_str());
+    std::fprintf(stderr, "🦝 %s\n", error.c_str());
     return 1;
   }
-  std::fprintf(stdout, "raccoon_runner: listening on unix:%s\n",
+  std::fprintf(stdout, "🦝 listening on unix:%s\n",
                options.socket.c_str());
   std::fflush(stdout);
 
@@ -978,14 +983,14 @@ int Serve(const Options& options) {
             host.frame().SetSharedPool(pool.get());
           }
         } else {
-          std::fprintf(stderr, "raccoon_runner: %s; frames stay inline\n",
+          std::fprintf(stderr, "🦝 %s; frames stay inline\n",
                        pool_error.c_str());
           client_shared = false;
         }
       }
     }
     if (const int gone = GonePid(); gone != 0) {
-      std::fprintf(stderr, "raccoon_runner: parent %d is gone; stopping\n", gone);
+      std::fprintf(stderr, "🦝 parent %d is gone; stopping\n", gone);
       stop = true;
     }
   };
@@ -1007,7 +1012,7 @@ int Serve(const Options& options) {
   }
   host.Shutdown();
   capture.Stop();
-  std::fprintf(stderr, "raccoon_runner: stopped\n");
+  std::fprintf(stderr, "🦝 stopped\n");
   return 0;
 }
 

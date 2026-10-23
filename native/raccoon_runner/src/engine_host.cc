@@ -129,7 +129,7 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   static constexpr char kResumed[] = "AppLifecycleState.resumed";
   SendPlatformMessage("flutter/lifecycle", reinterpret_cast<const uint8_t*>(kResumed),
                       sizeof(kResumed) - 1);
-  if (on_log_) on_log_("raccoon_runner", "raccoon_runner: renderer " + renderer_);
+  if (on_log_) on_log_("raccoon_runner", "🦝 renderer " + renderer_);
   return true;
 }
 
@@ -593,7 +593,7 @@ void EngineHost::RespondNoPlugin(const std::string& channel,
   // as "this host does not do that": nothing failed, nothing to say.
   if (channel.rfind("flutter/", 0) == 0) return;
   if (!unanswered_.insert(std::string(why) + '\n' + channel).second) return;
-  std::fprintf(stderr, "raccoon_runner: nothing answered %s (%s); the app sees no plugin\n",
+  std::fprintf(stderr, "🦝 nothing answered %s (%s); the app sees no plugin\n",
                channel.c_str(), why);
 }
 

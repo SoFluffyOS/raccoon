@@ -97,6 +97,15 @@ void main() {
     expect(failure?.channels, ['plugins.flutter.io/camera']);
   });
 
+  test('the runner\'s 🦝 lines read as its old ones did', () {
+    final failure = StartupFailure.fromLog([
+      '🦝 nothing answered plugins.flutter.io/camera (no client); the app '
+          'sees no plugin',
+    ]);
+
+    expect(failure?.channels, ['plugins.flutter.io/camera']);
+  });
+
   test('a log that tells of nothing gone wrong is no failure', () {
     expect(
       StartupFailure.fromLog([
