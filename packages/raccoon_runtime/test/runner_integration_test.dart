@@ -1309,8 +1309,22 @@ void main() {
         forwarded.add('plugins.flutter.io/camera');
         return null;
       });
+      // The preview fills the view while the first camera streams: the test
+      // pattern's first bar is white, its last blue.
+      var previewed = false;
+      final frames = client.frames.listen((frame) {
+        final y = frame.height ~/ 4;
+        if (_pixel(frame, frame.width ~/ 14, y) == (r: 255, g: 255, b: 255) &&
+            _pixel(frame, frame.width * 13 ~/ 14, y) == (r: 0, g: 0, b: 255)) {
+          previewed = true;
+        }
+      });
       try {
         await done.future.timeout(const Duration(seconds: 30));
+        await frames.cancel();
+        if (runner.renderer == 'gl' || runner.renderer == 'metal') {
+          expect(previewed, isTrue, reason: 'no frame showed the preview');
+        }
         expect(lines, contains('cameras back,front'));
         expect(lines, contains('initialized 352x288'));
         final picture = _pictureLine.firstMatch(

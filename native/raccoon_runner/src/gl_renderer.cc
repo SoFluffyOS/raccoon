@@ -210,6 +210,67 @@ bool GlRenderer::EnsureSize(size_t width, size_t height) {
   return true;
 }
 
+bool GlRenderer::PixelTexture(int64_t texture_id, size_t width, size_t height, uint64_t number,
+                              const uint8_t* bgra, FlutterOpenGLTexture* out) {
+  if (width == 0 || height == 0) return false;
+  std::lock_guard<std::mutex> lock(pixels_mutex_);
+  if (!forgotten_.empty()) {
+    glDeleteTextures(static_cast<GLsizei>(forgotten_.size()), forgotten_.data());
+    forgotten_.clear();
+  }
+  Pixels& kept = pixels_[texture_id];
+  const bool fresh = kept.name == 0;
+  if (fresh) {
+    glGenTextures(1, &kept.name);
+    glBindTexture(GL_TEXTURE_2D, kept.name);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  } else {
+    glBindTexture(GL_TEXTURE_2D, kept.name);
+  }
+  const bool resized = kept.width != width || kept.height != height;
+  if (fresh || resized || kept.number != number) {
+    // GLES 2 takes RGBA everywhere, BGRA only with an extension.
+    rgba_.resize(width * height * 4);
+    for (size_t i = 0; i < rgba_.size(); i += 4) {
+      rgba_[i] = bgra[i + 2];
+      rgba_[i + 1] = bgra[i + 1];
+      rgba_[i + 2] = bgra[i];
+      rgba_[i + 3] = bgra[i + 3];
+    }
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    if (fresh || resized) {
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, static_cast<GLsizei>(width),
+                   static_cast<GLsizei>(height), 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba_.data());
+    } else {
+      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, static_cast<GLsizei>(width),
+                      static_cast<GLsizei>(height), GL_RGBA, GL_UNSIGNED_BYTE, rgba_.data());
+    }
+    kept.width = width;
+    kept.height = height;
+    kept.number = number;
+  }
+  glBindTexture(GL_TEXTURE_2D, 0);
+  out->target = GL_TEXTURE_2D;
+  out->name = kept.name;
+  out->format = GL_RGBA8_OES;
+  out->user_data = nullptr;
+  out->destruction_callback = nullptr;
+  out->width = width;
+  out->height = height;
+  return true;
+}
+
+void GlRenderer::ForgetPixelTexture(int64_t texture_id) {
+  std::lock_guard<std::mutex> lock(pixels_mutex_);
+  const auto found = pixels_.find(texture_id);
+  if (found == pixels_.end()) return;
+  forgotten_.push_back(found->second.name);
+  pixels_.erase(found);
+}
+
 bool GlRenderer::EnablePool(size_t count, std::string* error) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (!can_export_) {

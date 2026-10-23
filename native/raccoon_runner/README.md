@@ -50,8 +50,13 @@ Design notes: `docs/internal_docs/raccoon/`.
   current frame as a JPEG to the temp directory. Image streams run at up to
   30 fps, as I420 (`yuv420`), BGRA (`bgra8888`, the default) or JPEG.
   Video recording is refused for now. The preview is a `Texture` by camera
-  id that nothing fills yet. On Windows the embedder takes no external
-  textures from a Vulkan or software renderer at all. `CameraController`'s
+  id, filled at the camera's frame rate through the GL or Metal renderer's
+  external textures. It is the camera's size turned to portrait (288×352
+  for `low`), because `CameraPreview` draws a portrait box while the device
+  is portrait up. `pausePreview` stops it. Camera ids start at 2^48 + 1, so
+  they stay clear of plugins' textures. The software and Vulkan renderers
+  take no external textures, so the preview is blank there, which includes
+  Windows. `CameraController`'s
   `startImageStream` asserts in a debug build, because the method channel
   implementation reports no streaming. `CameraPlatform.instance.
   onStreamedFrameAvailable` streams without that check. `example/camera`

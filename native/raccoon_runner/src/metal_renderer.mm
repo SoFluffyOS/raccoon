@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
+#include <unordered_map>
 #include <vector>
 
 namespace raccoon {
@@ -88,6 +89,18 @@ struct MetalRenderer::Impl {
   bool stopping = false;
   size_t in_flight = 0;
   std::condition_variable drained;
+
+  // PixelTexture's, by id: two each, the one not drawn last filled next, so
+  // the CPU never writes into a texture the GPU may still be reading.
+  struct Pixels {
+    id<MTLTexture> textures[2] = {nil, nil};
+    FlutterMetalTextureHandle handles[2] = {nullptr, nullptr};
+    int current = 0;
+    uint64_t number = 0;
+    bool filled = false;
+  };
+  std::mutex pixels_mutex;
+  std::unordered_map<int64_t, Pixels> pixels;
 
   // Mutex held.
   bool EnsureReadback(size_t width, size_t height);
@@ -216,6 +229,47 @@ const void* MetalRenderer::device() const {
 
 const void* MetalRenderer::command_queue() const {
   return (__bridge const void*)impl_->queue;
+}
+
+bool MetalRenderer::PixelTexture(int64_t texture_id, size_t width, size_t height, uint64_t number,
+                                 const uint8_t* bgra, FlutterMetalExternalTexture* out) {
+  if (impl_->device == nil || width == 0 || height == 0) return false;
+  std::lock_guard<std::mutex> lock(impl_->pixels_mutex);
+  Impl::Pixels& kept = impl_->pixels[texture_id];
+  if (kept.filled && kept.number != number) kept.current = 1 - kept.current;
+  id<MTLTexture> texture = kept.textures[kept.current];
+  if (texture == nil || texture.width != width || texture.height != height) {
+    MTLTextureDescriptor* descriptor =
+        [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                           width:width
+                                                          height:height
+                                                       mipmapped:NO];
+    descriptor.usage = MTLTextureUsageShaderRead;
+    texture = [impl_->device newTextureWithDescriptor:descriptor];
+    if (texture == nil) return false;
+    kept.textures[kept.current] = texture;
+    kept.handles[kept.current] = (__bridge FlutterMetalTextureHandle)texture;
+    kept.filled = false;
+  }
+  if (!kept.filled || kept.number != number) {
+    [texture replaceRegion:MTLRegionMake2D(0, 0, width, height)
+               mipmapLevel:0
+                 withBytes:bgra
+               bytesPerRow:width * 4];
+    kept.number = number;
+    kept.filled = true;
+  }
+  out->width = width;
+  out->height = height;
+  out->pixel_format = kRGBA;
+  out->num_textures = 1;
+  out->textures = &kept.handles[kept.current];
+  return true;
+}
+
+void MetalRenderer::ForgetPixelTexture(int64_t texture_id) {
+  std::lock_guard<std::mutex> lock(impl_->pixels_mutex);
+  impl_->pixels.erase(texture_id);
 }
 
 const std::string& MetalRenderer::description() const {

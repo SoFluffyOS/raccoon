@@ -23,8 +23,10 @@
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
+#include "flutter_embedder.h"
 #include "gpu_renderer.h"
 
 namespace raccoon {
@@ -55,6 +57,16 @@ class GlRenderer : public GpuRenderer {
 
   // The pool is a ring of dmabufs; false, with why, when the display cannot
   // export.
+  // External texture |texture_id| for the engine, on its raster thread with the
+  // context current: |bgra|, rows of |width| * 4 bytes, in a texture kept
+  // for that id and filled again when |number| changes. The camera's preview
+  // comes this way.
+  bool PixelTexture(int64_t texture_id, size_t width, size_t height, uint64_t number,
+                    const uint8_t* bgra, FlutterOpenGLTexture* out);
+  // Drops texture |texture_id|, from any thread; it is deleted at the next
+  // PixelTexture, with the context current.
+  void ForgetPixelTexture(int64_t texture_id);
+
   bool EnablePool(size_t count, std::string* error) override;
   void DisablePool() override;
   void SetGpuFrameCallback(GpuFrameCallback callback) override {
@@ -112,6 +124,17 @@ class GlRenderer : public GpuRenderer {
   PFNEGLCLIENTWAITSYNCKHRPROC client_wait_sync_ = nullptr;
   PFNEGLWAITSYNCKHRPROC wait_sync_ = nullptr;
   PFNEGLDUPNATIVEFENCEFDANDROIDPROC dup_fence_ = nullptr;
+
+  struct Pixels {
+    GLuint name = 0;
+    size_t width = 0;
+    size_t height = 0;
+    uint64_t number = 0;
+  };
+  std::mutex pixels_mutex_;
+  std::unordered_map<int64_t, Pixels> pixels_;
+  std::vector<GLuint> forgotten_;
+  std::vector<uint8_t> rgba_;
 
   mutable std::mutex mutex_;
   bool pool_wanted_ = false;

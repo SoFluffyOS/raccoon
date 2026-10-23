@@ -81,6 +81,7 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
 
   FlutterRendererConfig renderer{};
   if (!ConfigureRenderer(options.renderer, &renderer, error)) return false;
+  GiveCameraTextures();
   if (gpu_) {
     gpu_->SetGpuFrameCallback([this](uint32_t generation, int index, size_t width,
                                      size_t height, int fence_fd) {
@@ -233,9 +234,7 @@ bool EngineHost::ConfigureRenderer(const std::string& wanted,
       config.make_resource_current = GlMakeResourceCurrent;
       config.fbo_with_frame_info_callback = GlFbo;
       config.present_with_info = GlPresent;
-#if RACCOON_HAS_PLUGINS
       config.gl_external_texture_frame_callback = GlExternalTexture;
-#endif
       config.gl_proc_resolver = GlProc;
       // Ask for the framebuffer every frame: with a pool it is a different
       // buffer each time.
@@ -259,9 +258,7 @@ bool EngineHost::ConfigureRenderer(const std::string& wanted,
       config.present_command_queue = metal_->command_queue();
       config.get_next_drawable_callback = MetalNextDrawable;
       config.present_drawable_callback = MetalPresent;
-#if RACCOON_HAS_PLUGINS
       config.external_texture_frame_callback = MetalExternalTexture;
-#endif
       renderer_ = "metal (" + metal_->description() + ")";
       return true;
     }
@@ -716,17 +713,59 @@ size_t EngineHost::plugins_loaded() const {
 #endif
 }
 
-#if RACCOON_HAS_PLUGINS && RACCOON_HAS_METAL
+void EngineHost::GiveCameraTextures() {
+  std::function<void(int64_t)> forget;
+#if RACCOON_HAS_METAL
+  if (metal_ != nullptr) forget = [this](int64_t id) { metal_->ForgetPixelTexture(id); };
+#endif
+#if RACCOON_HAS_GL
+  if (gl_ != nullptr) forget = [this](int64_t id) { gl_->ForgetPixelTexture(id); };
+#endif
+  // The software and Vulkan renderers draw no external textures.
+  if (!forget) return;
+  CameraChannels::Textures textures;
+  textures.add = [this](int64_t id) {
+    return engine_ != nullptr && loader_.procs().RegisterExternalTexture(engine_, id) == kSuccess;
+  };
+  textures.frame = [this](int64_t id) {
+    if (engine_ != nullptr) loader_.procs().MarkExternalTextureFrameAvailable(engine_, id);
+  };
+  textures.remove = [this, forget](int64_t id) {
+    if (engine_ != nullptr) loader_.procs().UnregisterExternalTexture(engine_, id);
+    forget(id);
+  };
+  camera_.SetTextures(std::move(textures));
+}
+
+#if RACCOON_HAS_METAL
 bool EngineHost::MetalExternalTexture(void* user_data, int64_t texture_id, size_t width,
                                       size_t height, FlutterMetalExternalTexture* out) {
   auto* host = static_cast<EngineHost*>(user_data);
+  if (const auto preview = host->camera_.PreviewOf(texture_id)) {
+    return host->metal_->PixelTexture(texture_id, preview->width, preview->height,
+                                      preview->number, preview->bgra.data(), out);
+  }
+#if RACCOON_HAS_PLUGINS
   return host->plugins_ && host->plugins_->PopulateTexture(texture_id, width, height, out);
+#else
+  return false;
+#endif
 }
-#elif RACCOON_HAS_PLUGINS
+#endif
+
+#if RACCOON_HAS_GL
 bool EngineHost::GlExternalTexture(void* user_data, int64_t texture_id, size_t width,
                                    size_t height, FlutterOpenGLTexture* out) {
   auto* host = static_cast<EngineHost*>(user_data);
+  if (const auto preview = host->camera_.PreviewOf(texture_id)) {
+    return host->gl_->PixelTexture(texture_id, preview->width, preview->height,
+                                   preview->number, preview->bgra.data(), out);
+  }
+#if RACCOON_HAS_PLUGINS
   return host->plugins_ && host->plugins_->PopulateTexture(texture_id, width, height, out);
+#else
+  return false;
+#endif
 }
 #endif
 

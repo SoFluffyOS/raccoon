@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <system_error>
 
 #if defined(_WIN32)
@@ -48,6 +49,12 @@ std::pair<size_t, size_t> PresetSize(const CodecValue& preset) {
   if (name == "medium") return {640, 480};
   if (name == "high") return {1280, 720};
   return {1920, 1080};
+}
+
+// When the next frame is due after one due at |due|: on a grid of
+// |interval|, as vsync is; after a stall the grid starts again from |now|.
+uint64_t NextDue(uint64_t due, uint64_t now, uint64_t interval) {
+  return now - due > interval ? now + interval : due + interval;
 }
 
 CodecValue Plane(std::vector<uint8_t> bytes, size_t bytes_per_row, int64_t bytes_per_pixel,
@@ -184,6 +191,10 @@ CodecValue CameraChannels::Call(const MethodCall& call, bool* known, std::string
     camera->format = format.type() == CodecValue::Type::kString ? format.string_value() : "";
     camera->initialized = true;
     stream_camera_ = args.Get("cameraId").int_value();
+    if (!camera->previewing && textures_.add && textures_.add(stream_camera_)) {
+      camera->previewing = true;
+      camera->next_preview_micros = 0;
+    }
     pending_.emplace_back(
         "flutter.io/cameraPlugin/camera" + std::to_string(stream_camera_),
         EncodeMethodCall("initialized",
@@ -199,6 +210,7 @@ CodecValue CameraChannels::Call(const MethodCall& call, bool* known, std::string
   }
   if (method == "dispose") {
     const int64_t id = args.Get("cameraId").int_value();
+    if (Camera* camera = Find(args)) StopPreview(id, *camera);
     cameras_.erase(id);
     if (id == stream_camera_) streaming_ = false;
     return CodecValue();
@@ -238,12 +250,18 @@ CodecValue CameraChannels::Call(const MethodCall& call, bool* known, std::string
     }
     return CodecValue();
   }
+  if (method == "pausePreview" || method == "resumePreview") {
+    if (Camera* camera = Find(args)) {
+      camera->paused = method == "pausePreview";
+      camera->next_preview_micros = 0;
+    }
+    return CodecValue();
+  }
   // Accepted and changing nothing.
   if (method == "lockCaptureOrientation" || method == "unlockCaptureOrientation" ||
       method == "setFlashMode" || method == "setExposureMode" ||
       method == "setExposurePoint" || method == "setFocusMode" ||
-      method == "setFocusPoint" || method == "pausePreview" || method == "resumePreview" ||
-      method == "setImageFileFormat" || method == "receivedImageStreamData") {
+      method == "setFocusPoint" || method == "setImageFileFormat" || method == "receivedImageStreamData") {
     return CodecValue();
   }
   *known = false;
@@ -360,22 +378,60 @@ void CameraChannels::Service(uint64_t now_micros) {
   if (!send_) return;
   for (auto& [channel, message] : pending_) send_(channel, std::move(message));
   pending_.clear();
+  for (auto& [id, camera] : cameras_) ServicePreview(id, camera, now_micros);
   if (!streaming_ || !listening_) return;
   const auto found = cameras_.find(stream_camera_);
   if (found == cameras_.end()) return;
   if (now_micros < next_frame_micros_) return;
-  const uint64_t interval = 1000000 / static_cast<uint64_t>(found->second.fps);
-  // On a grid, as vsync is; after a stall the grid starts again from now.
-  next_frame_micros_ = now_micros - next_frame_micros_ > interval ? now_micros + interval
-                                                                  : next_frame_micros_ + interval;
+  next_frame_micros_ = NextDue(next_frame_micros_, now_micros,
+                               1000000 / static_cast<uint64_t>(found->second.fps));
   send_(kImageStream, EncodeSuccess(StreamFrame(found->second, now_micros)));
+}
+
+void CameraChannels::ServicePreview(int64_t id, Camera& camera, uint64_t now_micros) {
+  if (!camera.previewing || camera.paused || now_micros < camera.next_preview_micros) return;
+  camera.next_preview_micros = NextDue(camera.next_preview_micros, now_micros,
+                                       1000000 / static_cast<uint64_t>(camera.fps));
+  auto preview = std::make_shared<Preview>();
+  preview->width = camera.height;
+  preview->height = camera.width;
+  preview->number = ++previews_made_;
+  preview->bgra = Frame(preview->width, preview->height, now_micros);
+  {
+    std::lock_guard<std::mutex> lock(previews_mutex_);
+    previews_[id] = std::move(preview);
+  }
+  textures_.frame(id);
+}
+
+void CameraChannels::StopPreview(int64_t id, Camera& camera) {
+  if (!camera.previewing) return;
+  camera.previewing = false;
+  {
+    std::lock_guard<std::mutex> lock(previews_mutex_);
+    previews_.erase(id);
+  }
+  textures_.remove(id);
+}
+
+std::shared_ptr<const CameraChannels::Preview> CameraChannels::PreviewOf(int64_t id) const {
+  std::lock_guard<std::mutex> lock(previews_mutex_);
+  const auto found = previews_.find(id);
+  return found == previews_.end() ? nullptr : found->second;
 }
 
 int CameraChannels::MillisUntilDue(uint64_t now_micros) const {
   if (!pending_.empty()) return 0;
-  if (!streaming_ || !listening_ || cameras_.count(stream_camera_) == 0) return -1;
-  if (next_frame_micros_ <= now_micros) return 0;
-  return static_cast<int>((next_frame_micros_ - now_micros + 999) / 1000);
+  uint64_t due = std::numeric_limits<uint64_t>::max();
+  for (const auto& [id, camera] : cameras_) {
+    if (camera.previewing && !camera.paused) due = std::min(due, camera.next_preview_micros);
+  }
+  if (streaming_ && listening_ && cameras_.count(stream_camera_) != 0) {
+    due = std::min(due, next_frame_micros_);
+  }
+  if (due == std::numeric_limits<uint64_t>::max()) return -1;
+  if (due <= now_micros) return 0;
+  return static_cast<int>((due - now_micros + 999) / 1000);
 }
 
 }  // namespace raccoon

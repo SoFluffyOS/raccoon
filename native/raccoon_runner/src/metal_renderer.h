@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "flutter_embedder.h"
 #include "gpu_renderer.h"
 
 namespace raccoon {
@@ -46,6 +47,14 @@ class MetalRenderer : public GpuRenderer {
   // Hands the drawn frame on: to the GPU frame callback once the GPU is done
   // with a pool buffer, else read back through |callback|.
   bool Present(int64_t texture_id, const FrameCallback& callback);
+
+  // External texture |texture_id| for the engine, on its raster thread: |bgra|, rows
+  // of |width| * 4 bytes, in textures kept for that id and filled again when
+  // |number| changes. The camera's preview comes this way.
+  bool PixelTexture(int64_t texture_id, size_t width, size_t height, uint64_t number,
+                    const uint8_t* bgra, FlutterMetalExternalTexture* out);
+  // Drops texture |texture_id|'s textures; from any thread.
+  void ForgetPixelTexture(int64_t texture_id);
 
   const std::string& description() const override;
   bool EnablePool(size_t count, std::string* error) override;
