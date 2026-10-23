@@ -187,10 +187,19 @@ Design notes: `docs/internal_docs/raccoon/`.
   half of the helper is `tool/plugins_windows.dart`, run with the SDK's
   `dart`, since Windows has no python3. Needs Visual Studio with the C++
   workload, as the Windows target does; cached as on the other hosts.
+  A plugin built as a static library, as FlutterFire's are, is meant to be
+  linked into an app's `.exe`, which the runner has no part of. So an
+  app's static plugins are built together in one project, each after the
+  plugins whose targets it links, and linked into one
+  `raccoon_static_plugins.dll`. A `.def` file exports their registrars from
+  it. Being one module, they share state as they would in the `.exe`:
+  `firebase_auth` sees the app `firebase_core` initialized.
+  `example/plugins_static` checks this with two small plugins.
   While plugins are loaded the runner waits in `MsgWaitForMultipleObjectsEx`
   and dispatches the platform thread's messages, so dialogs, COM and
-  messages posted to windows work; a modal dialog's own loop holds the
-  runner's while it is open. FFI plugins' DLLs go on the runner's PATH.
+  messages posted to windows work. While a modal dialog's own loop runs,
+  a thread timer takes the runner's turns, so frames keep coming (#72).
+  FFI plugins' DLLs go on the runner's PATH.
   The runner carries a version resource, which `package_info_plus` reads.
   On a Ryzen 9 7945HX: the eleven of `tool/plugins` with Windows code in
   88 s cold, 2 s from the cache, all loaded; `connectivity_plus`,
