@@ -669,35 +669,54 @@ if misses:
         # The deployment target of this machine: the frameworks run nowhere
         # else, and no pod asks for more.
         macos = subprocess.run(['sw_vers', '-productVersion'], capture_output=True, text=True).stdout.strip()
-        with open(os.path.join(pods, 'Podfile'), 'w') as f:
-            f.write("platform :osx, '%s.0'\n" % (macos.split('.')[0] or '11'))
-            f.write("install! 'cocoapods', :integrate_targets => false, :warn_for_unused_master_specs_repo => false\n")
-            # Every pod a dynamic framework, static_framework or not
-            # (FlutterFire's are): the runner opens them, nothing links them.
-            f.write("pre_install do |installer|\n"
-                    "  installer.pod_targets.each do |target|\n"
-                    "    def target.build_type\n"
-                    "      Pod::BuildType.dynamic_framework\n"
-                    "    end\n"
-                    "  end\n"
-                    "end\n")
-            # Never integrated, so no Xcode project is read: the target is a
-            # name, and Swift 5 is what Flutter's Runner target would give
-            # the pods that name no Swift version.
-            f.write("use_frameworks!\ntarget 'Host' do\n"
-                    "  current_target_definition.swift_version = '5.0'\n")
-            f.write("  pod 'FlutterMacOS', :path => 'FlutterMacOS'\n")
-            for plugin in misses:
-                linked = os.path.join('.symlinks', 'plugins', plugin['name'], os.path.basename(plugin['sources']))
-                f.write("  pod %s, :path => %s\n" % (json.dumps(plugin['name']), json.dumps(linked)))
-            f.write("end\n")
-        with open(log_path, 'w') as log:
-            installed = subprocess.run(['pod', 'install'], cwd=pods, env=env,
-                                       stdout=log, stderr=subprocess.STDOUT).returncode == 0
-        if not installed:
-            toolchain = 'pod install failed; see ' + log_path
+        # Every plugin's pod, the cached ones too, so a pod that depends on
+        # one (firebase_analytics on firebase_core) resolves; only the misses
+        # are built. A miss CocoaPods names in what stops it is dropped, its
+        # log kept, and the rest are installed again without it (#82).
+        podded = list(wanted)
+        miss_names = {p['name'] for p in misses}
+        while True:
+            with open(os.path.join(pods, 'Podfile'), 'w') as f:
+                f.write("platform :osx, '%s.0'\n" % (macos.split('.')[0] or '11'))
+                f.write("install! 'cocoapods', :integrate_targets => false, :warn_for_unused_master_specs_repo => false\n")
+                # Every pod a dynamic framework, static_framework or not
+                # (FlutterFire's are): the runner opens them, nothing links them.
+                f.write("pre_install do |installer|\n"
+                        "  installer.pod_targets.each do |target|\n"
+                        "    def target.build_type\n"
+                        "      Pod::BuildType.dynamic_framework\n"
+                        "    end\n"
+                        "  end\n"
+                        "end\n")
+                # Never integrated, so no Xcode project is read: the target is
+                # a name, and Swift 5 is what Flutter's Runner target would
+                # give the pods that name no Swift version.
+                f.write("use_frameworks!\ntarget 'Host' do\n"
+                        "  current_target_definition.swift_version = '5.0'\n")
+                f.write("  pod 'FlutterMacOS', :path => 'FlutterMacOS'\n")
+                for plugin in podded:
+                    linked = os.path.join('.symlinks', 'plugins', plugin['name'], os.path.basename(plugin['sources']))
+                    f.write("  pod %s, :path => %s\n" % (json.dumps(plugin['name']), json.dumps(linked)))
+                f.write("end\n")
+            with open(log_path, 'w') as log:
+                installed = subprocess.run(['pod', 'install'], cwd=pods, env=env,
+                                           stdout=log, stderr=subprocess.STDOUT).returncode == 0
+            if installed:
+                break
+            errors = ' '.join(line for line in open(log_path, errors='replace') if line.startswith('[!]'))
+            culprits = miss_names & set(re.findall(r'`([\w-]+)`', errors)) & {p['name'] for p in podded}
+            if not culprits:
+                toolchain = 'pod install failed; see ' + log_path
+                break
+            for name in sorted(culprits):
+                kept = os.path.join(pods, 'pod-install-%s.log' % name)
+                shutil.copyfile(log_path, kept)
+                broken[name] = 'pod install failed; see ' + kept
+            podded = [p for p in podded if p['name'] not in culprits]
     for plugin in misses:
         name = plugin['name']
+        if name in broken:
+            continue
         if toolchain is not None:
             broken[name] = toolchain
             continue

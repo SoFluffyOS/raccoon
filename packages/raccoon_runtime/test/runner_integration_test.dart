@@ -213,6 +213,111 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
   test(
+    'on macOS a plugin whose pod needs a cached plugin\'s pod builds',
+    () async {
+      // plugin_b's pod depends on plugin_a's. The first install builds and
+      // caches plugin_a; the second must still find plugin_a's pod to build
+      // plugin_b (firebase_analytics on firebase_core, #82).
+      final temp = Directory.systemTemp.createTempSync('raccoon_pods');
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      void plugin(String name, String className, {String? needs}) {
+        write(
+          '$name/pubspec.yaml',
+          'name: $name\nversion: 1.0.0\nflutter:\n  plugin:\n    platforms:\n'
+              '      macos:\n        pluginClass: $className\n',
+        );
+        write(
+          '$name/macos/$name.podspec',
+          "Pod::Spec.new do |s|\n  s.name = '$name'\n  s.version = '1.0.0'\n"
+              "  s.summary = '$name'\n  s.homepage = 'https://example.com'\n"
+              "  s.license = { :type => 'BSD' }\n  s.author = 'Raccoon'\n"
+              "  s.source = { :path => '.' }\n  s.source_files = 'Classes/**/*'\n"
+              "  s.dependency 'FlutterMacOS'\n"
+              "${needs == null ? '' : "  s.dependency '$needs'\n"}"
+              "  s.platform = :osx, '10.15'\nend\n",
+        );
+        write(
+          '$name/macos/Classes/$className.h',
+          '@import FlutterMacOS;\n'
+              '@interface $className : NSObject <FlutterPlugin>\n@end\n',
+        );
+        write(
+          '$name/macos/Classes/$className.m',
+          '#import "$className.h"\n@implementation $className\n'
+              '+ (void)registerWithRegistrar:(id<FlutterPluginRegistrar>)registrar {}\n'
+              '@end\n',
+        );
+      }
+
+      plugin('plugin_a', 'PluginA');
+      plugin('plugin_b', 'PluginB', needs: 'plugin_a');
+      void configure(List<String> plugins) {
+        write(
+          'app/pubspec.yaml',
+          'name: app\ndependencies:\n${[for (final name in plugins) '  $name:\n'].join()}',
+        );
+        write(
+          'app/.dart_tool/package_config.json',
+          jsonEncode({
+            'configVersion': 2,
+            'packages': [
+              {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+              for (final name in plugins)
+                {'name': name, 'rootUri': '../../$name', 'packageUri': 'lib/'},
+            ],
+          }),
+        );
+      }
+
+      final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+        ..createSync(recursive: true);
+      final data = p.join(temp.path, 'data');
+      Future<Map<String, Object?>> install() async {
+        final result = await Process.run(
+          p.join(runnerDir, 'tool', 'raccoon-device'),
+          ['install', bundle.path, 'app'],
+          environment: {
+            'RACCOON_RUNNER': binary!,
+            if (sdk != null) 'FLUTTER_ROOT': sdk,
+            'XDG_DATA_HOME': data,
+            'RACCOON_PLUGIN_CACHE': p.join(temp.path, 'cache'),
+            'RACCOON_NO_PREBUILT': '1',
+          },
+        );
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        final manifest = File(
+          p.join(data, 'raccoon', 'apps', 'app', 'plugins', 'manifest.json'),
+        );
+        expect(manifest.existsSync(), isTrue, reason: '${result.stderr}');
+        return jsonDecode(manifest.readAsStringSync()) as Map<String, Object?>;
+      }
+
+      List<String> loaded(Map<String, Object?> manifest) => [
+        for (final entry in manifest['plugins'] as List)
+          '${(entry as Map)['name']}',
+      ];
+      try {
+        configure(['plugin_a']);
+        expect(loaded(await install()), ['plugin_a']);
+        configure(['plugin_a', 'plugin_b']);
+        final second = await install();
+        expect(second['status'], isEmpty);
+        expect(loaded(second), ['plugin_a', 'plugin_b']);
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isMacOS)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'CocoaPods plugins are macOS',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 5)),
+  );
+  test(
     'a pub workspace member gets its own plugins, not the other members\'',
     () async {
       // A member has no package config of its own; the workspace root's
