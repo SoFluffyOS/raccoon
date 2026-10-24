@@ -26,6 +26,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -74,6 +75,12 @@ class GpuTexture {
 
   flutter::TextureVariant* variant() { return &variant_; }
 
+  // Tells Flutter a new frame is ready; called from the reader's thread,
+  // which the registrar allows.
+  void SetFrameAvailable(std::function<void()> frame_available) {
+    frame_available_ = std::move(frame_available);
+  }
+
   bool Connect(const std::string& path) {
     sockaddr_un address{};
     address.sun_family = AF_UNIX;
@@ -113,11 +120,13 @@ class GpuTexture {
       socket = socket_;
       socket_ = INVALID_SOCKET;
     }
-    // A shutdown ends the reader's recv; the socket is closed once the
-    // reader is done with it, so its handle is not reused under it.
-    if (socket != INVALID_SOCKET) shutdown(socket, SD_BOTH);
+    // Closing is what ends a blocking recv on Winsock; a shutdown first
+    // tells the runner at once.
+    if (socket != INVALID_SOCKET) {
+      shutdown(socket, SD_BOTH);
+      closesocket(socket);
+    }
     if (reader_.joinable()) reader_.join();
-    if (socket != INVALID_SOCKET) closesocket(socket);
   }
 
  private:
@@ -200,14 +209,24 @@ class GpuTexture {
           set->handles.push_back(
               reinterpret_cast<HANDLE>(static_cast<uintptr_t>(Read32(handles + i * 4))));
         }
-        std::lock_guard<std::mutex> lock(mutex_);
-        pending_ = std::move(set);
+        bool named;
+        {
+          std::lock_guard<std::mutex> lock(mutex_);
+          named = set->generation == shown_generation_;
+          pending_ = std::move(set);
+        }
+        // The frame was named before its set came: Flutter asked for it
+        // then and keeps what it got, so it must ask again, or an idle
+        // app's pane stays as it was.
+        if (named && frame_available_) frame_available_();
       }
       inbox.erase(inbox.begin(), inbox.begin() + offset);
     }
   }
 
   flutter::TextureVariant variant_;
+  // Set before the reader starts and not changed after.
+  std::function<void()> frame_available_;
   FlutterDesktopGpuSurfaceDescriptor descriptor_{};
   std::mutex mutex_;
   // The set waiting to be shown, and the one shown; the raster thread takes
@@ -244,6 +263,8 @@ class RaccoonViewPlugin : public flutter::Plugin {
     if (call.method_name() == "create") {
       auto texture = std::make_shared<GpuTexture>();
       const int64_t id = textures_->RegisterTexture(texture->variant());
+      texture->SetFrameAvailable(
+          [registrar = textures_, id] { registrar->MarkTextureFrameAvailable(id); });
       live_[id] = std::move(texture);
       result->Success(EncodableValue(id));
       return;

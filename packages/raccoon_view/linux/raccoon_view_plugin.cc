@@ -53,6 +53,9 @@ struct BufferSet {
 
 struct Imported {
   EGLDisplay display = EGL_NO_DISPLAY;
+  // The GL context the textures were made in: another engine's window may
+  // not share it.
+  EGLContext context = EGL_NO_CONTEXT;
   uint32_t generation = 0;
   uint32_t width = 0;
   uint32_t height = 0;
@@ -78,7 +81,7 @@ void destroy_set(Imported& imported) {
 }
 
 // Sets of disposed textures: their GL objects belong to Flutter's context,
-// current only on the raster thread, so the next populate of any texture
+// current only on the raster thread, so the next populate in that context
 // deletes them. Each holds a ring's buffers until then.
 std::mutex graveyard_mutex;
 std::vector<std::unique_ptr<Imported>> graveyard;
@@ -89,12 +92,20 @@ void bury(std::unique_ptr<Imported> imported) {
   graveyard.push_back(std::move(imported));
 }
 
-// Raster thread, context current.
+// Raster thread, context current: deletes the sets made in it.
 void empty_graveyard() {
+  const EGLContext context = eglGetCurrentContext();
   std::vector<std::unique_ptr<Imported>> sets;
   {
     std::lock_guard<std::mutex> lock(graveyard_mutex);
-    sets.swap(graveyard);
+    for (auto it = graveyard.begin(); it != graveyard.end();) {
+      if ((*it)->context == context) {
+        sets.push_back(std::move(*it));
+        it = graveyard.erase(it);
+      } else {
+        ++it;
+      }
+    }
   }
   for (auto& set : sets) destroy_set(*set);
 }
@@ -297,6 +308,7 @@ static gboolean import_pending(RaccoonGpuTexture* self, GError** error) {
   }
   auto imported = std::make_unique<Imported>();
   imported->display = self->display;
+  imported->context = eglGetCurrentContext();
   imported->generation = set->generation;
   imported->width = set->width;
   imported->height = set->height;
