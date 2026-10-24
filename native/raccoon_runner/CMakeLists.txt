@@ -1,4 +1,8 @@
 cmake_minimum_required(VERSION 3.24)
+# The oldest macOS the Flutter engine it loads runs on, not the build
+# host's: a prebuilt runner from a newer CI image would refuse to load on
+# an older Mac. Before project(), which reads it.
+set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Oldest macOS the runner runs on")
 project(raccoon_runner CXX)
 
 set(CMAKE_CXX_STANDARD 17)

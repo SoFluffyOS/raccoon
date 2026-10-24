@@ -25,8 +25,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # The oldest image: the binary, the engine and the plugins need
+          # this glibc or later, not the newest one's.
           - name: linux-x64
-            os: ubuntu-latest
+            os: ubuntu-22.04
           - name: macos-arm64
             os: macos-latest
           - name: macos-x64
@@ -101,7 +103,12 @@ jobs:
             Darwin) HOST=macos ;;
             *) HOST=linux ;;
           esac
-          tool/raccoon-device prebuild tool/plugins "dist/plugins-$ENGINE-$HOST-$(uname -m).tar.gz"
+          archive="dist/plugins-$ENGINE-$HOST-$(uname -m).tar.gz"
+          tool/raccoon-device prebuild tool/plugins "$archive"
+          # A prebuild whose plugins failed exits 0; a release without them
+          # would be remembered as having none (#149). At least one library
+          # or framework, or the release fails.
+          tar tzf "$archive" | grep -c -E '\.so$|\.framework/$'
 
       - uses: actions/upload-artifact@v6
         with:
@@ -109,7 +116,9 @@ jobs:
           path: native/raccoon_runner/dist/*.tar.gz
 
   release:
-    if: github.ref_type == 'tag'
+    # Only a pushed tag publishes: run by hand, even on a tag, the archives
+    # stay workflow artifacts.
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: build
     runs-on: ubuntu-latest
     steps:

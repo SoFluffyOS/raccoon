@@ -285,12 +285,16 @@ runner. It runs when started by hand, from the Actions tab or with
 
 ## Prebuilt binaries
 
-Every tag `v<VERSION>` publishes `raccoon_runner-<version>-<platform>.tar.gz`
-for `linux-x64`, `macos-arm64`, `macos-x64` and `windows-x64` (with
-`raccoon_runner.exe`; its helper runs in Git Bash) on the [releases
-page](https://github.com/SoFluffyOS/raccoon/releases), under `runner-v*` tags, packed by
-`tool/package.sh`: the binary, `tool/raccoon-device`, `tool/engine_dir.sh`,
-`VERSION` and `LICENSE`, flat. Unpacked into a folder it works as a runtime
+Every tag `runner-v<VERSION>` publishes
+`raccoon_runner-<version>-<platform>.tar.gz` for `linux-x64`, `macos-arm64`,
+`macos-x64` and `windows-x64` (with `raccoon_runner.exe`; its helper runs in
+Git Bash) on the [releases
+page](https://github.com/SoFluffyOS/raccoon/releases), packed by
+`tool/package.sh`: the binary, `tool/raccoon-device` with `engine_dir.sh`,
+`package_scope.dart` and `plugins_windows.dart`, `VERSION` and `LICENSE`,
+with the prebuilt common plugins beside them for Linux and macOS. The Mac
+binaries run on macOS 12 and later, as the engine does; the Linux ones are
+built on Ubuntu 22.04, for its glibc and later. Unpacked into a folder it works as a runtime
 on its own, and the Raccoon Simulator fetches the archive for its host
 itself.
 
@@ -307,8 +311,10 @@ attribute.
 
 `VERSION` holds the version, which `--version` prints; a `-pre.N` suffix
 marks a prerelease. To release, bump `VERSION`, commit, and push the tag
-`v$(cat VERSION)`: `.github/workflows/release.yml` refuses a tag that does
-not match.
+`runner-v$(cat VERSION)`: `.github/workflows/runner-release.yml` refuses a tag
+that does not match. Plain `v*` tags are the `raccoon` package's. Run by
+hand, the workflow builds and keeps the archives as artifacts without
+publishing them.
 
 ## Try it
 
