@@ -973,6 +973,17 @@ void main() {
         expect(names().where((n) => n.endsWith('.done')), isEmpty);
         expect(names().where((n) => n.startsWith('.prebuilt-')), isEmpty);
 
+        // A server that hangs up: not remembered either.
+        final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+        server.listen((socket) => socket.destroy());
+        try {
+          await install('http://127.0.0.1:${server.port}/prebuilt.tar.gz');
+        } finally {
+          await server.close();
+        }
+        expect(names().where((n) => n.endsWith('.done')), isEmpty);
+        expect(names().where((n) => n.startsWith('.prebuilt-')), isEmpty);
+
         // An archive there: its entries move in, and the fetch is noted.
         final source = Directory(p.join(temp.path, 'archive', 'some-entry'))
           ..createSync(recursive: true);

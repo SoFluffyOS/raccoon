@@ -385,27 +385,34 @@ def fetch_prebuilt():
     import tempfile
     staging = tempfile.mkdtemp(prefix='.prebuilt-', dir=cache)
     archive = os.path.join(staging, 'archive.tar.gz')
-    remember = True
+    # Remembered: the fetch, no archive for this version, or a broken one.
+    # Not a network failure, a dropped connection or a server error: the
+    # next install asks again.
+    remember = False
     try:
         # Only when downloading: importing it costs every install 20 ms.
-        import urllib.error, urllib.request
-        urllib.request.urlretrieve(prebuilt_url, archive)
-        with tarfile.open(archive) as tar:
-            members = [m for m in tar.getmembers()
-                       if m.isfile() and m.name.endswith('.so') and '..' not in m.name]
-            tar.extractall(staging, members=members)
+        import gzip, urllib.error, urllib.request, zlib
+        try:
+            urllib.request.urlretrieve(prebuilt_url, archive)
+        except urllib.error.HTTPError as error:
+            remember = error.code == 404
+            raise
+        try:
+            with tarfile.open(archive) as tar:
+                members = [m for m in tar.getmembers()
+                           if m.isfile() and m.name.endswith('.so') and '..' not in m.name]
+                tar.extractall(staging, members=members)
+        except (tarfile.TarError, EOFError, zlib.error, gzip.BadGzipFile):
+            remember = True
+            raise
         os.remove(archive)
         for entry in os.listdir(staging):
             if not os.path.exists(os.path.join(cache, entry)):
                 os.replace(os.path.join(staging, entry), os.path.join(cache, entry))
         print('🦝 prebuilt plugins fetched for runner %s' % runner_version, file=sys.stderr)
-    except Exception as error:
-        # No archive for this version is worth remembering; a network
-        # failure or a server error is not, so the next install asks again.
-        if isinstance(error, urllib.error.HTTPError):
-            remember = error.code == 404
-        elif isinstance(error, urllib.error.URLError):
-            remember = False
+        remember = True
+    except Exception:
+        pass
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     if remember:
@@ -680,33 +687,40 @@ def fetch_prebuilt():
     import tempfile
     staging = tempfile.mkdtemp(prefix='.prebuilt-', dir=cache)
     archive = os.path.join(staging, 'archive.tar.gz')
-    remember = True
+    # Remembered: the fetch, no archive for this version, or a broken one.
+    # Not a network failure, a dropped connection or a server error: the
+    # next install asks again.
+    remember = False
     try:
         # Only when downloading: importing it costs every install 20 ms.
-        import urllib.error, urllib.request
-        urllib.request.urlretrieve(prebuilt_url, archive)
-        with tarfile.open(archive) as tar:
-            # Frameworks, with their symlinks; nothing that would land or
-            # point outside the cache.
-            if hasattr(tarfile, 'data_filter'):
-                tar.extractall(staging, filter='data')
-            else:
-                members = [m for m in tar.getmembers()
-                           if not m.name.startswith('/') and '..' not in m.name.split('/')
-                           and not (m.issym() and (m.linkname.startswith('/') or '..' in m.linkname.split('/')[:-1]))]
-                tar.extractall(staging, members=members)
+        import gzip, urllib.error, urllib.request, zlib
+        try:
+            urllib.request.urlretrieve(prebuilt_url, archive)
+        except urllib.error.HTTPError as error:
+            remember = error.code == 404
+            raise
+        try:
+            with tarfile.open(archive) as tar:
+                # Frameworks, with their symlinks; nothing that would land or
+                # point outside the cache.
+                if hasattr(tarfile, 'data_filter'):
+                    tar.extractall(staging, filter='data')
+                else:
+                    members = [m for m in tar.getmembers()
+                               if not m.name.startswith('/') and '..' not in m.name.split('/')
+                               and not (m.issym() and (m.linkname.startswith('/') or '..' in m.linkname.split('/')[:-1]))]
+                    tar.extractall(staging, members=members)
+        except (tarfile.TarError, EOFError, zlib.error, gzip.BadGzipFile):
+            remember = True
+            raise
         os.remove(archive)
         for entry in os.listdir(staging):
             if not os.path.exists(os.path.join(cache, entry)):
                 os.replace(os.path.join(staging, entry), os.path.join(cache, entry))
         print('🦝 prebuilt plugins fetched for runner %s' % runner_version, file=sys.stderr)
-    except Exception as error:
-        # No archive for this version is worth remembering; a network
-        # failure or a server error is not, so the next install asks again.
-        if isinstance(error, urllib.error.HTTPError):
-            remember = error.code == 404
-        elif isinstance(error, urllib.error.URLError):
-            remember = False
+        remember = True
+    except Exception:
+        pass
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     if remember:
