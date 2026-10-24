@@ -1742,9 +1742,11 @@ void main() {
             ),
           );
         }
+        // Checked left of the box's centre, clear of its label: at this
+        // pixel ratio a glyph can cover the centre, as on Linux's fonts.
         await client.frames
             .firstWhere(
-              (f) => f.width == 8192 && _pixel(f, 4096, 102) == _green,
+              (f) => f.width == 8192 && _pixel(f, 4048, 102) == _green,
             )
             .timeout(const Duration(seconds: 10));
         client.resize(395, 870, 1);
