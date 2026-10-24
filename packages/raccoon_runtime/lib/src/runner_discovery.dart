@@ -124,8 +124,8 @@ final class RunnerDiscovery {
 
     var cancelled = false;
     // The watch ends when the directory goes, as a temp cleaner can take
-    // it: it is made again and watched again, so runners started later
-    // still show (#134).
+    // it, or on Windows fails: it is made again and watched again, so
+    // runners started later still show (#134).
     void startWatching() {
       try {
         if (!dir.existsSync()) dir.createSync(recursive: true);
@@ -135,7 +135,15 @@ final class RunnerDiscovery {
           ..close();
         return;
       }
-      events = dir
+      late final StreamSubscription<FileSystemEvent> watching;
+      void again() {
+        if (cancelled || !identical(events, watching)) return;
+        unawaited(watching.cancel());
+        emitIfChanged();
+        startWatching();
+      }
+
+      watching = dir
           .watch(
             events:
                 FileSystemEvent.create |
@@ -144,13 +152,13 @@ final class RunnerDiscovery {
           )
           .listen(
             (_) => emitIfChanged(),
-            onError: controller.addError,
-            onDone: () {
-              if (cancelled) return;
-              emitIfChanged();
-              startWatching();
+            onError: (Object error, StackTrace stackTrace) {
+              if (!dir.existsSync()) return again();
+              controller.addError(error, stackTrace);
             },
+            onDone: again,
           );
+      events = watching;
     }
 
     controller = StreamController(

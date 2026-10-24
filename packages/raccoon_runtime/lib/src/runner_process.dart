@@ -76,11 +76,23 @@ final class RunnerProcess {
     _process.stdout
         .transform(const Utf8Decoder(allowMalformed: true))
         .transform(const LineSplitter())
-        .listen(_onStdoutLine, onDone: () => unawaited(_stdout.close()));
+        .listen(
+          _onStdoutLine,
+          onDone: () {
+            _stdoutRead.complete();
+            unawaited(_stdout.close());
+          },
+        );
     _process.stderr
         .transform(const Utf8Decoder(allowMalformed: true))
         .transform(const LineSplitter())
-        .listen(_onStderrLine, onDone: () => unawaited(_stderr.close()));
+        .listen(
+          _onStderrLine,
+          onDone: () {
+            _stderrRead.complete();
+            unawaited(_stderr.close());
+          },
+        );
     _vmService.future.ignore();
     unawaited(_process.exitCode.then(_onExit));
   }
@@ -109,6 +121,9 @@ final class RunnerProcess {
   final _vmService = Completer<String>();
   final _stdout = StreamController<String>.broadcast();
   final _stderr = StreamController<String>.broadcast();
+
+  final _stdoutRead = Completer<void>();
+  final _stderrRead = Completer<void>();
 
   /// The last lines, to say why a runner that exited at once did.
   final _lastLines = <String>[];
@@ -170,7 +185,12 @@ final class RunnerProcess {
 
   /// A runner that exits before it listens fails [start] at once, with its
   /// last words, rather than after the whole timeout (#134).
-  void _onExit(int code) {
+  Future<void> _onExit(int code) async {
+    // The exit can come before its last lines are read; they say why.
+    await Future.wait([
+      _stdoutRead.future,
+      _stderrRead.future,
+    ]).timeout(const Duration(seconds: 1), onTimeout: () => const []);
     if (!_listening.isCompleted) {
       _listening.completeError(
         RunnerExited(code, List.unmodifiable(_lastLines)),
