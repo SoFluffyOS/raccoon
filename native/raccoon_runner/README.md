@@ -22,6 +22,8 @@ Design notes: `docs/internal_docs/raccoon/`.
   channel messages out and the client's answers back; the VM service URI;
   shutdown. A frame with a side over 8,192 pixels is scaled down to fit,
   its pixel ratio with it: the app keeps its logical size (#117).
+  The app sees `RACCOON_ENDPOINT=unix:<socket>`, which `package:raccoon`'s
+  `Raccoon().isPresent` reads (#150).
 - Answers some plugins' channels itself, in both commands and with or
   without a client, because apps call them at startup (Wonderous before its
   first frame) and an unanswered call throws:

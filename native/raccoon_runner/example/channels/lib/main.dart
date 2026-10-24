@@ -11,13 +11,15 @@ import 'package:flutter/widgets.dart';
 /// box when every call was answered as expected and a red one otherwise. The
 /// result does not depend on a client. Expects the runner's default 800x600
 /// view at a pixel ratio of 1 and an empty data directory, if any. Prints
-/// XDG_DATA_HOME: and what the app sees, for the data directory test, then
-/// LOCALES:, BRIGHTNESS: and LIFECYCLE:, as the runner told the engine.
+/// XDG_DATA_HOME: and what the app sees, for the data directory test,
+/// RACCOON_ENDPOINT: for package:raccoon, then LOCALES:, BRIGHTNESS: and
+/// LIFECYCLE:, as the runner told the engine.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Where the Dart-only Linux plugins would put the app's files: the runner
   // points this into the app's data directory when it has one.
   print('XDG_DATA_HOME:${Platform.environment['XDG_DATA_HOME'] ?? ''}');
+  print('RACCOON_ENDPOINT:${Platform.environment['RACCOON_ENDPOINT'] ?? ''}');
   final failures = <String>[];
   Future<void> check(String name, Future<bool> Function() call) async {
     try {

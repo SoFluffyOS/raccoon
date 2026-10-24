@@ -533,6 +533,15 @@ int Serve(const Options& options) {
   std::signal(SIGBREAK, OnSignal);
 #endif
 
+  // What package:raccoon's Raccoon().isPresent reads. Set before any thread
+  // starts, since setenv races getenv.
+  const std::string endpoint = "unix:" + options.socket;
+#if defined(_WIN32)
+  _putenv_s("RACCOON_ENDPOINT", endpoint.c_str());
+#else
+  setenv("RACCOON_ENDPOINT", endpoint.c_str(), 1);
+#endif
+
   // The app's log reaches the client too: the engine's lines, and stderr,
   // where the engine prints what main() died of and the runner what went
   // unanswered. A client is often not there yet when that happens.

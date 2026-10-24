@@ -2883,6 +2883,8 @@ void main() {
         }
         // Resumed, as a desktop embedding says once the engine runs.
         expect(output, contains('LIFECYCLE:resumed'));
+        // What package:raccoon reads to know it runs on Raccoon.
+        expect(output, contains('RACCOON_ENDPOINT:${endpoint.uri}'));
         final locales = output.firstWhere(
           (line) => line.startsWith('LOCALES:'),
           orElse: () => 'LOCALES: none printed',
