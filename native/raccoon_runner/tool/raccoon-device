@@ -1109,6 +1109,25 @@ print('🦝 native plugins ready in %.1f s: ' % (time.time() - started) + '; '.j
 PY
 }
 
+# Instances of one project (raccoon, raccoon-2) share its build/raccoon: a
+# workspace member's scoped package config, the native assets and their
+# stamp. Installs that write there take turns, until the helper exits
+# (#136); a lock ten minutes old is a killed install's. Taken only then, so
+# an app with neither pays nothing for it.
+lock_build() {
+  [ -z "${BUILD_LOCK:-}" ] || return 0
+  BUILD_LOCK="$1/build/raccoon/.install-lock"
+  [ -d "$1/build/raccoon" ] || mkdir -p "$1/build/raccoon"
+  until mkdir "$BUILD_LOCK" 2>/dev/null; do
+    if [ -n "$(find "$BUILD_LOCK" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then
+      rmdir "$BUILD_LOCK" 2>/dev/null || true
+      continue
+    fi
+    sleep 0.2
+  done
+  trap 'rmdir "$BUILD_LOCK" 2>/dev/null' EXIT
+}
+
 # A linux/ holding only flutter/ephemeral is the Linux target's engine copy,
 # which assemble makes in a project with no Linux app of its own (one has
 # CMakeLists.txt and runner/). Cleared before and after the build, so one an
@@ -1255,6 +1274,7 @@ PY
 )" || scan=$?
   # 3: no package has a hook. Any other failure: build, and keep no stamp.
   [ "$scan" -eq 3 ] && return 0
+  lock_build "$project"
   if [ ! -f "$project/lib/main.dart" ]; then
     echo "🦝 native assets skipped: no lib/main.dart to build them with" >&2
     return 0
@@ -1345,19 +1365,8 @@ case "$verb" in
     # The project is two levels above its bundle; its native plugins are
     # built for this host and loaded into the runner.
     project="$(cd "$local_path/../.." && pwd)"
-    # Instances of one project (raccoon, raccoon-2) share its build/raccoon:
-    # the scoped package config, the native assets and their stamp. Their
-    # installs take turns (#136); a lock ten minutes old is a killed one's.
-    lock="$project/build/raccoon/.install-lock"
-    mkdir -p "$project/build/raccoon"
-    until mkdir "$lock" 2>/dev/null; do
-      if [ -n "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then
-        rmdir "$lock" 2>/dev/null || true
-        continue
-      fi
-      sleep 0.2
-    done
-    trap 'rmdir "$lock" 2>/dev/null' EXIT
+    # A workspace member's config is written into build/raccoon.
+    [ -f "$project/.dart_tool/package_config.json" ] || lock_build "$project"
     # Worked out once: for a pub workspace member it runs package_scope.
     config="$(package_config "$project")" || config=""
     build_plugins "$project" "$APPS/$key/plugins" "$config"
