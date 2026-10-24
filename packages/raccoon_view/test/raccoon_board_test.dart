@@ -178,6 +178,34 @@ void main() {
       expect(find.byType(RaccoonView), findsNothing);
     });
 
+    // #133: frames were matched by place, so closing the first handed the
+    // second's view, focus and all, to the third.
+    testWidgets('a session keeps its view when one before it closes', (
+      tester,
+    ) async {
+      final connections = await pumpBoard(tester, ['a', 'b', 'c']);
+      State viewOf(String name) => tester.state(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is RaccoonView && widget.connection == connections[name],
+        ),
+      );
+      final before = viewOf('b');
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: RaccoonBoard(
+            sessions: [
+              for (final name in ['b', 'c'])
+                RaccoonBoardSession(name: name, connection: connections[name]!),
+            ],
+            layout: layout,
+          ),
+        ),
+      );
+      expect(viewOf('b'), same(before));
+    });
+
     testWidgets('each session gets a frame at its device size', (tester) async {
       final connections = await pumpBoard(tester, [
         'counter',

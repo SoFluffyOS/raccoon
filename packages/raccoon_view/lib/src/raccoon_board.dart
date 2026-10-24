@@ -437,7 +437,10 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
       );
     }
 
+    // Keyed by name: a frame keeps its view, focus and texture when one
+    // before it closes.
     return Positioned(
+      key: ValueKey(session.name),
       left: frame.position.dx + RaccoonBoard.reach,
       top: frame.position.dy - RaccoonBoard.titleHeight + RaccoonBoard.reach,
       width: frame.size.width,
