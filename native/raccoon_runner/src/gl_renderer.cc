@@ -540,15 +540,17 @@ bool GlRenderer::Present(const FrameCallback& callback) {
   uint32_t generation = 0;
   size_t width = 0;
   size_t height = 0;
+  bool pooled = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     index = current_;
     generation = generation_;
     width = pool_width_;
     height = pool_height_;
+    pooled = pool_wanted_;
     current_ = -1;
   }
-  if (index >= 0) {
+  if (index >= 0 && pooled) {
     // The client reads the buffer from its own context: it gets a fence for
     // the draw, or, without fences, the draw is waited for here.
     int fence = ExportFence();
@@ -564,8 +566,16 @@ bool GlRenderer::Present(const FrameCallback& callback) {
     }
     return true;
   }
+  // The pool went off while this frame was drawn into one of its buffers
+  // (Skia's GL surface takes the next frame's buffer at present): nobody
+  // takes buffers now, so its pixels go as a readback frame.
+  GLuint source = fbo_;
+  if (index >= 0) {
+    if (!EnsureSize(width, height)) return false;
+    source = pool_fbo_;
+  }
   if (fbo_ == 0) return false;
-  glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
+  glBindFramebuffer(GL_FRAMEBUFFER, source);
   glReadPixels(0, 0, static_cast<GLsizei>(width_), static_cast<GLsizei>(height_),
                reads_bgra_ ? GL_BGRA_EXT : GL_RGBA, GL_UNSIGNED_BYTE,
                readback_.data());
