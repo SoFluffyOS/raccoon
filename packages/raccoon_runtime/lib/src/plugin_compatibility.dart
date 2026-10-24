@@ -65,26 +65,36 @@ final class PluginCompatibility {
   static const String fileName = '.flutter-plugins-dependencies';
 
   /// The report for the project at [projectDirectory], or an empty list when
-  /// the tool has not written the file yet.
+  /// the tool has not written the file yet, or is writing it: it truncates
+  /// the file first, so a read can find it empty or cut short (#134).
   List<PluginStatus> forProject(String projectDirectory) {
     final file = File(p.join(projectDirectory, fileName));
     if (!file.existsSync()) return const [];
-    return parse(file.readAsStringSync());
+    try {
+      return parse(file.readAsStringSync());
+    } on FormatException {
+      return const [];
+    }
   }
 
+  /// The report in [json]; empty for a shape that isn't the tool's.
   List<PluginStatus> parse(String json) {
     final decoded = jsonDecode(json);
     if (decoded is! Map || decoded['plugins'] is! Map) return const [];
     final platforms = decoded['plugins'] as Map;
+    List<Object?> entriesOf(Object? list) => switch (list) {
+      final List<Object?> entries => entries,
+      _ => const [],
+    };
     final onPlatform = <String, bool>{};
-    for (final entry in platforms[platform] as List? ?? const []) {
-      if (entry case {'name': final String name}) {
-        onPlatform[name] = entry['native_build'] == true;
+    for (final entry in entriesOf(platforms[platform])) {
+      if (entry case final Map map && {'name': final String name}) {
+        onPlatform[name] = map['native_build'] == true;
       }
     }
     final everywhere = <String>{};
     for (final list in platforms.values) {
-      for (final entry in list as List? ?? const []) {
+      for (final entry in entriesOf(list)) {
         if (entry case {'name': final String name}) everywhere.add(name);
       }
     }

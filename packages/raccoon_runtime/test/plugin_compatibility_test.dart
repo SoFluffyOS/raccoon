@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
 import 'package:raccoon_runtime/raccoon_runtime.dart';
 import 'package:test/test.dart';
 
@@ -85,5 +88,21 @@ void main() {
 
   test('tolerates a project without the file', () {
     expect(PluginCompatibility().forProject('/nowhere'), isEmpty);
+  });
+
+  // #134: the tool truncates the file before it writes it again.
+  test('reads a file cut short, or of another shape, as no report', () {
+    final temp = Directory.systemTemp.createTempSync('raccoon_plugins');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    final compatibility = PluginCompatibility(platform: 'linux');
+    final file = File(p.join(temp.path, PluginCompatibility.fileName));
+    for (final text in [
+      '',
+      '{"plugins": {"linux": [',
+      '{"plugins": {"linux": 3}}',
+    ]) {
+      file.writeAsStringSync(text);
+      expect(compatibility.forProject(temp.path), isEmpty, reason: text);
+    }
   });
 }
