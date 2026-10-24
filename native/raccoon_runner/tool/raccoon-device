@@ -226,7 +226,8 @@ build_plugins() {
   local project="$1" out="$2" config
   rm -rf "$out"
   # None, as package_scope says why: no plugins rather than a failed install.
-  config="$(package_config "$project")" || config=""
+  # Install passes it, worked out once for both steps.
+  if [ $# -ge 3 ]; then config="$3"; else config="$(package_config "$project")" || config=""; fi
   [ -n "$config" ] || return 0
   if [ -n "$WINDOWS" ]; then
     build_plugins_windows "$project" "$out" "$config"
@@ -1108,6 +1109,18 @@ print('🦝 native plugins ready in %.1f s: ' % (time.time() - started) + '; '.j
 PY
 }
 
+# A linux/ holding only flutter/ephemeral is the Linux target's engine copy,
+# which assemble makes in a project with no Linux app of its own (one has
+# CMakeLists.txt and runner/). Cleared before and after the build, so one an
+# install killed mid-build left goes too (#136).
+clear_assembled_linux() {
+  local linux="$1/linux"
+  [ "$(uname -s)" = Linux ] || return 0
+  [ "$(ls -A "$linux" 2>/dev/null)" = flutter ] || return 0
+  [ "$(ls -A "$linux/flutter")" = ephemeral ] || return 0
+  rm -rf "$linux"
+}
+
 # Code assets of packages with build hooks (native assets: objective_c
 # under path_provider_foundation, sqlite3 3.x), built for this host. The
 # tool builds the bundle for the Linux device it believes Raccoon to be (#1)
@@ -1115,14 +1128,14 @@ PY
 # names none. The tool's own bundle target for this host runs them: on macOS
 # the macOS one, without the app's macos/ directory; on Linux the Linux one,
 # which unpacks the GTK engine into linux/flutter/ephemeral, a folder that
-# goes again when the project had no linux/ of its own (#57). The code assets
+# goes again when the project had no linux/ of its own (#57, #136). The code assets
 # land beside the app's bundle, and the installed manifest names them by
 # absolute path under this host's key, so the engine opens them as an app's
 # would. Skipped without hook packages.
 build_native_assets() {
-  local project="$1" app="$2" config out log manifest built had_linux
+  local project="$1" app="$2" config out log manifest built
   local -a target
-  config="$(package_config "$project")" || config=""
+  if [ $# -ge 3 ]; then config="$3"; else config="$(package_config "$project")" || config=""; fi
   [ -n "$config" ] || return 0
   out="$project/build/raccoon/native_assets"
   case "$(uname -s)" in
@@ -1254,15 +1267,11 @@ PY
     unchanged=1
   else
     rm -f "$stamp"
-    had_linux=""
-    [ -d "$project/linux" ] && had_linux=1
+    clear_assembled_linux "$project"
     (cd "$project" && "$(sdk_root)/bin/flutter" assemble --no-version-check \
       -dBuildMode=debug -dTargetFile=lib/main.dart --output="$out" \
       "${target[@]}") > "$log" 2>&1 || status=$?
-    # The Linux target's engine copy, in a project that had no linux/ before.
-    if [ "$(uname -s)" = Linux ] && [ -z "$had_linux" ] && [ -d "$project/linux/flutter/ephemeral" ]; then
-      rm -rf "$project/linux"
-    fi
+    clear_assembled_linux "$project"
     if [ "$status" -ne 0 ] || [ ! -f "$manifest" ]; then
       echo "🦝 native assets did not build; see $log" >&2
       return 0
@@ -1335,8 +1344,11 @@ case "$verb" in
     clone_tree "$local_path" "$APPS/$key/flutter_assets"
     # The project is two levels above its bundle; its native plugins are
     # built for this host and loaded into the runner.
-    build_plugins "$(cd "$local_path/../.." && pwd)" "$APPS/$key/plugins"
-    build_native_assets "$(cd "$local_path/../.." && pwd)" "$APPS/$key"
+    project="$(cd "$local_path/../.." && pwd)"
+    # Worked out once: for a pub workspace member it runs package_scope.
+    config="$(package_config "$project")" || config=""
+    build_plugins "$project" "$APPS/$key/plugins" "$config"
+    build_native_assets "$project" "$APPS/$key" "$config"
     ;;
   uninstall)
     rm -rf "$APPS/$(app_key "$1")"
