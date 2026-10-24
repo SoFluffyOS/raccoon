@@ -70,6 +70,9 @@ struct Options {
 // How long the client may take to answer a platform message before the app
 // gets "no plugin" instead: a reply that never comes must not hang it.
 constexpr auto kReplyTimeout = std::chrono::seconds(5);
+// How long frames wait for a client that reads nothing before it is let
+// go: as long as a blocked write waited before frames waited instead.
+constexpr auto kStalledClient = std::chrono::seconds(5);
 const std::string kNoReplyWhy =
     "the client did not answer in " + std::to_string(kReplyTimeout.count()) + " s";
 
@@ -562,6 +565,7 @@ int Serve(const Options& options) {
   bool stop = false;
   size_t last_sent = 0;
   bool frames_held = false;
+  std::chrono::steady_clock::time_point held_since;
   bool vm_sent = false;
   bool client_shared = false;
   std::unique_ptr<raccoon::SharedBufferPool> pool;
@@ -907,7 +911,17 @@ int Serve(const Options& options) {
     // A client that reads slowly leaves its socket full: frames wait in
     // the renderer, the newest replacing the rest, rather than block the
     // platform thread, the app's, on the write (#138).
-    frames_held = server.has_client() && !server.CanWrite();
+    const bool held = server.has_client() && !server.CanWrite();
+    const auto now = std::chrono::steady_clock::now();
+    if (held && !frames_held) held_since = now;
+    frames_held = held;
+    // One that reads nothing for as long as a blocked write used to wait
+    // has stopped: it is let go, so the runner is free for another (#139).
+    if (held && now - held_since > kStalledClient) {
+      std::fprintf(stderr, "🦝 the client stopped reading; letting it go\n");
+      server.Disconnect();
+      frames_held = false;
+    }
     if (server.has_client()) {
       if (!vm_sent) {
         const std::string uri = host.vm_service_uri();
@@ -989,7 +1003,7 @@ int Serve(const Options& options) {
       // replacing the pool releases it, and that frame would be lost.
       // Shared buffers, sized for the current frame; replaced on resize.
       const size_t need = host.frame().LatestSizeBytes();
-      if (client_shared && !client_gpu && need > 0 &&
+      if (client_shared && !client_gpu && need > 0 && !frames_held &&
           (!pool || pool->size() != need)) {
         host.frame().SetSharedPool(nullptr);
         auto fresh = std::make_unique<raccoon::SharedBufferPool>();

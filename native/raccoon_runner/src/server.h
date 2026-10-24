@@ -44,6 +44,8 @@ class RunnerServer {
   // Whether the client's socket takes more now, without waiting: a frame
   // waits for it rather than block the loop on a client reading slowly.
   bool CanWrite() const;
+  // Lets the client go, as when it hangs up.
+  void Disconnect() { CloseClient(); }
 
   // Sends |message| to the client. Returns false when there is no client or
   // it went away.

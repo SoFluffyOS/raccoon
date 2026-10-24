@@ -2384,6 +2384,73 @@ void main() {
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
+  // #139: frames waited for a client that read nothing, for good, and
+  // kept the runner from anyone else.
+  test(
+    'a client that stops reading is let go',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final stalled = await Socket.connect(
+        InternetAddress(endpoint.path, type: InternetAddressType.unix),
+        0,
+      );
+      try {
+        // Says hello, then reads nothing: frames pile up behind it.
+        stalled.add(
+          MessageFraming.frame(
+            ClientMessage(
+              hello: ClientHello(protocolVersion: 1, pid: 1),
+            ).writeToBuffer(),
+          ),
+        );
+        await stalled.flush();
+        final deadline = DateTime.now().add(const Duration(seconds: 15));
+        RunnerClient? next;
+        while (next == null) {
+          expect(DateTime.now().isBefore(deadline), isTrue);
+          final RunnerClient client;
+          try {
+            client = await RunnerClient.connect(endpoint);
+          } on SocketException {
+            // Its queue is full while a write to the stalled client waits.
+            await Future<void>.delayed(const Duration(milliseconds: 500));
+            continue;
+          }
+          try {
+            await client.hello.timeout(const Duration(seconds: 2));
+            next = client;
+          } on Object {
+            await client.close();
+            await Future<void>.delayed(const Duration(milliseconds: 500));
+          }
+        }
+        await next.frames.first.timeout(const Duration(seconds: 10));
+        next.shutdown();
+        await next.close();
+        expect(await _exitCode(runner), 0);
+      } finally {
+        stalled.destroy();
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((ready, Platform.isWindows)) {
+      (false, _) => 'build the runner and example first',
+      (_, true) => 'a raw socket stands in for a client',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   test(
     'the runner stops when its parent is gone',
     () async {
