@@ -112,6 +112,44 @@ void main() {
     expect(entry['platform'], 'linux-x64');
   });
 
+  // #132: one malformed file threw from every read, which kept the
+  // simulator's setup spinning.
+  test(
+    'a file that is not JSON reads as no devices and is not overwritten',
+    () {
+      final path = p.join(temp.path, 'custom_devices.json');
+      File(path).writeAsStringSync('{"custom-devices": [');
+      final file = CustomDevicesFile(path);
+      expect(file.ids(), isEmpty);
+      expect(file.helperOf('raccoon'), isNull);
+      expect(
+        () =>
+            file.upsert(CustomDeviceConfig(deviceHelper: '/h/raccoon-device')),
+        throwsFormatException,
+      );
+      expect(() => file.remove('raccoon'), throwsFormatException);
+      expect(File(path).readAsStringSync(), '{"custom-devices": [');
+    },
+  );
+
+  test('a write lands whole, with nothing left beside the file', () {
+    final file = CustomDevicesFile(p.join(temp.path, 'tool', 'devices.json'));
+    file.upsert(CustomDeviceConfig(deviceHelper: '/h/raccoon-device'));
+    file.upsert(
+      CustomDeviceConfig.forDevice(
+        RaccoonDevice.tablet,
+        deviceHelper: '/h/raccoon-device',
+      ),
+    );
+    expect(file.ids(), ['raccoon', 'raccoon-tablet']);
+    expect(
+      Directory(
+        p.join(temp.path, 'tool'),
+      ).listSync().map((e) => p.basename(e.path)),
+      ['devices.json'],
+    );
+  });
+
   test('remove takes one entry out and says whether it was there', () {
     final file = CustomDevicesFile(p.join(temp.path, 'custom_devices.json'));
     file.upsert(CustomDeviceConfig(deviceHelper: '/h/raccoon-device'));

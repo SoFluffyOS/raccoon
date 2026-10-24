@@ -196,12 +196,13 @@ final class CustomDevicesFile {
 
   final String path;
 
-  /// Adds or replaces the entry whose id matches [config]'s.
+  /// Adds or replaces the entry whose id matches [config]'s. Throws a
+  /// [FormatException] when the file is not JSON, rather than overwrite
+  /// the user's other devices.
   void upsert(CustomDeviceConfig config) {
-    final file = File(path);
     final devices = <Object?>[];
-    if (file.existsSync()) {
-      final decoded = jsonDecode(file.readAsStringSync());
+    if (File(path).existsSync()) {
+      final decoded = jsonDecode(File(path).readAsStringSync());
       if (decoded case {_key: final List<Object?> existing}) {
         devices.addAll(
           existing.where((d) => d is! Map || d['id'] != config.id),
@@ -209,13 +210,11 @@ final class CustomDevicesFile {
       }
     }
     devices.add(config.toJson());
-    file.parent.createSync(recursive: true);
-    file.writeAsStringSync(
-      '${const JsonEncoder.withIndent('  ').convert({_key: devices})}\n',
-    );
+    _write(devices);
   }
 
-  /// Removes the entry with [id]; tells whether there was one.
+  /// Removes the entry with [id]; tells whether there was one. Throws a
+  /// [FormatException] when the file is not JSON.
   bool remove(String id) {
     final file = File(path);
     if (!file.existsSync()) return false;
@@ -223,12 +222,32 @@ final class CustomDevicesFile {
     if (decoded case {_key: final List<Object?> existing}) {
       final kept = existing.where((d) => d is! Map || d['id'] != id).toList();
       if (kept.length == existing.length) return false;
-      file.writeAsStringSync(
-        '${const JsonEncoder.withIndent('  ').convert({_key: kept})}\n',
-      );
+      _write(kept);
       return true;
     }
     return false;
+  }
+
+  /// Written aside and renamed over the file, so a write cut short leaves
+  /// the old file, never half of the new one.
+  void _write(List<Object?> devices) {
+    final file = File(path)..parent.createSync(recursive: true);
+    final staged = File('$path.$pid.tmp')..writeAsStringSync(
+      '${const JsonEncoder.withIndent('  ').convert({_key: devices})}\n',
+    );
+    staged.renameSync(file.path);
+  }
+
+  /// The file's contents; null when it is missing or not JSON, which reads
+  /// as no devices.
+  Object? _read() {
+    final file = File(path);
+    if (!file.existsSync()) return null;
+    try {
+      return jsonDecode(file.readAsStringSync());
+    } on FormatException {
+      return null;
+    }
   }
 
   /// The device helper the entry with [id] runs, read off its ping
@@ -258,10 +277,7 @@ final class CustomDevicesFile {
   }
 
   Map? _entry(String id) {
-    final file = File(path);
-    if (!file.existsSync()) return null;
-    final decoded = jsonDecode(file.readAsStringSync());
-    if (decoded case {_key: final List<Object?> devices}) {
+    if (_read() case {_key: final List<Object?> devices}) {
       for (final device in devices) {
         if (device case {'id': final String deviceId} when deviceId == id) {
           return device as Map;
@@ -273,10 +289,7 @@ final class CustomDevicesFile {
 
   /// Ids of the configured devices.
   List<String> ids() {
-    final file = File(path);
-    if (!file.existsSync()) return const [];
-    final decoded = jsonDecode(file.readAsStringSync());
-    if (decoded case {_key: final List<Object?> devices}) {
+    if (_read() case {_key: final List<Object?> devices}) {
       return [
         for (final device in devices)
           if (device case {'id': final String id}) id,
