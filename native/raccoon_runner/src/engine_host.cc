@@ -186,11 +186,13 @@ void EngineHost::Resize(size_t width, size_t height, double pixel_ratio) {
   // display.
   constexpr size_t kMaxSide = 8192;
   const size_t longest = std::max(width, height);
+  input_scale_ = 1.0;
   if (longest > kMaxSide) {
     const double scale = static_cast<double>(kMaxSide) / static_cast<double>(longest);
     width = std::max<size_t>(1, static_cast<size_t>(std::lround(width * scale)));
     height = std::max<size_t>(1, static_cast<size_t>(std::lround(height * scale)));
     pixel_ratio *= scale;
+    input_scale_ = scale;
   }
   FlutterWindowMetricsEvent metrics{};
   metrics.struct_size = sizeof(FlutterWindowMetricsEvent);
@@ -479,7 +481,20 @@ void EngineHost::ReleaseAllGpuBuffers() {
 }
 
 void EngineHost::SendPointer(const FlutterPointerEvent& event) {
-  loader_.procs().SendPointerEvent(engine_, &event, 1);
+  if (input_scale_ == 1.0) {
+    loader_.procs().SendPointerEvent(engine_, &event, 1);
+    return;
+  }
+  // A frame scaled down to fit (#117): the host points in the size it asked
+  // for, so its positions and distances scale the same way (#130).
+  FlutterPointerEvent scaled = event;
+  scaled.x *= input_scale_;
+  scaled.y *= input_scale_;
+  scaled.scroll_delta_x *= input_scale_;
+  scaled.scroll_delta_y *= input_scale_;
+  scaled.pan_x *= input_scale_;
+  scaled.pan_y *= input_scale_;
+  loader_.procs().SendPointerEvent(engine_, &scaled, 1);
 }
 
 namespace {

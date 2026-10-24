@@ -193,6 +193,9 @@ class EngineHost {
   VulkanRenderer* vulkan_ = nullptr;
 #endif
   std::string renderer_ = "software";
+  // What Resize scaled the frame by to fit (#117), so pointer events from
+  // the host scale with it (#130); 1 almost always. Loop thread.
+  double input_scale_ = 1.0;
   static void OnLog(const char* tag, const char* message, void* user_data);
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* user_data);

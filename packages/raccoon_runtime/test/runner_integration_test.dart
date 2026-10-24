@@ -1714,6 +1714,28 @@ void main() {
             .timeout(const Duration(seconds: 15));
         expect(scaled.height, 205);
         expect(_pixel(scaled, 3, 3), _blue);
+        // The host's pointer stays in the size it asked for: a tap on the
+        // box, at the middle of 16000x400, lands on it (#130).
+        for (final (phase, buttons) in [
+          (PointerPhase.POINTER_PHASE_DOWN, 1),
+          (PointerPhase.POINTER_PHASE_UP, 0),
+        ]) {
+          client.sendPointer(
+            PointerEvent(
+              phase: phase,
+              x: 8000,
+              y: 200,
+              buttons: Int64(buttons),
+              device: PointerDevice.POINTER_DEVICE_MOUSE,
+              pointerId: 1,
+            ),
+          );
+        }
+        await client.frames
+            .firstWhere(
+              (f) => f.width == 8192 && _pixel(f, 4096, 102) == _green,
+            )
+            .timeout(const Duration(seconds: 10));
         client.resize(395, 870, 1);
         await client.frames
             .firstWhere((f) => f.width == 395 && f.height == 870)
