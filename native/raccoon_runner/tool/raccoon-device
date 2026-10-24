@@ -225,7 +225,8 @@ plugin_headers() {
 build_plugins() {
   local project="$1" out="$2" config
   rm -rf "$out"
-  config="$(package_config "$project")"
+  # None, as package_scope says why: no plugins rather than a failed install.
+  config="$(package_config "$project")" || config=""
   [ -n "$config" ] || return 0
   if [ -n "$WINDOWS" ]; then
     build_plugins_windows "$project" "$out" "$config"
@@ -281,9 +282,23 @@ build_plugins_linux() {
   python3 - "$config" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS" \
     "$cache" "$version" "$(uname -m)" \
     "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-$engine-linux-$(uname -m).tar.gz}" <<'PY'
-import glob, hashlib, json, os, re, shutil, subprocess, sys, tarfile, time
+import glob, hashlib, json, os, re, shutil, subprocess, sys, tarfile, tempfile, time
 started = time.time()
 from urllib.parse import unquote, urlparse
+
+def settle(staging, cached, good):
+    """Renames [staging] into place as [cached], each install staging on
+    its own: an install that finished the same entry first keeps it (#136)."""
+    if good():
+        shutil.rmtree(staging, ignore_errors=True)
+        return
+    shutil.rmtree(cached, ignore_errors=True)
+    try:
+        os.replace(staging, cached)
+    except OSError:
+        # Another install put its entry there between the two.
+        shutil.rmtree(staging, ignore_errors=True)
+
 
 def clone(source, target):
     # A copy-on-write clone where the file system has one, so an install
@@ -371,11 +386,17 @@ def version_key(name, root):
 lib_stamp = runner_version
 
 
+prebuilt_tried = False
+
+
 def fetch_prebuilt():
     """The release's prebuilt plugins into the cache, once per runner version
     and engine; a marker remembers a miss so it is not asked again."""
-    if os.environ.get('RACCOON_NO_PREBUILT'):
+    global prebuilt_tried
+    if os.environ.get('RACCOON_NO_PREBUILT') or prebuilt_tried:
         return
+    # Once an install: a network that fails fails for every plugin alike.
+    prebuilt_tried = True
     marker = os.path.join(cache, 'prebuilt-%s.%s' % (runner_version, 'done'))
     if os.path.exists(marker):
         return
@@ -391,7 +412,9 @@ def fetch_prebuilt():
     remember = False
     try:
         # Only when downloading: importing it costs every install 20 ms.
-        import gzip, urllib.error, urllib.request, zlib
+        import gzip, socket, urllib.error, urllib.request, zlib
+        # A stalled connection fails rather than holding the install.
+        socket.setdefaulttimeout(30)
         try:
             urllib.request.urlretrieve(prebuilt_url, archive)
         except urllib.error.HTTPError as error:
@@ -520,13 +543,11 @@ for plugin in wanted:
             continue
         # Copied aside, then renamed into place: an interrupted copy leaves
         # no entry that counts as cached (#122).
-        staging = cached + '.partial'
-        shutil.rmtree(staging, ignore_errors=True)
-        os.makedirs(staging)
+        os.makedirs(cache, exist_ok=True)
+        staging = tempfile.mkdtemp(prefix=os.path.basename(cached) + '.partial-', dir=cache)
         for so in libs:
             shutil.copy2(so, staging)
-        shutil.rmtree(cached, ignore_errors=True)
-        os.replace(staging, cached)
+        settle(staging, cached, lambda: glob.glob(os.path.join(cached, '*.so')))
         libs = sorted(glob.glob(os.path.join(cached, '*.so')))
         built.append(name)
     for so in libs:
@@ -575,9 +596,23 @@ build_plugins_macos() {
     "$cache" "$version" "$(uname -m)" "$sdk/bin/cache/artifacts/engine/darwin-x64" \
     "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-$engine-macos-$(uname -m).tar.gz}" \
     "$project" <<'PY'
-import hashlib, json, os, re, shutil, subprocess, sys, tarfile, time
+import hashlib, json, os, re, shutil, subprocess, sys, tarfile, tempfile, time
 started = time.time()
 from urllib.parse import unquote, urlparse
+
+def settle(staging, cached, good):
+    """Renames [staging] into place as [cached], each install staging on
+    its own: an install that finished the same entry first keeps it (#136)."""
+    if good():
+        shutil.rmtree(staging, ignore_errors=True)
+        return
+    shutil.rmtree(cached, ignore_errors=True)
+    try:
+        os.replace(staging, cached)
+    except OSError:
+        # Another install put its entry there between the two.
+        shutil.rmtree(staging, ignore_errors=True)
+
 
 def clone(source, target):
     # A copy-on-write clone where the file system has one, so an install
@@ -673,11 +708,17 @@ def dependencies(pubspec):
     return names
 
 
+prebuilt_tried = False
+
+
 def fetch_prebuilt():
     """The release's prebuilt plugins into the cache, once per runner version
     and engine; a marker remembers a miss so it is not asked again."""
-    if os.environ.get('RACCOON_NO_PREBUILT'):
+    global prebuilt_tried
+    if os.environ.get('RACCOON_NO_PREBUILT') or prebuilt_tried:
         return
+    # Once an install: a network that fails fails for every plugin alike.
+    prebuilt_tried = True
     marker = os.path.join(cache, 'prebuilt-%s-macos.done' % runner_version)
     if os.path.exists(marker):
         return
@@ -693,7 +734,9 @@ def fetch_prebuilt():
     remember = False
     try:
         # Only when downloading: importing it costs every install 20 ms.
-        import gzip, urllib.error, urllib.request, zlib
+        import gzip, socket, urllib.error, urllib.request, zlib
+        # A stalled connection fails rather than holding the install.
+        socket.setdefaulttimeout(30)
         try:
             urllib.request.urlretrieve(prebuilt_url, archive)
         except urllib.error.HTTPError as error:
@@ -1011,9 +1054,8 @@ if misses:
         # A fresh entry: one built again replaces what an older helper left.
         # Copied aside, then renamed into place: an interrupted copy leaves
         # no entry that counts as cached (#122).
-        staging = cached + '.partial'
-        shutil.rmtree(staging, ignore_errors=True)
-        os.makedirs(staging)
+        os.makedirs(cache, exist_ok=True)
+        staging = tempfile.mkdtemp(prefix=os.path.basename(cached) + '.partial-', dir=cache)
         for d, f in made:
             shutil.copytree(os.path.join(release, d, f), os.path.join(staging, f), symlinks=True,
                             dirs_exist_ok=True)
@@ -1024,8 +1066,7 @@ if misses:
                 shutil.copytree(path, target, symlinks=True, dirs_exist_ok=True)
             else:
                 shutil.copy2(path, target)
-        shutil.rmtree(cached, ignore_errors=True)
-        os.replace(staging, cached)
+        settle(staging, cached, lambda: in_cache(plugin))
         built.append(name)
 
 entries = []
@@ -1081,8 +1122,9 @@ PY
 build_native_assets() {
   local project="$1" app="$2" config out log manifest built had_linux
   local -a target
-  config="$(package_config "$project")"
+  config="$(package_config "$project")" || config=""
   [ -n "$config" ] || return 0
+  command -v python3 >/dev/null || { echo "🦝 no python3; native assets skipped" >&2; return 0; }
   out="$project/build/raccoon/native_assets"
   case "$(uname -s)" in
     Darwin)
