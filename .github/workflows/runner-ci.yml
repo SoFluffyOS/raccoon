@@ -6,6 +6,11 @@ name: Runner CI
 # gh workflow run runner-ci.yml --ref <branch> (#131).
 on:
   workflow_dispatch:
+    inputs:
+      prebuild:
+        description: Also prebuild the common plugins (minutes; worth it after changing what they build with)
+        type: boolean
+        default: false
 
 # A newer run on the same branch cancels the one it replaces.
 concurrency:
@@ -52,25 +57,6 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v5
-
-      # The plugin prebuild takes minutes (six on macOS x64) and only checks
-      # that the release's plugins still build, so it runs when what they
-      # build with changed. A base we can't fetch runs it, and a run asked
-      # for by hand has none, so it always does. So does the release
-      # workflow.
-      - name: Check what the plugin prebuild depends on
-        id: plugins
-        env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          changed=true
-          if git fetch -q --depth=1 origin "$BASE" 2>/dev/null; then
-            files="$(git diff --name-only "$BASE" HEAD -- tool/raccoon-device tool/engine_dir.sh \
-              tool/package_scope.dart tool/plugins_windows.dart tool/plugins third_party VERSION \
-              ../../.github/workflows/runner-ci.yml)"
-            [ -n "$files" ] || changed=false
-          fi
-          echo "changed=$changed" >> "$GITHUB_OUTPUT"
 
       - name: Install CMake and Ninja
         if: runner.os == 'Linux'
@@ -133,9 +119,11 @@ jobs:
         run: flutter build bundle --target-platform=${{ matrix.target }}
 
       # Libraries on Linux, frameworks on macOS: at least one, or it fails.
-      # No native plugins on Windows yet (#36).
+      # No native plugins on Windows yet (#36). Minutes (six on macOS x64),
+      # and it only checks that the release's plugins still build, so only
+      # when asked for; the release workflow always does it.
       - name: Prebuild the common plugins
-        if: runner.os != 'Windows' && steps.plugins.outputs.changed == 'true'
+        if: runner.os != 'Windows' && inputs.prebuild
         run: tool/raccoon-device prebuild tool/plugins build/plugins-test.tar.gz && tar tzf build/plugins-test.tar.gz | grep -c -E '\.so$|\.framework/$'
 
       - name: Render a frame of example/hello
