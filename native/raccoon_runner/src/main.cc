@@ -566,6 +566,7 @@ int Serve(const Options& options) {
   size_t last_sent = 0;
   bool frames_held = false;
   std::chrono::steady_clock::time_point held_since;
+  uint64_t sent_when_held = 0;
   bool vm_sent = false;
   bool client_shared = false;
   std::unique_ptr<raccoon::SharedBufferPool> pool;
@@ -914,9 +915,17 @@ int Serve(const Options& options) {
     // A client that reads slowly leaves its socket full: frames wait in
     // the renderer, the newest replacing the rest, rather than block the
     // platform thread, the app's, on the write (#138).
-    const bool held = server.has_client() && !server.CanWrite();
+    // Held only with a frame to send: an idle app's client, paused in a
+    // debugger say, waits as long as it likes (#142).
+    const bool waiting = host.frame().FrameCount() > last_sent;
+    const bool held = server.has_client() && waiting && !server.CanWrite();
     const auto now = std::chrono::steady_clock::now();
-    if (held && !frames_held) held_since = now;
+    // The stall counts from the last time the client took anything, so
+    // one that reads slower than the app logs is not taken for stopped.
+    if (!held || !frames_held || server.bytes_sent() != sent_when_held) {
+      held_since = now;
+      sent_when_held = server.bytes_sent();
+    }
     frames_held = held;
     // One that reads nothing for as long as a blocked write used to wait
     // has stopped: it is let go, so the runner is free for another (#139).

@@ -46,6 +46,9 @@ class RunnerServer {
   bool CanWrite() const;
   // Lets the client go, as when it hangs up.
   void Disconnect() { CloseClient(); }
+  // Bytes written whole to the client so far: a client that takes any is
+  // reading, however slowly.
+  uint64_t bytes_sent() const { return bytes_sent_; }
 
   // Sends |message| to the client. Returns false when there is no client or
   // it went away.
@@ -87,6 +90,7 @@ class RunnerServer {
   // runs, so a handler that closes the client, which dispatches what is
   // left, starts after it, not again from the first (#138).
   size_t inbox_read_ = 0;
+  uint64_t bytes_sent_ = 0;
   // Descriptors a raw client sent, not yet taken by the handler.
   std::vector<int> fds_in_;
   // Newcomers told the runner is busy, oldest first; a few at most.

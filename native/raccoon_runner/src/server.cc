@@ -400,7 +400,9 @@ bool RunnerServer::CanWrite() const {
 }
 
 bool RunnerServer::WriteAll(const uint8_t* data, size_t size) {
-  return WriteAllTo(client_fd_, data, size);
+  if (!WriteAllTo(client_fd_, data, size)) return false;
+  bytes_sent_ += size;
+  return true;
 }
 
 bool RunnerServer::WriteAllTo(int fd, const uint8_t* data, size_t size) {
