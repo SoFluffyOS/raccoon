@@ -601,14 +601,17 @@ void EngineHost::SendKey(const FlutterKeyEvent& event) {
   const uint64_t logical = event.logical;
   SendPlatformMessage(
       "flutter/keyevent", reinterpret_cast<const uint8_t*>(raw.data()),
-      raw.size(), [this, down, logical, character](const uint8_t* data, size_t size) {
+      raw.size(),
+      // The modifiers as the key was pressed, not as the reply finds them.
+      [this, down, logical, character, shift = shift_, control = control_,
+       alt = alt_, meta = meta_](const uint8_t* data, size_t size) {
         if (!down) return;
         const auto reply = nlohmann::json::parse(data, data + size, nullptr, false);
         const bool handled = reply.is_object() && reply.contains("handled") &&
                              reply["handled"].is_boolean() &&
                              reply["handled"].get<bool>();
         if (handled) return;
-        text_input_.HandleKey(logical, character, shift_, control_, alt_, meta_);
+        text_input_.HandleKey(logical, character, shift, control, alt, meta);
       });
 }
 
