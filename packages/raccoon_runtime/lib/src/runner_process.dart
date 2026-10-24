@@ -72,14 +72,17 @@ final class RunnerLaunch {
 /// them the Dart VM service line the Flutter tool looks for.
 final class RunnerProcess {
   RunnerProcess._(this._process, this.launch) {
+    // Lenient: an app or a plugin can print bytes that are not UTF-8.
     _process.stdout
-        .transform(utf8.decoder)
+        .transform(const Utf8Decoder(allowMalformed: true))
         .transform(const LineSplitter())
-        .listen(_onStdoutLine);
+        .listen(_onStdoutLine, onDone: () => unawaited(_stdout.close()));
     _process.stderr
-        .transform(utf8.decoder)
+        .transform(const Utf8Decoder(allowMalformed: true))
         .transform(const LineSplitter())
-        .listen(_stderr.add);
+        .listen(_onStderrLine, onDone: () => unawaited(_stderr.close()));
+    _vmService.future.ignore();
+    unawaited(_process.exitCode.then(_onExit));
   }
 
   /// Starts the runner and waits until it listens on its socket.
@@ -106,6 +109,10 @@ final class RunnerProcess {
   final _vmService = Completer<String>();
   final _stdout = StreamController<String>.broadcast();
   final _stderr = StreamController<String>.broadcast();
+
+  /// The last lines, to say why a runner that exited at once did.
+  final _lastLines = <String>[];
+  static const _keptLines = 20;
 
   // The runner's lines start with 🦝 (#94), and did with `raccoon_runner:`.
   static const _prefixes = ['🦝 ', 'raccoon_runner: '];
@@ -147,6 +154,44 @@ final class RunnerProcess {
     if (line.startsWith(_vmServicePrefix) && !_vmService.isCompleted) {
       _vmService.complete(line.substring(_vmServicePrefix.length).trim());
     }
+    _keep(line);
     _stdout.add(line);
   }
+
+  void _onStderrLine(String line) {
+    _keep(line);
+    _stderr.add(line);
+  }
+
+  void _keep(String line) {
+    _lastLines.add(line);
+    if (_lastLines.length > _keptLines) _lastLines.removeAt(0);
+  }
+
+  /// A runner that exits before it listens fails [start] at once, with its
+  /// last words, rather than after the whole timeout (#134).
+  void _onExit(int code) {
+    if (!_listening.isCompleted) {
+      _listening.completeError(
+        RunnerExited(code, List.unmodifiable(_lastLines)),
+      );
+    }
+    if (!_vmService.isCompleted) _vmService.completeError(RunnerExited(code));
+  }
+}
+
+/// The runner process ended before it got as far as asked.
+final class RunnerExited implements Exception {
+  const RunnerExited(this.exitCode, [this.lastLines = const []]);
+
+  final int exitCode;
+
+  /// What it printed last, stdout and stderr together.
+  final List<String> lastLines;
+
+  @override
+  String toString() => switch (lastLines) {
+    [] => 'the runner exited with code $exitCode',
+    _ => 'the runner exited with code $exitCode:\n${lastLines.join('\n')}',
+  };
 }
