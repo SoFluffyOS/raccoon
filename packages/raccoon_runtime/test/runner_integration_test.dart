@@ -1688,6 +1688,40 @@ void main() {
           );
           expect(_pixel(latest, 3, 3), _blue);
         }
+        // Frames after the resizes keep coming through the latest set's
+        // buffers: the runner takes their releases, named by that set's
+        // generation (#135). Four taps, four frames, more than the set
+        // holds without them.
+        final before = client.sharedFrames;
+        var box = _red;
+        for (var tap = 0; tap < 4; tap++) {
+          for (final (phase, buttons) in [
+            (PointerPhase.POINTER_PHASE_DOWN, 1),
+            (PointerPhase.POINTER_PHASE_UP, 0),
+          ]) {
+            client.sendPointer(
+              PointerEvent(
+                phase: phase,
+                x: 197,
+                y: 435,
+                buttons: Int64(buttons),
+                device: PointerDevice.POINTER_DEVICE_MOUSE,
+                pointerId: 1,
+              ),
+            );
+          }
+          box = switch (box) {
+            _red => _green,
+            _ => _red,
+          };
+          final want = box;
+          await client.frames
+              .firstWhere((f) => f.width == 395 && _pixel(f, 197, 390) == want)
+              .timeout(const Duration(seconds: 10));
+        }
+        if (!Platform.isWindows) {
+          expect(client.sharedFrames - before, greaterThanOrEqualTo(4));
+        }
       } finally {
         client.shutdown();
         await client.close();

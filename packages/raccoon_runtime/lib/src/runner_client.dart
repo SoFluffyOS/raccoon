@@ -108,6 +108,9 @@ final class RunnerClient
   final RunnerTransport _transport;
   final _handles = <RandomAccessFile>[];
   var _buffers = <RandomAccessFile>[];
+  // Which set _buffers is, as the runner named it; releases name it back,
+  // so one meant for a set since replaced frees nothing in the new (#135).
+  var _sharedGeneration = 0;
   var _sharedFrames = 0;
   final _unframer = MessageUnframer();
   final _messages = StreamController<RunnerMessage>.broadcast();
@@ -349,6 +352,7 @@ final class RunnerClient
     // read as the tail of this one: the set takes its count from the front.
     // A set that came short of its count is dropped, its descriptors
     // closed rather than leaked (#134, #137).
+    _sharedGeneration = buffers.generation;
     final count = buffers.count;
     if (_handles.length < count) {
       _buffers = [];
@@ -377,17 +381,26 @@ final class RunnerClient
     if (index >= _buffers.length) {
       // Not one this client holds: dropped, but given back, or the runner
       // would keep it busy and send every frame inline.
-      send(ClientMessage(releaseBuffer: ReleaseBuffer(index: index)));
+      _releaseShared(index);
       return null;
     }
     final file = _buffers[index]..setPositionSync(0);
     final pixels = file.readSync(frame.rowBytes * frame.height);
-    send(ClientMessage(releaseBuffer: ReleaseBuffer(index: index)));
+    _releaseShared(index);
     _sharedFrames++;
     return frame.deepCopy()
       ..pixels = pixels
       ..inSharedBuffer = false;
   }
+
+  void _releaseShared(int index) => send(
+    ClientMessage(
+      releaseBuffer: ReleaseBuffer(
+        index: index,
+        sharedGeneration: _sharedGeneration,
+      ),
+    ),
+  );
 
   void _onDone() => _finish();
 

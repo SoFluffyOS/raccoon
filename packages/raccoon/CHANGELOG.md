@@ -1,6 +1,7 @@
 ## Unreleased
 
 - `PointerPhase` gains `CANCEL`: the host took a press away, and the app drops it with no tap. A runner that predates it already took an unknown phase as a cancel.
+- `SharedBuffers.generation` and `ReleaseBuffer.shared_generation`: a shared buffer goes back named by its set, so a release meant for a set since replaced frees nothing in the new one. 0 on either side keeps the old behaviour.
 
 ## 0.7.0
 

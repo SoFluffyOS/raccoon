@@ -152,10 +152,12 @@ class ReleaseBuffer extends $pb.GeneratedMessage {
   factory ReleaseBuffer({
     $core.int? index,
     $core.int? generation,
+    $core.int? sharedGeneration,
   }) {
     final result = ReleaseBuffer._();
     if (index != null) result.index = index;
     if (generation != null) result.generation = generation;
+    if (sharedGeneration != null) result.sharedGeneration = sharedGeneration;
     return result;
   }
 
@@ -174,6 +176,8 @@ class ReleaseBuffer extends $pb.GeneratedMessage {
       createEmptyInstance: ReleaseBuffer.$_createMessage)
     ..aI(1, _omitFieldNames ? '' : 'index', fieldType: $pb.PbFieldType.OU3)
     ..aI(2, _omitFieldNames ? '' : 'generation', fieldType: $pb.PbFieldType.OU3)
+    ..aI(3, _omitFieldNames ? '' : 'sharedGeneration',
+        fieldType: $pb.PbFieldType.OU3)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -216,6 +220,19 @@ class ReleaseBuffer extends $pb.GeneratedMessage {
   $core.bool hasGeneration() => $_has(1);
   @$pb.TagNumber(2)
   void clearGeneration() => $_clearField(2);
+
+  /// For a shared buffer, the generation of the set it belongs to, as
+  /// SharedBuffers named it: a release meant for a set since replaced is
+  /// dropped rather than free the same index in the new one (#135). 0, as
+  /// from a client that predates it, is taken for the current set.
+  @$pb.TagNumber(3)
+  $core.int get sharedGeneration => $_getIZ(2);
+  @$pb.TagNumber(3)
+  set sharedGeneration($core.int value) => $_setUnsignedInt32(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasSharedGeneration() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearSharedGeneration() => $_clearField(3);
 }
 
 class Resize extends $pb.GeneratedMessage {
@@ -1494,10 +1511,12 @@ class SharedBuffers extends $pb.GeneratedMessage {
   factory SharedBuffers({
     $core.int? count,
     $fixnum.Int64? size,
+    $core.int? generation,
   }) {
     final result = SharedBuffers._();
     if (count != null) result.count = count;
     if (size != null) result.size = size;
+    if (generation != null) result.generation = generation;
     return result;
   }
 
@@ -1517,6 +1536,7 @@ class SharedBuffers extends $pb.GeneratedMessage {
     ..aI(1, _omitFieldNames ? '' : 'count', fieldType: $pb.PbFieldType.OU3)
     ..a<$fixnum.Int64>(2, _omitFieldNames ? '' : 'size', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aI(3, _omitFieldNames ? '' : 'generation', fieldType: $pb.PbFieldType.OU3)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1558,6 +1578,17 @@ class SharedBuffers extends $pb.GeneratedMessage {
   $core.bool hasSize() => $_has(1);
   @$pb.TagNumber(2)
   void clearSize() => $_clearField(2);
+
+  /// Counts the sets the runner made for this client, from 1; releases
+  /// name it back (ReleaseBuffer.shared_generation).
+  @$pb.TagNumber(3)
+  $core.int get generation => $_getIZ(2);
+  @$pb.TagNumber(3)
+  set generation($core.int value) => $_setUnsignedInt32(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasGeneration() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearGeneration() => $_clearField(3);
 }
 
 class VmService extends $pb.GeneratedMessage {

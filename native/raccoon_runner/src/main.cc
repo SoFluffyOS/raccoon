@@ -563,6 +563,8 @@ int Serve(const Options& options) {
   bool vm_sent = false;
   bool client_shared = false;
   std::unique_ptr<raccoon::SharedBufferPool> pool;
+  // Which set pool is, as the client was told (#135).
+  uint32_t shared_generation = 0;
   // GPU buffers: the client asked for them in its hello, the set it was told
   // about on this socket, and the set whose descriptors went out on the GPU
   // socket.
@@ -767,6 +769,10 @@ int Serve(const Options& options) {
       host.ReleaseGpuBuffer(release.generation(), static_cast<int>(release.index()));
       return;
     }
+    // A release meant for a set since replaced would free the same index
+    // in this one while its frame is read; 0 is a client that predates it.
+    const uint32_t meant_for = release.shared_generation();
+    if (meant_for != 0 && meant_for != shared_generation) return;
     if (pool) pool->Release(static_cast<int>(release.index()));
   };
   handler.on_platform_response = [&](const raccoon::v1::PlatformResponse& response) {
@@ -983,7 +989,9 @@ int Serve(const Options& options) {
           raccoon::v1::RunnerMessage message;
           message.mutable_shared_buffers()->set_count(2);
           message.mutable_shared_buffers()->set_size(need);
+          message.mutable_shared_buffers()->set_generation(shared_generation + 1);
           if (server.SendWithFds(message, fresh->fds())) {
+            ++shared_generation;
             pool = std::move(fresh);
             host.frame().SetSharedPool(pool.get());
           }

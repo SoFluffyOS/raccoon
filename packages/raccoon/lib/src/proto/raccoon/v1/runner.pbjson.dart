@@ -136,13 +136,21 @@ const ReleaseBuffer$json = {
   '2': [
     {'1': 'index', '3': 1, '4': 1, '5': 13, '10': 'index'},
     {'1': 'generation', '3': 2, '4': 1, '5': 13, '10': 'generation'},
+    {
+      '1': 'shared_generation',
+      '3': 3,
+      '4': 1,
+      '5': 13,
+      '10': 'sharedGeneration'
+    },
   ],
 };
 
 /// Descriptor for `ReleaseBuffer`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List releaseBufferDescriptor = $convert.base64Decode(
     'Cg1SZWxlYXNlQnVmZmVyEhQKBWluZGV4GAEgASgNUgVpbmRleBIeCgpnZW5lcmF0aW9uGAIgAS'
-    'gNUgpnZW5lcmF0aW9u');
+    'gNUgpnZW5lcmF0aW9uEisKEXNoYXJlZF9nZW5lcmF0aW9uGAMgASgNUhBzaGFyZWRHZW5lcmF0'
+    'aW9u');
 
 @$core.Deprecated('Use resizeDescriptor instead')
 const Resize$json = {
@@ -449,13 +457,14 @@ const SharedBuffers$json = {
   '2': [
     {'1': 'count', '3': 1, '4': 1, '5': 13, '10': 'count'},
     {'1': 'size', '3': 2, '4': 1, '5': 4, '10': 'size'},
+    {'1': 'generation', '3': 3, '4': 1, '5': 13, '10': 'generation'},
   ],
 };
 
 /// Descriptor for `SharedBuffers`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List sharedBuffersDescriptor = $convert.base64Decode(
     'Cg1TaGFyZWRCdWZmZXJzEhQKBWNvdW50GAEgASgNUgVjb3VudBISCgRzaXplGAIgASgEUgRzaX'
-    'pl');
+    'plEh4KCmdlbmVyYXRpb24YAyABKA1SCmdlbmVyYXRpb24=');
 
 @$core.Deprecated('Use vmServiceDescriptor instead')
 const VmService$json = {

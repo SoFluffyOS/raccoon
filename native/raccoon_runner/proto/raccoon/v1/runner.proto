@@ -36,6 +36,11 @@ message ReleaseBuffer {
   uint32 index = 1;
   // Which GPU buffer set the index belongs to; 0 for shared buffers.
   uint32 generation = 2;
+  // For a shared buffer, the generation of the set it belongs to, as
+  // SharedBuffers named it: a release meant for a set since replaced is
+  // dropped rather than free the same index in the new one (#135). 0, as
+  // from a client that predates it, is taken for the current set.
+  uint32 shared_generation = 3;
 }
 
 message Resize {
@@ -200,6 +205,9 @@ message GpuBuffers {
 message SharedBuffers {
   uint32 count = 1;
   uint64 size = 2;
+  // Counts the sets the runner made for this client, from 1; releases
+  // name it back (ReleaseBuffer.shared_generation).
+  uint32 generation = 3;
 }
 
 message VmService {
