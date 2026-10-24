@@ -101,15 +101,19 @@ std::vector<mach_port_t> AskPorts(mach_port_t service, uint32_t generation,
   message.request.generation = generation;
   std::memcpy(message.request.token, token, kTokenSize);
   std::vector<mach_port_t> ports;
-  if (mach_msg(&message.header, MACH_SEND_MSG | MACH_RCV_MSG | MACH_SEND_TIMEOUT | MACH_RCV_TIMEOUT,
-               sizeof(Request), sizeof(message), reply, 1000, MACH_PORT_NULL) == MACH_MSG_SUCCESS &&
-      message.header.msgh_id == kPortReplyId &&
+  const mach_msg_return_t received =
+      mach_msg(&message.header, MACH_SEND_MSG | MACH_RCV_MSG | MACH_SEND_TIMEOUT | MACH_RCV_TIMEOUT,
+               sizeof(Request), sizeof(message), reply, 1000, MACH_PORT_NULL);
+  if (received == MACH_MSG_SUCCESS && message.header.msgh_id == kPortReplyId &&
       (message.header.msgh_bits & MACH_MSGH_BITS_COMPLEX) != 0) {
     const auto* body = reinterpret_cast<const mach_msg_body_t*>(&message.header + 1);
     const auto* descriptors = reinterpret_cast<const mach_msg_port_descriptor_t*>(body + 1);
     for (mach_msg_size_t i = 0; i < body->msgh_descriptor_count; ++i) {
       ports.push_back(descriptors[i].name);
     }
+  } else if (received == MACH_MSG_SUCCESS) {
+    // Not the reply asked for: the rights it carried go (raccoon#127).
+    mach_msg_destroy(&message.header);
   }
   mach_port_mod_refs(mach_task_self(), reply, MACH_PORT_RIGHT_RECEIVE, -1);
   return ports;
@@ -164,6 +168,9 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
   // is.
   uint32_t _boundGeneration;
   int _boundIndex;
+  // That buffer, retained: shown again while the frame named is not of the
+  // set at hand, rather than one of the set's buffers nobody named.
+  CVPixelBufferRef _boundBuffer;
   // The socket's reading state, on the main queue.
   int _socket;
   dispatch_source_t _reader;
@@ -181,6 +188,7 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
     _shownIndex = -1;
     _boundGeneration = 0;
     _boundIndex = -1;
+    _boundBuffer = nullptr;
     _socket = -1;
     _reader = nil;
     _service = MACH_PORT_NULL;
@@ -204,27 +212,29 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
   if (_pending) _current = std::move(_pending);
   if (!_current || _current->buffers.empty()) return nullptr;
   const BufferSet& set = *_current;
-  // Nothing of this set shown yet: the first buffer, rather than nothing,
-  // and not one to give back.
-  int index = 0;
-  bool rebound = false;
-  uint32_t beforeGeneration = 0;
-  int beforeIndex = -1;
-  if (_shownGeneration == set.generation && _shownIndex >= 0 &&
-      static_cast<size_t>(_shownIndex) < set.buffers.size() &&
-      set.buffers[_shownIndex] != nullptr) {
-    index = _shownIndex;
-    rebound = _boundIndex != _shownIndex || _boundGeneration != set.generation;
-    beforeGeneration = _boundGeneration;
-    beforeIndex = _boundIndex;
-    _boundGeneration = set.generation;
-    _boundIndex = _shownIndex;
+  // The frame named is not of this set: the ring changed on one socket and
+  // the names on the other. Buffer 0 of a new ring may be the one being
+  // drawn, or never drawn, and of an old ring stale; the frame shown last
+  // stays until one of this set is named (raccoon#127).
+  if (_shownGeneration != set.generation || _shownIndex < 0 ||
+      static_cast<size_t>(_shownIndex) >= set.buffers.size() ||
+      set.buffers[_shownIndex] == nullptr) {
+    return _boundBuffer == nullptr ? nullptr : CVPixelBufferRetain(_boundBuffer);
+  }
+  const bool rebound = _boundIndex != _shownIndex || _boundGeneration != set.generation;
+  const uint32_t beforeGeneration = _boundGeneration;
+  const int beforeIndex = _boundIndex;
+  _boundGeneration = set.generation;
+  _boundIndex = _shownIndex;
+  CVPixelBufferRef buffer = set.buffers[_shownIndex];
+  if (buffer != _boundBuffer) {
+    if (_boundBuffer != nullptr) CVPixelBufferRelease(_boundBuffer);
+    _boundBuffer = CVPixelBufferRetain(buffer);
   }
   // The buffer bound before was last read by the frame drawn before this
   // one: the runner's again.
   if (rebound && beforeIndex >= 0) [self sendRelease:beforeGeneration index:beforeIndex];
-  CVPixelBufferRef buffer = set.buffers[index];
-  return buffer == nullptr ? nullptr : CVPixelBufferRetain(buffer);
+  return CVPixelBufferRetain(buffer);
 }
 
 - (void)showGeneration:(uint32_t)generation index:(int)index {
@@ -258,7 +268,8 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
     }
     if (length < 32 || std::memcmp(payload, "RGPU", 4) != 0) continue;
     const uint32_t count = Read32(payload + 8);
-    if (length < 32 + count * 12) continue;  // not whole, or no IDs
+    // Not whole, or no IDs; in 64 bits, so a bad count can't wrap it.
+    if (length < 32 + static_cast<uint64_t>(count) * 12) continue;
     auto set = std::make_unique<BufferSet>();
     set->generation = Read32(payload + 4);
     set->width = Read32(payload + 12);
@@ -289,7 +300,7 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
 // Main queue.
 - (void)takeService:(const uint8_t*)payload length:(uint32_t)length {
   const uint32_t size = Read32(payload + 4);
-  if (length < 8 + size + kTokenSize) return;
+  if (length < 8 + static_cast<uint64_t>(size) + kTokenSize) return;
   const std::string name(reinterpret_cast<const char*>(payload + 8), size);
   mach_port_t service = MACH_PORT_NULL;
   if (bootstrap_look_up(bootstrap_port, name.c_str(), &service) != KERN_SUCCESS) return;
@@ -364,6 +375,10 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
   std::lock_guard<std::mutex> lock(_mutex);
   _pending.reset();
   _current.reset();
+  if (_boundBuffer != nullptr) {
+    CVPixelBufferRelease(_boundBuffer);
+    _boundBuffer = nullptr;
+  }
 }
 
 @end
