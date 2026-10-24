@@ -2627,14 +2627,11 @@ void main() {
       final messages = StreamController<RunnerMessage>.broadcast();
       socket.listen((event) {
         if (event != RawSocketEvent.read) return;
-        final message = socket.readMessage();
-        if (message == null) return;
-        for (final control in message.controlMessages) {
-          for (final handle in control.extractHandles()) {
-            handle.toFile().closeSync();
-          }
-        }
-        for (final payload in unframer.add(message.data)) {
+        // No shared buffers asked for, so no descriptors come: a plain
+        // read, which Windows has too.
+        final data = socket.read();
+        if (data == null) return;
+        for (final payload in unframer.add(data)) {
           messages.add(RunnerMessage.fromBuffer(payload));
         }
       });
