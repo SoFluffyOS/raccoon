@@ -78,7 +78,7 @@ bool SoftwareFrame::CopyLatest(Copy* out, size_t after_sequence) const {
       inline_sequence_ <= after_sequence) {
     return false;
   }
-  out->pixels = pixels_;
+  out->pixels.assign(reinterpret_cast<const char*>(pixels_.data()), pixels_.size());
   out->width = width_;
   out->height = height_;
   out->row_bytes = row_bytes_;

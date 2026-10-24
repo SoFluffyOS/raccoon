@@ -974,7 +974,7 @@ int Serve(const Options& options) {
         frame->set_height(static_cast<uint32_t>(copy.height));
         frame->set_row_bytes(static_cast<uint32_t>(copy.row_bytes));
         frame->set_format(kPixelFormat);
-        frame->set_pixels(copy.pixels.data(), copy.pixels.size());
+        frame->set_pixels(std::move(copy.pixels));
         frame->set_timestamp_micros(host.NowMicros());
         server.Send(message);
         last_sent = copy.sequence;

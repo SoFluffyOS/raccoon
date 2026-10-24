@@ -24,7 +24,8 @@ constexpr bool kSoftwareFrameIsBgra = true;
 class SoftwareFrame {
  public:
   struct Copy {
-    std::vector<uint8_t> pixels;
+    // A string, so the frame message can take it without another copy.
+    std::string pixels;
     size_t width = 0;
     size_t height = 0;
     size_t row_bytes = 0;
