@@ -3,6 +3,8 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart' show PointerDeviceKind, PointerExitEvent;
 import 'package:flutter/rendering.dart';
+import 'package:fixnum/fixnum.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:raccoon/raccoon.dart' as rc;
 import 'package:raccoon_view/src/frame_decoder.dart';
@@ -87,9 +89,15 @@ class _RaccoonViewState extends State<RaccoonView> {
   /// engine takes a mouse's leaving only from one it knows.
   bool _mouseIn = false;
 
+  /// The keys the runner has seen go down and not yet up. An up or repeat
+  /// it never saw the down of is not sent, and what is held when focus
+  /// leaves is let go (#133).
+  final _pressed = <PhysicalKeyboardKey, LogicalKeyboardKey>{};
+
   @override
   void initState() {
     super.initState();
+    _focus.addListener(_onFocus);
     _subscribe();
   }
 
@@ -103,11 +111,14 @@ class _RaccoonViewState extends State<RaccoonView> {
     _unsubscribeCursor();
     _sentSize = null;
     _mouseIn = false;
+    // The new runner saw none of them go down.
+    _pressed.clear();
     _subscribe();
   }
 
   @override
   void dispose() {
+    _releaseKeys();
     unawaited(_frames?.cancel());
     _unsubscribeText();
     _unsubscribeGpu();
@@ -344,10 +355,47 @@ class _RaccoonViewState extends State<RaccoonView> {
     _mouseIn = false;
   }
 
+  void _onFocus() {
+    if (!_focus.hasFocus) _releaseKeys();
+  }
+
+  /// Lets go of every key the runner still holds down: their ups go to
+  /// whatever took focus, or nowhere.
+  void _releaseKeys() {
+    final now = Int64(DateTime.now().microsecondsSinceEpoch);
+    for (final MapEntry(key: physical, value: logical) in _pressed.entries) {
+      widget.connection.sendKey(
+        rc.KeyEvent(
+          kind: rc.KeyKind.KEY_KIND_UP,
+          physical: Int64(physical.usbHidUsage),
+          logical: Int64(logical.keyId),
+          timestampMicros: now,
+          synthesized: true,
+        ),
+      );
+    }
+    _pressed.clear();
+  }
+
+  /// Sends [event] unless it is an up or repeat of a key the runner never
+  /// saw go down; tells whether it went.
+  bool _sendKey(KeyEvent event) {
+    switch (event) {
+      case KeyDownEvent():
+        _pressed[event.physicalKey] = event.logicalKey;
+      case KeyUpEvent():
+        if (_pressed.remove(event.physicalKey) == null) return false;
+      case KeyRepeatEvent():
+        if (!_pressed.containsKey(event.physicalKey)) return false;
+    }
+    widget.connection.sendKey(toRunnerKey(event));
+    return true;
+  }
+
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     final text = _text;
     if (text == null || !text.attached) {
-      widget.connection.sendKey(toRunnerKey(event));
+      _sendKey(event);
       return KeyEventResult.handled;
     }
     // With the host's input method open for the app's field: characters go
@@ -356,10 +404,11 @@ class _RaccoonViewState extends State<RaccoonView> {
     // its own.
     if (isEditingKey(event)) {
       if (text.composing) return KeyEventResult.ignored;
-      widget.connection.sendKey(toRunnerKey(event));
+      // The up of a key whose down the method took is the method's too.
+      if (!_sendKey(event)) return KeyEventResult.ignored;
       return KeyEventResult.handled;
     }
-    widget.connection.sendKey(toRunnerKey(event));
+    _sendKey(event);
     return switch (event.character) {
       final character? when character.isNotEmpty => KeyEventResult.ignored,
       _ => KeyEventResult.handled,

@@ -304,6 +304,48 @@ void main() {
     );
   });
 
+  // #133: focus that left mid-press left the key held in the app, and an
+  // up whose down the app never saw failed its keyboard's checks.
+  testWidgets('keys held when focus leaves are let go, and stray ups stay', (
+    tester,
+  ) async {
+    final connection = _FakeConnection();
+    final elsewhere = FocusNode();
+    addTearDown(elsewhere.dispose);
+    await tester.pumpWidget(
+      MediaQuery(
+        data: const MediaQueryData(),
+        child: Column(
+          children: [
+            Focus(focusNode: elsewhere, child: const SizedBox(height: 10)),
+            Expanded(
+              child: RaccoonView(connection: connection, autofocus: true),
+            ),
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyB);
+    expect(connection.keys, isEmpty);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    elsewhere.requestFocus();
+    await tester.pump();
+    expect(connection.keys.map((k) => k.kind), [
+      rc.KeyKind.KEY_KIND_DOWN,
+      rc.KeyKind.KEY_KIND_UP,
+    ]);
+    expect(connection.keys.last.synthesized, isTrue);
+    expect(
+      connection.keys.last.logical.toInt(),
+      LogicalKeyboardKey.metaLeft.keyId,
+    );
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    expect(connection.keys, hasLength(2));
+  });
+
   testWidgets('a runner hanging up shows as disconnected', (tester) async {
     final connection = _FakeConnection();
     var disconnected = 0;
