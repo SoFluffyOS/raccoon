@@ -121,6 +121,8 @@ constexpr uint64_t kArrowDown = 0x100000301;
 constexpr uint64_t kArrowUp = 0x100000304;
 constexpr uint64_t kPageDown = 0x100000307;
 constexpr uint64_t kPageUp = 0x100000308;
+constexpr uint64_t kKeyD = 0x64;
+constexpr uint64_t kKeyH = 0x68;
 
 // What AppKit's standard key bindings make of a key in a text field, which a
 // Mac app's framework leaves unhandled and waits for as performSelectors.
@@ -183,6 +185,14 @@ std::vector<const char*> MacSelectors(uint64_t logical, bool shift,
       return {shift ? "insertBacktab:" : "insertTab:"};
     case kEscape:
       return {"cancelOperation:"};
+    // The Emacs keys Flutter leaves to the platform; it moves with the rest
+    // (Ctrl+A, E, F, B, N, P) itself.
+    case kKeyH:
+      if (control && !shift && !alt && !meta) return {"deleteBackward:"};
+      return {};
+    case kKeyD:
+      if (control && !shift && !alt && !meta) return {"deleteForward:"};
+      return {};
     default:
       return {};
   }

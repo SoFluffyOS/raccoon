@@ -2346,8 +2346,10 @@ void main() {
         await held((0x200000104, 0x000700e2), (0x100000008, 0x0007002a));
         await held((0x200000106, 0x000700e3), (0x100000302, 0x00070050));
         await key(0x78, 0x0007001b, 'x');
+        // Ctrl+H deletes back, AppKit's Emacs key that Flutter leaves to it.
+        await held((0x200000100, 0x000700e0), (0x68, 0x0007000b));
         final deadline = DateTime.now().add(const Duration(seconds: 10));
-        while (!output.any((line) => line.contains('TEXT:xab ')) &&
+        while (output.where((line) => line.contains('TEXT:')).length < 8 &&
             DateTime.now().isBefore(deadline)) {
           await Future<void>.delayed(const Duration(milliseconds: 100));
         }
@@ -2364,6 +2366,7 @@ void main() {
           'TEXT:ab cd',
           'TEXT:ab ',
           'TEXT:xab ',
+          'TEXT:ab ',
         ]);
       } finally {
         client.shutdown();
