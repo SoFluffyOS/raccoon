@@ -63,15 +63,28 @@ case "$(uname -s)" in
   *) echo "unsupported system $(uname -s)" >&2; exit 1 ;;
 esac
 
-if [ ! -e "$LIBRARY" ]; then
-  mkdir -p "$DIR/dl" "$UNZIP_INTO"
+# An engine is there once its library is, unless a download that wrote in
+# place, before #136, was cut short: its dl folder is left behind.
+installed() { [ -e "$LIBRARY" ] && [ ! -d "$DIR/dl" ]; }
+if ! installed; then
+  # Downloaded and unpacked aside, then renamed into place, as RuntimeStore
+  # does: an interrupted download, or two at once, never leaves half an
+  # engine that counts as there (#136).
+  mkdir -p "$CACHE"
+  STAGE="$(mktemp -d "$DIR.partial.XXXXXX")"
+  trap 'rm -rf "$STAGE"' EXIT
+  mkdir -p "$STAGE/dir${UNZIP_INTO#"$DIR"}"
   # Said plainly: offline, a first run with a new SDK fails here (#119).
-  if ! curl -sfLo "$DIR/dl/embedder.zip" "$URL" ||
-    ! unzip -q -o "$DIR/dl/embedder.zip" -d "$UNZIP_INTO"; then
-    rm -rf "$DIR/dl"
+  if ! curl -sfLo "$STAGE/embedder.zip" "$URL" ||
+    ! unzip -q -o "$STAGE/embedder.zip" -d "$STAGE/dir${UNZIP_INTO#"$DIR"}"; then
     echo "🦝 could not download the Flutter engine $REV from $URL; check the network" >&2
     exit 1
   fi
-  rm -rf "$DIR/dl"
+  rm -f "$STAGE/embedder.zip"
+  # Another download may have finished first; its engine is as good.
+  if ! installed; then
+    rm -rf "$DIR"
+    [ -e "$DIR" ] || mv "$STAGE/dir" "$DIR"
+  fi
 fi
 if command -v cygpath >/dev/null; then cygpath -m "$DIR"; else echo "$DIR"; fi
