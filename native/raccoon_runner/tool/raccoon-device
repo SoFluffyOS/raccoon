@@ -337,16 +337,31 @@ def linux_block(pubspec):
 
 
 def version_key(name, root):
-    # A pub package is its directory name, name-version; a path package is
-    # the shape of its linux/ directory, so an edit rebuilds it.
-    if os.sep + '.pub-cache' + os.sep in root + os.sep:
-        return os.path.basename(root.rstrip(os.sep))
+    # A hosted package is its directory name, name-version. A git one is its
+    # place in the cache, which names the commit. A path package is the shape
+    # of its native side, so an edit rebuilds it: every file but its Dart
+    # code, tests, examples, build output and hidden folders, so the shared
+    # sources an FFI plugin builds (src/) count too (#121).
+    real = os.path.realpath(root)
+    cache_marker = os.sep + '.pub-cache' + os.sep
+    if cache_marker + 'hosted' + os.sep in real + os.sep:
+        return os.path.basename(real.rstrip(os.sep))
+    if cache_marker in real + os.sep:
+        place = real.split(cache_marker, 1)[1]
+        return '%s-git-%s' % (name, hashlib.sha256(place.encode('utf-8', 'surrogateescape')).hexdigest()[:16])
     digest = hashlib.sha256()
-    for dirpath, _, files in sorted(os.walk(os.path.join(root, 'linux'))):
+    for dirpath, dirs, files in os.walk(root):
+        top = dirpath == root
+        dirs[:] = sorted(d for d in dirs if not d.startswith('.')
+                         and not (top and d in ('lib', 'test', 'example', 'build'))
+                         and not os.path.isfile(os.path.join(dirpath, d, 'pubspec.yaml')))
         for f in sorted(files):
             full = os.path.join(dirpath, f)
-            st = os.stat(full)
-            digest.update(('%s %d %d\n' % (os.path.relpath(full, root), st.st_size, int(st.st_mtime))).encode())
+            try:
+                st = os.lstat(full)
+            except OSError:
+                continue
+            digest.update(('%s %d %d\n' % (os.path.relpath(full, root), st.st_size, int(st.st_mtime))).encode('utf-8', 'surrogateescape'))
     return '%s-path-%s' % (name, digest.hexdigest()[:16])
 
 
@@ -434,7 +449,7 @@ for name, root, pubspec in packages:
     if cls is not None:
         symbol = re.sub(r'(?<!^)(?=[A-Z])', '_', cls.group(1)).lower() + '_register_with_registrar'
     wanted.append({'name': name, 'root': root, 'symbol': symbol,
-                   'key': version_key(name, root) + '-' + lib_stamp})
+                   'key': '%s-%s-%s' % (version_key(name, root), lib_stamp, arch)})
 
 if not wanted and not status:
     sys.exit(0)
@@ -574,16 +589,31 @@ def platform_block(pubspec, platform):
 
 
 def version_key(name, root, sources):
-    # A pub package is its directory name, name-version; a path package is
-    # the shape of its sources, so an edit rebuilds it.
-    if os.sep + '.pub-cache' + os.sep in root + os.sep:
-        return os.path.basename(root.rstrip(os.sep))
+    # A hosted package is its directory name, name-version. A git one is its
+    # place in the cache, which names the commit. A path package is the shape
+    # of its native side, so an edit rebuilds it: every file but its Dart
+    # code, tests, examples, build output and hidden folders, so the shared
+    # sources an FFI plugin builds (src/) count too (#121).
+    real = os.path.realpath(root)
+    cache_marker = os.sep + '.pub-cache' + os.sep
+    if cache_marker + 'hosted' + os.sep in real + os.sep:
+        return os.path.basename(real.rstrip(os.sep))
+    if cache_marker in real + os.sep:
+        place = real.split(cache_marker, 1)[1]
+        return '%s-git-%s' % (name, hashlib.sha256(place.encode('utf-8', 'surrogateescape')).hexdigest()[:16])
     digest = hashlib.sha256()
-    for dirpath, _, files in sorted(os.walk(sources)):
+    for dirpath, dirs, files in os.walk(root):
+        top = dirpath == root
+        dirs[:] = sorted(d for d in dirs if not d.startswith('.')
+                         and not (top and d in ('lib', 'test', 'example', 'build'))
+                         and not os.path.isfile(os.path.join(dirpath, d, 'pubspec.yaml')))
         for f in sorted(files):
             full = os.path.join(dirpath, f)
-            st = os.stat(full)
-            digest.update(('%s %d %d\n' % (os.path.relpath(full, root), st.st_size, int(st.st_mtime))).encode())
+            try:
+                st = os.lstat(full)
+            except OSError:
+                continue
+            digest.update(('%s %d %d\n' % (os.path.relpath(full, root), st.st_size, int(st.st_mtime))).encode('utf-8', 'surrogateescape'))
     return '%s-path-%s' % (name, digest.hexdigest()[:16])
 
 

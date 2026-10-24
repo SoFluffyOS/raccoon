@@ -852,6 +852,7 @@ void main() {
       final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
         ..createSync(recursive: true);
       final data = p.join(temp.path, 'data');
+      var log = '';
       Future<Map<String, Object?>> install() async {
         final result = await Process.run(
           p.join(runnerDir, 'tool', 'raccoon-device'),
@@ -865,6 +866,7 @@ void main() {
           },
         );
         expect(result.exitCode, 0, reason: '${result.stderr}');
+        log = '${result.stderr}';
         final manifest = File(
           p.join(data, 'raccoon', 'apps', 'app', 'plugins', 'manifest.json'),
         );
@@ -883,6 +885,15 @@ void main() {
         final second = await install();
         expect(second['status'], isEmpty);
         expect(loaded(second), ['plugin_a', 'plugin_b']);
+
+        // #121: a path plugin's Dart code is not its native build; shared
+        // native sources outside its platform folder are.
+        write('plugin_a/lib/plugin_a.dart', '// changed\n');
+        await install();
+        expect(log, contains('from the cache: plugin_a'));
+        write('plugin_a/src/extra.c', 'int extra(void) { return 1; }\n');
+        await install();
+        expect(log, contains('built: plugin_a'));
       } finally {
         temp.deleteSync(recursive: true);
       }
