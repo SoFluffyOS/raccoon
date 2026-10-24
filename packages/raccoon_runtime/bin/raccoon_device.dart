@@ -13,7 +13,12 @@ import 'package:raccoon_runtime/raccoon_runtime.dart';
 void main(List<String> arguments) {
   final file = CustomDevicesFile.forHost(Platform.environment);
   switch (arguments) {
-    case ['setup', '--helper', final helper]:
+    case ['setup', '--helper', final given]:
+      final helper = _helperPath(given);
+      if (helper == null) {
+        exitCode = 1;
+        return;
+      }
       // One device to start with; add and remove the rest as wanted.
       file.upsert(
         CustomDeviceConfig.forDevice(RaccoonDevice.host, deviceHelper: helper),
@@ -60,7 +65,8 @@ int _add(CustomDevicesFile file, String name, List<String> options) {
       case '--label' when i + 1 < options.length:
         label = options[++i];
       case '--helper' when i + 1 < options.length:
-        helper = options[++i];
+        helper = _helperPath(options[++i]);
+        if (helper == null) return 1;
       default:
         stderr.writeln('unknown option ${options[i]}');
         return 2;
@@ -96,6 +102,17 @@ int _add(CustomDevicesFile file, String name, List<String> options) {
     'to ${file.path}',
   );
   return 0;
+}
+
+/// [given] as an absolute path: Flutter runs the helper from the project's
+/// directory, not this one. Null, said on stderr, when it is not a file.
+String? _helperPath(String given) {
+  final helper = File(given).absolute.path;
+  if (!File(helper).existsSync()) {
+    stderr.writeln('no helper at $helper');
+    return null;
+  }
+  return helper;
 }
 
 void _doctor(String project) {
