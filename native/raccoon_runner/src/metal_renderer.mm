@@ -370,8 +370,11 @@ void MetalRenderer::Release(uint32_t generation, int index, int fence_fd) {
   if (fence_fd >= 0) close(fence_fd);
   Impl& m = *impl_;
   std::lock_guard<std::mutex> lock(m.mutex);
+  // The buffer being drawn was never handed out: a release naming it is
+  // late or a duplicate, and freeing it would let the next frame draw into
+  // what the client shows (#124).
   if (generation != m.generation || index < 0 ||
-      static_cast<size_t>(index) >= m.pool.size()) {
+      static_cast<size_t>(index) >= m.pool.size() || index == m.current) {
     return;
   }
   m.pool[index].busy = false;

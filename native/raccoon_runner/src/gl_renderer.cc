@@ -335,8 +335,11 @@ bool GlRenderer::HasFreeBuffer() const {
 
 void GlRenderer::Release(uint32_t generation, int index, int fence_fd) {
   std::lock_guard<std::mutex> lock(mutex_);
+  // The buffer being drawn was never handed out: a release naming it is
+  // late or a duplicate, and freeing it would let the next frame draw into
+  // what the client shows (#124).
   if (generation != generation_ || index < 0 ||
-      static_cast<size_t>(index) >= pool_.size()) {
+      static_cast<size_t>(index) >= pool_.size() || index == current_) {
     if (fence_fd >= 0) close(fence_fd);
     return;
   }
