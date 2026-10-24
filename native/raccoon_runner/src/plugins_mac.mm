@@ -54,6 +54,10 @@ using raccoon::PluginHost;
 - (BOOL)handleMessage:(NSString*)channel
                  data:(NSData*)data
                handle:(const FlutterPlatformMessageResponseHandle*)handle;
+// The connection the next handler gets, and dropping every handler set
+// from one on: what a plugin whose registration threw left behind.
+- (FlutterBinaryMessengerConnection)nextConnection;
+- (void)dropConnectionsFrom:(FlutterBinaryMessengerConnection)first;
 @end
 
 @implementation RaccoonMessenger {
@@ -116,18 +120,38 @@ using raccoon::PluginHost;
                                               (FlutterBinaryMessageHandler)handler
                                                      taskQueue:
                                                          (NSObject<FlutterTaskQueue>*)taskQueue {
-  if (handler == nil) {
-    [_handlers removeObjectForKey:channel];
-    return 0;
+  // Plugins set handlers from any thread; the main thread reads them
+  // (#128).
+  @synchronized(_handlers) {
+    if (handler == nil) {
+      [_handlers removeObjectForKey:channel];
+      return 0;
+    }
+    RaccoonHandler* entry = [[RaccoonHandler alloc] init];
+    entry.connection = _nextConnection++;
+    entry.handler = handler;
+    if ([taskQueue isKindOfClass:[RaccoonTaskQueue class]]) {
+      entry.queue = (RaccoonTaskQueue*)taskQueue;
+    }
+    _handlers[channel] = entry;
+    return entry.connection;
   }
-  RaccoonHandler* entry = [[RaccoonHandler alloc] init];
-  entry.connection = _nextConnection++;
-  entry.handler = handler;
-  if ([taskQueue isKindOfClass:[RaccoonTaskQueue class]]) {
-    entry.queue = (RaccoonTaskQueue*)taskQueue;
+}
+
+- (FlutterBinaryMessengerConnection)nextConnection {
+  @synchronized(_handlers) {
+    return _nextConnection;
   }
-  _handlers[channel] = entry;
-  return entry.connection;
+}
+
+- (void)dropConnectionsFrom:(FlutterBinaryMessengerConnection)first {
+  @synchronized(_handlers) {
+    NSMutableArray<NSString*>* dropped = [NSMutableArray array];
+    for (NSString* channel in _handlers) {
+      if (_handlers[channel].connection >= first) [dropped addObject:channel];
+    }
+    [_handlers removeObjectsForKeys:dropped];
+  }
 }
 
 - (NSObject<FlutterTaskQueue>*)makeBackgroundTaskQueue {
@@ -135,17 +159,22 @@ using raccoon::PluginHost;
 }
 
 - (void)cleanUpConnection:(FlutterBinaryMessengerConnection)connection {
-  NSString* found = nil;
-  for (NSString* channel in _handlers) {
-    if (_handlers[channel].connection == connection) found = channel;
+  @synchronized(_handlers) {
+    NSString* found = nil;
+    for (NSString* channel in _handlers) {
+      if (_handlers[channel].connection == connection) found = channel;
+    }
+    if (found != nil) [_handlers removeObjectForKey:found];
   }
-  if (found != nil) [_handlers removeObjectForKey:found];
 }
 
 - (BOOL)handleMessage:(NSString*)channel
                  data:(NSData*)data
                handle:(const FlutterPlatformMessageResponseHandle*)handle {
-  RaccoonHandler* entry = _handlers[channel];
+  RaccoonHandler* entry;
+  @synchronized(_handlers) {
+    entry = _handlers[channel];
+  }
   if (entry == nil) return NO;
   PluginHost::Bridge* bridge = _bridge;
   // The engine's handle takes one answer; a second would be a use after
@@ -539,10 +568,13 @@ bool PluginHost::Load(const PluginEntry& entry, std::string* error) {
   RaccoonRegistrar* registrar = [[RaccoonRegistrar alloc] initWithMessenger:impl_->messenger
                                                                    textures:impl_->textures];
   // Some APIs throw outside an application bundle (UserNotifications does
-  // at registration); the plugin fails alone and says why.
+  // at registration); the plugin fails alone and says why, and the
+  // handlers it set before the throw go with it (#128).
+  const FlutterBinaryMessengerConnection first = [impl_->messenger nextConnection];
   @try {
     [cls registerWithRegistrar:registrar];
   } @catch (NSException* exception) {
+    [impl_->messenger dropConnectionsFrom:first];
     *error = std::string("registerWithRegistrar: threw ") + exception.name.UTF8String + ": " +
              exception.reason.UTF8String;
     return false;
