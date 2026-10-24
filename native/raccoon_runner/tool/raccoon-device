@@ -1214,6 +1214,10 @@ case "$verb" in
     ;;
   run)
     key="$(app_key "$1")"; shift
+    if [ ! -d "$APPS/$key/flutter_assets" ]; then
+      echo "🦝 $key is not installed: flutter run -d raccoon installs it, or raccoon-device install" >&2
+      exit 1
+    fi
     mkdir -p "$SOCKETS" "$DATA/$key"
     # The run's output, timestamped, for the run that went wrong; the tool
     # keeps reading the untouched streams.

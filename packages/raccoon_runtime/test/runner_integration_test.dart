@@ -318,6 +318,17 @@ void main() {
         ).timeout(const Duration(seconds: 60));
         expect(missing.exitCode, isNot(0));
         expect('${missing.stderr}', contains('no runner at'));
+
+        // And an app that was never installed.
+        final absent = await Process.run(helper, [
+          'run',
+          'never_installed',
+        ], environment: environment).timeout(const Duration(seconds: 60));
+        expect(absent.exitCode, isNot(0));
+        expect(
+          '${absent.stderr}',
+          contains('never_installed is not installed'),
+        );
       } finally {
         temp.deleteSync(recursive: true);
       }
