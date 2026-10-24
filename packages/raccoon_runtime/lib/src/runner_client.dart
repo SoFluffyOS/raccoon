@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 import 'dart:io' as io show pid;
 import 'dart:typed_data';
@@ -205,7 +206,7 @@ final class RunnerClient
         .map((message) => message.textField);
   }
 
-  final _startupLog = <String>[];
+  final _startupLog = ListQueue<String>();
   StartupFailure? _startupFailure;
   Timer? _startupTimer;
   final _startupChanges = StreamController<StartupFailure?>.broadcast();
@@ -292,10 +293,14 @@ final class RunnerClient
         if (_latestFrame == null) _readStartup();
       }
       if (message.hasLog() && _latestFrame == null) {
-        _startupLog.add(message.log.message);
-        final overflow = _startupLog.length - startupLogLines;
-        if (overflow > 0) _startupLog.removeRange(0, overflow);
-        _readStartup();
+        final line = message.log.message;
+        _startupLog.add(line);
+        if (_startupLog.length > startupLogLines) _startupLog.removeFirst();
+        // Reading the whole log again for every line costs an app that logs
+        // a lot before its first frame dearly (#163). A line that can't tell
+        // of a failure changes nothing: before a report the grace timer
+        // reads the log anew anyway.
+        if (StartupFailure.tells(line)) _readStartup();
       }
       if (message.hasPlatformMessage()) {
         unawaited(_servePlatformMessage(message.platformMessage));

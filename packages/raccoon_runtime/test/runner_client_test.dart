@@ -102,6 +102,21 @@ void main() {
     temp.deleteSync(recursive: true);
   });
 
+  test('an app that logs a lot before its first frame costs little to '
+      'follow', () async {
+    // #163: every line read the whole startup window again, two regexes
+    // a line, so 150,000 lines took about 20 seconds.
+    final stopwatch = Stopwatch()..start();
+    for (var i = 0; i < 150000; i++) {
+      runner.log('flutter: step $i of a long start');
+    }
+    runner.log(_unanswered);
+    runner.frame();
+    await client.frames.first.timeout(const Duration(seconds: 30));
+    expect(stopwatch.elapsed, lessThan(const Duration(seconds: 6)));
+    expect(client.startupLog, isEmpty, reason: 'the first frame ends it');
+  });
+
   test('a message that does not parse ends the client, with no uncaught '
       'error', () async {
     // A stream that stops being the protocol can't be trusted to be framed

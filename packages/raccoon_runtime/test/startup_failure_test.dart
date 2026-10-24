@@ -106,6 +106,15 @@ void main() {
     expect(failure?.channels, ['plugins.flutter.io/camera']);
   });
 
+  test('only failure lines and stack lines can change what the log says', () {
+    expect(StartupFailure.tells(_log[0]), isFalse); // the VM service
+    expect(StartupFailure.tells(_log[1]), isTrue); // nothing answered
+    expect(StartupFailure.tells(_log[2]), isTrue); // unhandled exception
+    expect(StartupFailure.tells(_log[3]), isTrue); // a stack line
+    expect(StartupFailure.tells('<asynchronous suspension>'), isTrue);
+    expect(StartupFailure.tells('flutter: loading 3 of 9'), isFalse);
+  });
+
   test('a log that tells of nothing gone wrong is no failure', () {
     expect(
       StartupFailure.fromLog([

@@ -162,6 +162,15 @@ final class StartupFailure {
     _ => false,
   };
 
+  /// Whether [line] can change what [fromLog] finds in a log that already
+  /// holds a failure, or start one: a channel nobody answered, an
+  /// unhandled exception, or a line of its stack. Most lines can't, so a
+  /// reader need not read the whole log again for them.
+  static bool tells(String line) =>
+      _unanswered.hasMatch(line) ||
+      _unhandled.hasMatch(line) ||
+      _isStackLine(line);
+
   static bool _isStackLine(String line) {
     final text = line.trim();
     return text.startsWith('#') || text == '<asynchronous suspension>';
