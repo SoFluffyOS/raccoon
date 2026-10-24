@@ -95,54 +95,62 @@ void main() {
 
   // #145: a set that came short of its descriptors left the client with no
   // buffers while the runner went on filling them.
-  test('a set that comes short asks the runner for frames inline', () async {
-    final temp = Directory.systemTemp.createTempSync('raccoon_short');
-    addTearDown(() => temp.deleteSync(recursive: true));
-    final path = p.join(temp.path, 'app.sock');
-    final server = await RawServerSocket.bind(
-      InternetAddress(path, type: InternetAddressType.unix),
-      0,
-    );
-    addTearDown(server.close);
-    final only = (File(p.join(temp.path, 'buffer0'))
-      ..writeAsBytesSync([0])).openSync(mode: FileMode.append);
-    addTearDown(only.closeSync);
-    final hellos = StreamController<ClientHello>();
-    server.listen((socket) {
-      final unframer = MessageUnframer();
-      socket.listen((event) {
-        if (event != RawSocketEvent.read) return;
-        final bytes = socket.read();
-        if (bytes == null) return;
-        for (final payload in unframer.add(bytes)) {
-          final message = ClientMessage.fromBuffer(payload);
-          if (message.hasHello()) hellos.add(message.hello);
-        }
-      });
-      // Two buffers named, one descriptor along.
-      socket.sendMessage(
-        [
-          SocketControlMessage.fromHandles([ResourceHandle.fromFile(only)]),
-        ],
-        MessageFraming.frame(
-          RunnerMessage(
-            sharedBuffers: SharedBuffers(
-              count: 2,
-              size: Int64(4),
-              generation: 1,
+  // #148: only a runner that numbers its sets drops its pool for that
+  // hello; an older one is left to the next resize, as before.
+  for (final generation in [1, 0]) {
+    test(
+      'a set that comes short, of generation $generation, '
+      '${generation == 0 ? 'waits for a resize' : 'asks for frames inline'}',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('raccoon_short');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        final path = p.join(temp.path, 'app.sock');
+        final server = await RawServerSocket.bind(
+          InternetAddress(path, type: InternetAddressType.unix),
+          0,
+        );
+        addTearDown(server.close);
+        final only = (File(p.join(temp.path, 'buffer0'))
+          ..writeAsBytesSync([0])).openSync(mode: FileMode.append);
+        addTearDown(only.closeSync);
+        final hellos = StreamController<ClientHello>();
+        server.listen((socket) {
+          final unframer = MessageUnframer();
+          socket.listen((event) {
+            if (event != RawSocketEvent.read) return;
+            final bytes = socket.read();
+            if (bytes == null) return;
+            for (final payload in unframer.add(bytes)) {
+              final message = ClientMessage.fromBuffer(payload);
+              if (message.hasHello()) hellos.add(message.hello);
+            }
+          });
+          // Two buffers named, one descriptor along.
+          socket.sendMessage(
+            [
+              SocketControlMessage.fromHandles([ResourceHandle.fromFile(only)]),
+            ],
+            MessageFraming.frame(
+              RunnerMessage(
+                sharedBuffers: SharedBuffers(
+                  count: 2,
+                  size: Int64(4),
+                  generation: generation,
+                ),
+              ).writeToBuffer(),
             ),
-          ).writeToBuffer(),
-        ),
-      );
-    });
+          );
+        });
 
-    final client = await RunnerClient.connect(UnixSocketEndpoint(path));
-    addTearDown(client.close);
-    final said = await hellos.stream
-        .take(2)
-        .toList()
-        .timeout(const Duration(seconds: 5));
-    expect(said.first.sharedBuffers, isTrue);
-    expect(said.last.sharedBuffers, isFalse);
-  });
+        final client = await RunnerClient.connect(UnixSocketEndpoint(path));
+        addTearDown(client.close);
+        final said = <ClientHello>[];
+        hellos.stream.listen(said.add);
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        expect(said.first.sharedBuffers, isTrue);
+        expect(said, hasLength(generation == 0 ? 1 : 2));
+        if (generation != 0) expect(said.last.sharedBuffers, isFalse);
+      },
+    );
+  }
 }

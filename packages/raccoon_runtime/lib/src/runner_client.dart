@@ -365,8 +365,11 @@ final class RunnerClient
       _buffers = [];
       _closeHandles();
       // The runner would go on filling buffers this client can't read:
-      // it is told to send frames inline instead (#145).
-      _sayHello(sharedBuffers: false);
+      // it is told to send frames inline instead (#145). Only one that
+      // numbers its sets drops its pool for that; an older one would keep
+      // filling it and never send another set, so it is left to the next
+      // resize, as before (#148).
+      if (buffers.generation != 0) _sayHello(sharedBuffers: false);
       return;
     }
     _buffers = _handles.sublist(0, count);
