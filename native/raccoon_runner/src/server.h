@@ -109,7 +109,7 @@ class RunnerServer {
   size_t outbox_sent_ = 0;
   size_t backlog_ = 0;
   bool watching_writable_ = false;
-  static constexpr size_t kMaxBacklog = 16 * 1024 * 1024;
+  static constexpr size_t kMaxBacklog = size_t{16} << 20;
   // Descriptors a raw client sent, not yet taken by the handler.
   std::vector<int> fds_in_;
   // Newcomers told the runner is busy, oldest first; a few at most.

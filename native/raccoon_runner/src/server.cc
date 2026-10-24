@@ -23,7 +23,7 @@ namespace raccoon {
 namespace {
 
 constexpr size_t kLengthPrefix = 4;
-constexpr size_t kMaxMessage = 64 * 1024 * 1024;
+constexpr size_t kMaxMessage = size_t{64} << 20;
 
 // Sockets are non-blocking and close-on-exec, and a client that went away
 // must fail a send with EPIPE rather than raise SIGPIPE. Linux asks for all of

@@ -422,7 +422,8 @@ FlutterPointerPhase ToPhase(raccoon::v1::PointerPhase phase) {
     case raccoon::v1::POINTER_PHASE_PAN_ZOOM_START: return kPanZoomStart;
     case raccoon::v1::POINTER_PHASE_PAN_ZOOM_UPDATE: return kPanZoomUpdate;
     case raccoon::v1::POINTER_PHASE_PAN_ZOOM_END: return kPanZoomEnd;
-    case raccoon::v1::POINTER_PHASE_CANCEL: return kCancel;
+    // Named, and any phase this runner doesn't know: both a cancel.
+    case raccoon::v1::POINTER_PHASE_CANCEL:
     default: return kCancel;
   }
 }
