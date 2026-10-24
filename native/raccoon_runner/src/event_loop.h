@@ -8,6 +8,7 @@
 #include <poll.h>
 #endif
 
+#include <cstdint>
 #include <functional>
 #include <unordered_map>
 #include <utility>
@@ -67,7 +68,15 @@ class EventLoop {
   // WSAPoll takes nothing but sockets.
   int wake_fd_ = -1;
   int wake_write_fd_ = -1;
-  std::unordered_map<int, std::pair<short, Handler>> watches_;
+  // Each watch keeps a serial while its descriptor stays watched, so a
+  // descriptor closed and reused within one pass is told apart (#144).
+  struct Watched {
+    short events;
+    Handler handler;
+    uint64_t serial;
+  };
+  std::unordered_map<int, Watched> watches_;
+  uint64_t next_serial_ = 0;
   Prepare prepare_;
   Dispatch dispatch_;
   Waiter waiter_;
