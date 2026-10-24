@@ -200,33 +200,55 @@ void main() {
   // #113: unpacking took the caller's isolate for 300 ms, the UI's in a
   // host.
   test('ensure unpacks without holding up the caller\'s isolate', () async {
-    // A large, poorly compressible library takes a while to unpack.
+    // Many files take a while to write, whatever the host: unpacked on the
+    // caller's isolate they hold it far longer than handing them over does.
     var seed = 1;
-    final library = Uint8List(24 << 20);
-    for (var i = 0; i < library.length; i++) {
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-      library[i] = seed >> 16;
+    Uint8List noise(int length) {
+      final bytes = Uint8List(length);
+      for (var i = 0; i < length; i++) {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        bytes[i] = seed >> 16;
+      }
+      return bytes;
     }
-    final zip = ZipEncoder().encodeBytes(
-      Archive()..addFile(ArchiveFile.bytes('libflutter_engine.so', library)),
-    );
+
+    final library = noise(1 << 20);
+    final archive =
+        Archive()..addFile(ArchiveFile.bytes('libflutter_engine.so', library));
+    for (var i = 0; i < 3000; i++) {
+      archive.addFile(ArchiveFile.bytes('data/file_$i.bin', noise(4096)));
+    }
+    final zip = ZipEncoder().encodeBytes(archive);
     final store = RuntimeStore(
       cacheDirectory: temp.path,
       platform: 'linux-x64',
       download: (_) async => zip,
     );
-    var ticks = 0;
+    // The longest the caller's event loop went without a turn, against the
+    // whole call: held up by the unpack, nearly all of it (460 of 470 ms on
+    // an M1); on its own isolate, the handover alone (22 of 440). A ratio
+    // holds on a slow host too, where counting turns did not (#137).
+    final clock = Stopwatch()..start();
+    var last = Duration.zero;
+    var longest = Duration.zero;
+    void turn() {
+      final gap = clock.elapsed - last;
+      if (gap > longest) longest = gap;
+      last = clock.elapsed;
+    }
+
     final timer = Timer.periodic(
       const Duration(milliseconds: 5),
-      (_) => ticks++,
+      (_) => turn(),
     );
     final runtime = await store.ensure('big');
+    turn();
     timer.cancel();
     expect(
       File(p.join(runtime.directory, 'libflutter_engine.so')).lengthSync(),
       library.length,
     );
-    expect(ticks, greaterThan(2));
+    expect(longest * 2, lessThan(clock.elapsed));
   });
 
   test('overlapping ensures share one install', () async {
