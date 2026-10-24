@@ -20,7 +20,8 @@ Design notes: `docs/internal_docs/raccoon/`.
   macOS), through shared buffers when the client takes them, inline on
   Windows; resize, pointer and key events in; the app's platform
   channel messages out and the client's answers back; the VM service URI;
-  shutdown.
+  shutdown. A frame with a side over 8,192 pixels is scaled down to fit,
+  its pixel ratio with it: the app keeps its logical size (#117).
 - Answers some plugins' channels itself, in both commands and with or
   without a client, because apps call them at startup (Wonderous before its
   first frame) and an unanswered call throws:
@@ -248,7 +249,12 @@ Design notes: `docs/internal_docs/raccoon/`.
   (`<data>/raccoon/data/<app>/size`, raccoon_runtime's `AppSizes`); each run's
   output lands timestamped in the app's data directory as `runner.log`. A
   runner that ends badly is said so in the run's output: `raccoon-device:
-  raccoon_runner exited with code N`, or `died of signal SEGV (11)`.
+  raccoon_runner exited with code N`, or `died of signal SEGV (11)`. So is
+  a run that can't start: an app not installed, no runner binary, or an
+  engine that can't be downloaded (#119). Each run's socket is
+  `<socket dir>/<app>.sock`; a key too long for a socket path (104 bytes
+  on macOS) gets as much of it as fits and `~<checksum>`, with the key in
+  a `.name` file beside the socket, which `RunnerDiscovery` reads (#118).
 
 ## Build
 
