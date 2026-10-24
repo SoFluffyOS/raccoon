@@ -111,6 +111,7 @@ final class RunnerClient
   var _sharedFrames = 0;
   final _unframer = MessageUnframer();
   final _messages = StreamController<RunnerMessage>.broadcast();
+  final _channelErrors = StreamController<Object>.broadcast();
   final _hello = Completer<RunnerHello>()..future.ignore();
   final _closed = Completer<void>();
   final _channels = <String, PlatformChannelHandler>{};
@@ -124,6 +125,11 @@ final class RunnerClient
 
   /// The runner's hello, with its protocol version.
   Future<RunnerHello> get hello => _hello.future;
+
+  /// What channel handlers threw. The call is answered "not handled", and
+  /// the connection goes on: an error here is the handler's, not the
+  /// runner's, so it stays out of [messages] and the streams built on it.
+  Stream<Object> get channelErrors => _channelErrors.stream;
 
   @override
   Stream<Frame> get frames async* {
@@ -287,7 +293,9 @@ final class RunnerClient
       _reportStartup(found);
       return;
     }
-    _startupTimer?.cancel();
+    // The grace runs from the failure, not from the latest line: an app
+    // that goes on logging after it died is reported all the same.
+    if (_startupTimer?.isActive ?? false) return;
     _startupTimer = Timer(startupGrace, () {
       if (_latestFrame != null || _closed.isCompleted) return;
       _reportStartup(
@@ -317,7 +325,7 @@ final class RunnerClient
       try {
         reply = await handler(Uint8List.fromList(message.data));
       } on Object catch (error, stackTrace) {
-        _messages.addError(error, stackTrace);
+        if (!_closed.isCompleted) _channelErrors.addError(error, stackTrace);
       }
     }
     if (message.responseId == 0) return;
@@ -337,14 +345,25 @@ final class RunnerClient
     for (final old in _buffers) {
       old.closeSync();
     }
+    // The set's own descriptors came last; any before them are left from
+    // a set that came short, and are closed rather than taken.
     final count = buffers.count;
-    if (_handles.length < count) {
+    final spare = _handles.length - count;
+    if (spare < 0) {
       _buffers = [];
-      _handles.clear();
+      _closeHandles();
       return;
     }
-    _buffers = _handles.sublist(0, count);
-    _handles.removeRange(0, count);
+    _buffers = _handles.sublist(spare);
+    _handles.removeRange(spare, _handles.length);
+    _closeHandles();
+  }
+
+  void _closeHandles() {
+    for (final handle in _handles) {
+      handle.closeSync();
+    }
+    _handles.clear();
   }
 
   /// Reads a shared-buffer frame's pixels and gives the buffer back; an
@@ -355,7 +374,12 @@ final class RunnerClient
     if (frame.inGpuBuffer) return frame;
     if (!frame.inSharedBuffer) return frame;
     final index = frame.bufferIndex;
-    if (index >= _buffers.length) return null;
+    if (index >= _buffers.length) {
+      // Not one this client holds: dropped, but given back, or the runner
+      // would keep it busy and send every frame inline.
+      send(ClientMessage(releaseBuffer: ReleaseBuffer(index: index)));
+      return null;
+    }
     final file = _buffers[index]..setPositionSync(0);
     final pixels = file.readSync(frame.rowBytes * frame.height);
     send(ClientMessage(releaseBuffer: ReleaseBuffer(index: index)));
@@ -389,7 +413,9 @@ final class RunnerClient
       buffer.closeSync();
     }
     _buffers = [];
+    _closeHandles();
     unawaited(_messages.close());
+    unawaited(_channelErrors.close());
     unawaited(_startupChanges.close());
   }
 }

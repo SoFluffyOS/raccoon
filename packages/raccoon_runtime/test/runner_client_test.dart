@@ -219,9 +219,14 @@ void main() {
     expect(response.handled, isFalse);
   });
 
-  test('a handler that throws still answers, "not handled"', () async {
+  // #134: the error went into messages, and a view took it for a lost
+  // runner.
+  test('a handler that throws still answers, "not handled", and the '
+      'connection goes on', () async {
     final errors = <Object>[];
-    final subscription = client.messages.listen((_) {}, onError: errors.add);
+    final frameErrors = <Object>[];
+    final subscription = client.channelErrors.listen(null, onError: errors.add);
+    final frames = client.frames.listen(null, onError: frameErrors.add);
     client.registerChannel(
       'plugins.flutter.io/broken',
       (Uint8List data) async => throw StateError('broken'),
@@ -240,6 +245,52 @@ void main() {
     expect(response.responseId, Int64(4));
     expect(response.handled, isFalse);
     expect(errors.single, isA<StateError>());
+    runner.frame();
+    await client.frames.first.timeout(const Duration(seconds: 5));
+    expect(frameErrors, isEmpty);
     await subscription.cancel();
+    await frames.cancel();
   });
+
+  // #134: every line restarted the grace, so an app that kept logging after
+  // it died was never reported.
+  test('an app that goes on logging after it died is reported', () async {
+    final reported = client.startupFailures
+        .firstWhere((failure) => failure != null)
+        .timeout(const Duration(seconds: 5));
+    runner
+      ..log(_exception)
+      ..log('#0      main (package:no_plugin/main.dart:24:5)');
+    final ticking = Timer.periodic(
+      const Duration(milliseconds: 30),
+      (_) => runner.log('still ticking'),
+    );
+    addTearDown(ticking.cancel);
+    expect(await reported, isNotNull);
+  });
+
+  // #134: a frame in a buffer the client does not hold was dropped and
+  // kept busy, so the runner sent every frame inline after it.
+  test(
+    'a frame in a buffer the client lacks is dropped and given back',
+    () async {
+      final release = runner.received.firstWhere((m) => m.hasReleaseBuffer());
+      runner.send(
+        RunnerMessage(
+          frame: Frame(
+            sequence: Int64(1),
+            width: 1,
+            height: 1,
+            rowBytes: 4,
+            inSharedBuffer: true,
+            bufferIndex: 5,
+          ),
+        ),
+      );
+      final message = await release.timeout(const Duration(seconds: 5));
+      expect(message.releaseBuffer.index, 5);
+      expect(message.releaseBuffer.generation, 0);
+      expect(client.latestFrame, isNull);
+    },
+  );
 }
