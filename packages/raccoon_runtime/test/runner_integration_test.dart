@@ -2492,6 +2492,68 @@ void main() {
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
+  // #144: a client let go kept its GPU socket, which refused the next
+  // client's and took its buffers.
+  test(
+    'a client that goes takes its GPU socket with it',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      try {
+        final first = await RunnerClient.connect(endpoint, gpuBuffers: true);
+        final GpuBuffers set;
+        try {
+          set = await first.gpuBufferSets.first.timeout(
+            const Duration(seconds: 5),
+          );
+        } on TimeoutException {
+          // No exporting renderer here: nothing to check.
+          first.shutdown();
+          await first.close();
+          return;
+        }
+        // Stands in for the host's side of the GPU socket.
+        final gpu = await Socket.connect(
+          InternetAddress(set.socket, type: InternetAddressType.unix),
+          0,
+        );
+        final gpuClosed = gpu.drain<void>().then((_) => true);
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        await first.close();
+        expect(
+          await gpuClosed.timeout(
+            const Duration(seconds: 5),
+            onTimeout: () => false,
+          ),
+          isTrue,
+        );
+        gpu.destroy();
+        final last = await RunnerClient.connect(endpoint);
+        await last.hello.timeout(const Duration(seconds: 5));
+        last.shutdown();
+        await last.close();
+        expect(await _exitCode(runner), 0);
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((ready, Platform.isWindows)) {
+      (false, _) => 'build the runner and example first',
+      (_, true) => 'GPU sockets are Unix sockets',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   test(
     'the runner stops when its parent is gone',
     () async {

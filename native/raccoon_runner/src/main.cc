@@ -579,6 +579,8 @@ int Serve(const Options& options) {
   uint32_t gpu_told = 0;
   uint32_t gpu_fds_sent = 0;
   raccoon::RunnerServer* server_ptr = nullptr;
+  // The GPU socket's server, set once it exists below.
+  raccoon::RunnerServer* gpu_server_ptr = nullptr;
   // The active text field, to the client; a client with an input method
   // mirrors it there.
   // What became of the plugins, for a client that just arrived.
@@ -825,6 +827,9 @@ int Serve(const Options& options) {
     host.DisableGpuBuffers();
     client_gpu = false;
     gpu_told = 0;
+    // Its GPU socket goes with it: kept, it would refuse the next client's
+    // and take that client's buffers and fences (#144).
+    if (gpu_server_ptr != nullptr) gpu_server_ptr->Disconnect();
     std::fprintf(stderr, "🦝 client disconnected\n");
   };
 
@@ -870,6 +875,7 @@ int Serve(const Options& options) {
     fds.clear();
   };
   raccoon::RunnerServer gpu_server(loop, gpu_handler);
+  gpu_server_ptr = &gpu_server;
 #if RACCOON_HAS_METAL
   // Surfaces by Mach port, for a client that asks: the service starts at the
   // first ask and stays; each ask gets its name and token.
