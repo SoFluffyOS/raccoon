@@ -2842,6 +2842,48 @@ void main() {
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
+  test(
+    'a malformed plugin manifest is reported, and the app still runs',
+    () async {
+      // The helper writes the manifest; a field of the wrong type made the
+      // runner throw at startup rather than run the app without plugins.
+      for (final content in [
+        '[1, 2]',
+        '{"flutter_framework": 3, "plugins": [7, {"name": 1, "library": []}],'
+            ' "status": [{"name": 2}, "x"]}',
+      ]) {
+        final temp = Directory.systemTemp.createTempSync('raccoon_test');
+        final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+        final manifest = File(p.join(temp.path, 'plugins.json'))
+          ..writeAsStringSync(content);
+        final runner = await RunnerProcess.start(
+          RunnerLaunch(
+            runnerBinary: binary ?? '',
+            engineDir: engineDir ?? '',
+            assets: assets,
+            icuData: icu ?? '',
+            endpoint: endpoint,
+            plugins: manifest.path,
+          ),
+        );
+        final client = await RunnerClient.connect(endpoint);
+        try {
+          final frame = await client.frames.first.timeout(
+            const Duration(seconds: 15),
+          );
+          expect(_pixel(frame, 400, 300), _red, reason: content);
+        } finally {
+          client.shutdown();
+          await client.close();
+          expect(await _exitCode(runner), 0, reason: content);
+          temp.deleteSync(recursive: true);
+        }
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   // #153: a frame that went by readback for want of a ring buffer was the
   // last an idle app drew, and a client drawing the ring drops it.
   test(

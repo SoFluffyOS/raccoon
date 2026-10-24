@@ -24,6 +24,19 @@ std::string ShortReason(const std::string& why) {
   return reason;
 }
 
+// A field of the helper's manifest, empty when it is missing or of another
+// type: json::value would throw, and the runner with it.
+std::string Str(const nlohmann::json& object, const char* key) {
+  const auto found = object.find(key);
+  return found != object.end() && found->is_string() ? found->get<std::string>() : "";
+}
+
+const nlohmann::json& List(const nlohmann::json& object, const char* key) {
+  static const nlohmann::json kEmpty = nlohmann::json::array();
+  const auto found = object.find(key);
+  return found != object.end() && found->is_array() ? *found : kEmpty;
+}
+
 }  // namespace
 
 bool PluginHost::LoadManifest(const std::string& path, std::string* error) {
@@ -39,19 +52,25 @@ bool PluginHost::LoadManifest(const std::string& path, std::string* error) {
     *error = path + ": " + e.what();
     return false;
   }
+  if (!manifest.is_object()) {
+    *error = path + ": not a manifest";
+    return false;
+  }
   std::string unprepared;
-  const bool prepared = Prepare(manifest.value("flutter_framework", ""), &unprepared);
+  const bool prepared = Prepare(Str(manifest, "flutter_framework"), &unprepared);
   if (!prepared) {
     std::fprintf(stderr, "🦝 plugins: %s\n", unprepared.c_str());
   }
-  for (const auto& item : manifest.value("plugins", nlohmann::json::array())) {
+  for (const auto& item : List(manifest, "plugins")) {
+    if (!item.is_object()) continue;
     PluginEntry entry;
-    entry.name = item.value("name", "");
-    entry.library = item.value("library", "");
-    entry.symbol = item.value("symbol", "");
-    entry.plugin_class = item.value("class", "");
-    entry.module = item.value("module", "");
-    entry.ffi = item.value("ffi", false);
+    entry.name = Str(item, "name");
+    entry.library = Str(item, "library");
+    entry.symbol = Str(item, "symbol");
+    entry.plugin_class = Str(item, "class");
+    entry.module = Str(item, "module");
+    const auto ffi = item.find("ffi");
+    entry.ffi = ffi != item.end() && ffi->is_boolean() && ffi->get<bool>();
     std::string why = unprepared;
     if (prepared && Load(entry, &why)) {
       std::fprintf(stderr, "🦝 plugin %s loaded\n", entry.name.c_str());
@@ -63,9 +82,9 @@ bool PluginHost::LoadManifest(const std::string& path, std::string* error) {
     }
   }
   // The ones that never got as far as a library: the helper's word.
-  for (const auto& item : manifest.value("status", nlohmann::json::array())) {
-    statuses_.push_back({item.value("name", ""), item.value("state", ""),
-                         item.value("detail", "")});
+  for (const auto& item : List(manifest, "status")) {
+    if (!item.is_object()) continue;
+    statuses_.push_back({Str(item, "name"), Str(item, "state"), Str(item, "detail")});
   }
   return true;
 }
