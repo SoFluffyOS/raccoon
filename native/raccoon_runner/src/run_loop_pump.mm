@@ -6,6 +6,7 @@
 #include <sys/event.h>
 #include <unistd.h>
 
+#include <cstdio>
 #include <vector>
 
 namespace raccoon {
@@ -37,7 +38,12 @@ void DispatchEvents() {
                                            inMode:NSDefaultRunLoopMode
                                           dequeue:YES];
     if (event == nil) return;
-    [NSApp sendEvent:event];
+    @try {
+      [NSApp sendEvent:event];
+    } @catch (NSException* exception) {
+      std::fprintf(stderr, "🦝 an event's handler threw: %s\n",
+                   exception.reason.UTF8String ?: "exception");
+    }
   }
 }
 
@@ -69,6 +75,14 @@ RunLoopPump::~RunLoopPump() {
 }
 
 int RunLoopPump::Wait(pollfd* fds, size_t count, int timeout_ms) {
+  // Each turn drains what plugins, timers and events autoreleased: the
+  // main thread has no other pool (#125).
+  @autoreleasepool {
+    return Turn(fds, count, timeout_ms);
+  }
+}
+
+int RunLoopPump::Turn(pollfd* fds, size_t count, int timeout_ms) {
   // Ready already, or not to wait: turn the run loop once without blocking
   // so the main queue keeps moving while the loop is busy.
   int ready = poll(fds, count, 0);

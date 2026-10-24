@@ -24,7 +24,9 @@ struct Reply {
   mach_msg_header_t header;
   mach_msg_body_t body;
   mach_msg_port_descriptor_t ports[kMaxPorts];
-  // The generation follows the last descriptor sent, not this array's end.
+  // The generation follows the last descriptor sent, not this array's end;
+  // with every descriptor sent, it lands here (#125).
+  uint32_t generation_room;
 };
 
 }  // namespace

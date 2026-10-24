@@ -24,6 +24,8 @@ class RunLoopPump {
 
  private:
   int Wait(pollfd* fds, size_t count, int timeout_ms);
+  // One turn of Wait, inside its autorelease pool.
+  int Turn(pollfd* fds, size_t count, int timeout_ms);
 
   struct Impl;
   EventLoop& loop_;

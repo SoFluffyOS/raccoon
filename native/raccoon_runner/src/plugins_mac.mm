@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <vector>
 #include <unordered_map>
 
 using raccoon::PluginHost;
@@ -87,8 +88,17 @@ using raccoon::PluginHost;
   }
   std::function<void(const uint8_t*, size_t)> on_reply;
   if (callback != nil) {
+    // Run from the runner's own tasks, outside any autorelease pool, and
+    // into plugin code (#125).
     on_reply = [callback](const uint8_t* data, size_t size) {
-      callback(data == nullptr ? nil : [NSData dataWithBytes:data length:size]);
+      @autoreleasepool {
+        @try {
+          callback(data == nullptr ? nil : [NSData dataWithBytes:data length:size]);
+        } @catch (NSException* exception) {
+          std::fprintf(stderr, "🦝 a plugin's reply handler threw: %s\n",
+                       exception.reason.UTF8String ?: "exception");
+        }
+      }
     };
   }
   _bridge->send(channel.UTF8String, static_cast<const uint8_t*>(message.bytes), message.length,
@@ -200,6 +210,10 @@ struct TextureFrame {
   // Registered on the main thread, read on the raster thread.
   NSMutableDictionary<NSNumber*, NSObject<FlutterTexture>*>* _textures;
   std::unordered_map<int64_t, TextureFrame> _frames;
+  // Frames of unregistered textures: the engine may still read the handles
+  // it was given, so they go at the next populate, on the raster thread,
+  // by when it has (#125).
+  std::vector<TextureFrame> _retired;
   int64_t _nextId;
 }
 
@@ -218,6 +232,7 @@ struct TextureFrame {
 
 - (void)dealloc {
   for (auto& entry : _frames) entry.second.Clear();
+  for (auto& frame : _retired) frame.Clear();
   if (_cache != nullptr) CFRelease(_cache);
 }
 
@@ -249,7 +264,7 @@ struct TextureFrame {
     [_textures removeObjectForKey:@(textureId)];
     const auto frame = _frames.find(textureId);
     if (frame != _frames.end()) {
-      frame->second.Clear();
+      _retired.push_back(frame->second);
       _frames.erase(frame);
     }
   }
@@ -280,10 +295,21 @@ struct TextureFrame {
   NSObject<FlutterTexture>* texture;
   {
     std::lock_guard<std::mutex> lock(_mutex);
+    for (auto& frame : _retired) frame.Clear();
+    _retired.clear();
     texture = _textures[@(textureId)];
   }
   if (texture == nil) return NO;
-  CVPixelBufferRef buffer = [texture copyPixelBuffer];
+  CVPixelBufferRef buffer = nullptr;
+  // Plugin code, on the raster thread: an exception must not unwind
+  // through the engine (#125).
+  @try {
+    buffer = [texture copyPixelBuffer];
+  } @catch (NSException* exception) {
+    std::fprintf(stderr, "🦝 texture %lld: %s\n", static_cast<long long>(textureId),
+                 exception.reason.UTF8String ?: "exception");
+    return NO;
+  }
   if (buffer == nullptr) return NO;
   TextureFrame next;
   const OSType format = CVPixelBufferGetPixelFormatType(buffer);
@@ -318,6 +344,11 @@ struct TextureFrame {
   }
   if (count == 0) return NO;
   std::lock_guard<std::mutex> lock(_mutex);
+  // Unregistered meanwhile: kept now, the frame would never go.
+  if (_textures[@(textureId)] == nil) {
+    next.Clear();
+    return NO;
+  }
   TextureFrame& kept = _frames[textureId];
   kept.Clear();
   kept = next;
