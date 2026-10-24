@@ -52,12 +52,52 @@ struct BufferSet {
 };
 
 struct Imported {
+  EGLDisplay display = EGL_NO_DISPLAY;
   uint32_t generation = 0;
   uint32_t width = 0;
   uint32_t height = 0;
   std::vector<EGLImageKHR> images;
   std::vector<GLuint> textures;
 };
+
+// Deletes |imported|'s GL textures and EGL images. Raster thread, Flutter's
+// context current.
+void destroy_set(Imported& imported) {
+  const auto destroy_image = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(
+      eglGetProcAddress("eglDestroyImageKHR"));
+  for (GLuint texture : imported.textures) {
+    if (texture != 0) glDeleteTextures(1, &texture);
+  }
+  for (EGLImageKHR image : imported.images) {
+    if (image != EGL_NO_IMAGE_KHR && destroy_image != nullptr) {
+      destroy_image(imported.display, image);
+    }
+  }
+  imported.textures.clear();
+  imported.images.clear();
+}
+
+// Sets of disposed textures: their GL objects belong to Flutter's context,
+// current only on the raster thread, so the next populate of any texture
+// deletes them. Each holds a ring's buffers until then.
+std::mutex graveyard_mutex;
+std::vector<std::unique_ptr<Imported>> graveyard;
+
+void bury(std::unique_ptr<Imported> imported) {
+  if (!imported) return;
+  std::lock_guard<std::mutex> lock(graveyard_mutex);
+  graveyard.push_back(std::move(imported));
+}
+
+// Raster thread, context current.
+void empty_graveyard() {
+  std::vector<std::unique_ptr<Imported>> sets;
+  {
+    std::lock_guard<std::mutex> lock(graveyard_mutex);
+    sets.swap(graveyard);
+  }
+  for (auto& set : sets) destroy_set(*set);
+}
 
 }  // namespace
 
@@ -68,6 +108,8 @@ struct Imported {
 
 struct _RaccoonGpuTexture {
   FlTextureGL parent_instance;
+  // Marks a frame available, for a set that comes after its frame was named.
+  FlTextureRegistrar* registrar;
   std::mutex* mutex;
   // The set waiting to be imported, and the one imported, in Flutter's GL
   // context, which only populate sees.
@@ -107,16 +149,7 @@ G_DEFINE_TYPE(RaccoonGpuTexture, raccoon_gpu_texture, fl_texture_gl_get_type())
 
 static void destroy_imported(RaccoonGpuTexture* self) {
   if (!self->imported) return;
-  const auto destroy_image = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(
-      eglGetProcAddress("eglDestroyImageKHR"));
-  for (GLuint texture : self->imported->textures) {
-    if (texture != 0) glDeleteTextures(1, &texture);
-  }
-  for (EGLImageKHR image : self->imported->images) {
-    if (image != EGL_NO_IMAGE_KHR && destroy_image != nullptr) {
-      destroy_image(self->display, image);
-    }
-  }
+  destroy_set(*self->imported);
   self->imported.reset();
 }
 
@@ -238,7 +271,13 @@ static gboolean import_pending(RaccoonGpuTexture* self, GError** error) {
   std::unique_ptr<BufferSet> set;
   {
     std::lock_guard<std::mutex> lock(*self->mutex);
-    set = std::move(self->pending);
+    // A new ring waits until a frame of it is named: until then the frame
+    // shown is of the set at hand, and the new ring's buffers may be being
+    // drawn or never drawn.
+    if (self->pending &&
+        (!self->imported || self->pending->generation == self->shown_generation)) {
+      set = std::move(self->pending);
+    }
   }
   if (!set) return self->imported != nullptr;
   const auto create_image = reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(
@@ -255,6 +294,7 @@ static gboolean import_pending(RaccoonGpuTexture* self, GError** error) {
     return self->imported != nullptr;
   }
   auto imported = std::make_unique<Imported>();
+  imported->display = self->display;
   imported->generation = set->generation;
   imported->width = set->width;
   imported->height = set->height;
@@ -303,14 +343,21 @@ static gboolean raccoon_gpu_texture_populate(FlTextureGL* texture,
                                              uint32_t* width, uint32_t* height,
                                              GError** error) {
   RaccoonGpuTexture* self = RACCOON_GPU_TEXTURE(texture);
-  if (!import_pending(self, error)) return FALSE;
+  empty_graveyard();
+  if (!import_pending(self, error)) {
+    // Flutter logs the error's message, and a missing one crashes it.
+    if (error != nullptr && *error == nullptr) {
+      g_set_error(error, G_IO_ERROR, G_IO_ERROR_PENDING, "no GPU buffers yet");
+    }
+    return FALSE;
+  }
   const Imported& imported = *self->imported;
   if (imported.textures.empty() || imported.textures[0] == 0) {
     g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "no GPU buffer imported");
     return FALSE;
   }
-  // Nothing of this set shown yet: the first buffer, rather than nothing,
-  // and not one to give back.
+  // The frame named is not of this set: the buffer bound last stays, or,
+  // with nothing of this set bound yet, the first, and not one to give back.
   int index = 0;
   int fence_fd = -1;
   bool rebound = false;
@@ -320,6 +367,11 @@ static gboolean raccoon_gpu_texture_populate(FlTextureGL* texture,
     std::lock_guard<std::mutex> lock(*self->mutex);
     const uint32_t generation = self->shown_generation;
     const int shown = self->shown_index;
+    if (self->bound_generation == imported.generation && self->bound_index >= 0 &&
+        static_cast<size_t>(self->bound_index) < imported.textures.size() &&
+        imported.textures[self->bound_index] != 0) {
+      index = self->bound_index;
+    }
     if (generation == imported.generation && shown >= 0 &&
         static_cast<size_t>(shown) < imported.textures.size() &&
         imported.textures[shown] != 0) {
@@ -353,14 +405,11 @@ static gboolean raccoon_gpu_texture_populate(FlTextureGL* texture,
 
 static void raccoon_gpu_texture_dispose(GObject* object) {
   RaccoonGpuTexture* self = RACCOON_GPU_TEXTURE(object);
-  if (self->watch != 0) {
-    g_source_remove(self->watch);
-    self->watch = 0;
+  if (self->mutex == nullptr) {
+    G_OBJECT_CLASS(raccoon_gpu_texture_parent_class)->dispose(object);
+    return;
   }
-  if (self->socket_fd >= 0) {
-    close(self->socket_fd);
-    self->socket_fd = -1;
-  }
+  close_socket(self);
   for (int fd : self->fds_in_flight) close(fd);
   self->fds_in_flight.clear();
   for (int& fd : self->fence_fds) {
@@ -371,9 +420,7 @@ static void raccoon_gpu_texture_dispose(GObject* object) {
     for (int fd : self->pending->fds) close(fd);
     self->pending.reset();
   }
-  // The GL objects of an imported set belong to Flutter's context, gone
-  // with it; the images are released when the display is.
-  self->imported.reset();
+  bury(std::move(self->imported));
   delete self->mutex;
   self->mutex = nullptr;
   G_OBJECT_CLASS(raccoon_gpu_texture_parent_class)->dispose(object);
@@ -385,6 +432,7 @@ static void raccoon_gpu_texture_class_init(RaccoonGpuTextureClass* klass) {
 }
 
 static void raccoon_gpu_texture_init(RaccoonGpuTexture* self) {
+  self->registrar = nullptr;
   self->mutex = new std::mutex();
   self->shown_generation = 0;
   self->shown_index = -1;
@@ -406,6 +454,20 @@ static void raccoon_gpu_texture_init(RaccoonGpuTexture* self) {
 }
 
 // ---- The GPU socket ------------------------------------------------------
+
+// Stops reading and closes the socket; the raster thread sends releases on
+// it under the mutex. Main thread.
+static void close_socket(RaccoonGpuTexture* self) {
+  if (self->watch != 0) {
+    g_source_remove(self->watch);
+    self->watch = 0;
+  }
+  std::lock_guard<std::mutex> lock(*self->mutex);
+  if (self->socket_fd >= 0) {
+    close(self->socket_fd);
+    self->socket_fd = -1;
+  }
+}
 
 static uint32_t read32(const uint8_t* at) {
   return static_cast<uint32_t>(at[0]) | (static_cast<uint32_t>(at[1]) << 8) |
@@ -461,11 +523,21 @@ static void parse_inbox(RaccoonGpuTexture* self) {
     }
     self->fds_in_flight.erase(self->fds_in_flight.begin(),
                               self->fds_in_flight.begin() + count);
-    std::lock_guard<std::mutex> lock(*self->mutex);
-    if (self->pending) {
-      for (int fd : self->pending->fds) close(fd);
+    bool named;
+    {
+      std::lock_guard<std::mutex> lock(*self->mutex);
+      if (self->pending) {
+        for (int fd : self->pending->fds) close(fd);
+      }
+      named = set->generation == self->shown_generation;
+      self->pending = std::move(set);
     }
-    self->pending = std::move(set);
+    // The frame was named before its set came: Flutter asked for it then
+    // and keeps what it got, so it must ask again, or an idle app's pane
+    // stays as it was.
+    if (named && self->registrar != nullptr) {
+      fl_texture_registrar_mark_texture_frame_available(self->registrar, FL_TEXTURE(self));
+    }
   }
   self->inbox.erase(self->inbox.begin(), self->inbox.begin() + offset);
 }
@@ -482,18 +554,20 @@ static gboolean on_socket_readable(gint fd, GIOCondition condition,
   header.msg_control = control;
   header.msg_controllen = sizeof(control);
   const ssize_t got = recvmsg(fd, &header, MSG_CMSG_CLOEXEC);
-  if (got <= 0) {
-    self->watch = 0;
-    close(self->socket_fd);
-    self->socket_fd = -1;
-    return G_SOURCE_REMOVE;
-  }
-  for (cmsghdr* cmsg = CMSG_FIRSTHDR(&header); cmsg != nullptr;
+  for (cmsghdr* cmsg = got > 0 ? CMSG_FIRSTHDR(&header) : nullptr; cmsg != nullptr;
        cmsg = CMSG_NXTHDR(&header, cmsg)) {
     if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS) continue;
     const size_t count = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
     const int* fds = reinterpret_cast<const int*>(CMSG_DATA(cmsg));
     self->fds_in_flight.insert(self->fds_in_flight.end(), fds, fds + count);
+  }
+  // Hung up, or descriptors were lost (more than fit): the ones after would
+  // be matched to the wrong messages, so the socket is done with.
+  if (got <= 0 || (header.msg_flags & MSG_CTRUNC) != 0) {
+    // The source is removed by returning; close_socket must not remove it.
+    self->watch = 0;
+    close_socket(self);
+    return G_SOURCE_REMOVE;
   }
   self->inbox.insert(self->inbox.end(), buffer, buffer + got);
   parse_inbox(self);
@@ -514,7 +588,10 @@ static bool connect_socket(RaccoonGpuTexture* self, const std::string& path) {
     close(fd);
     return false;
   }
-  self->socket_fd = fd;
+  {
+    std::lock_guard<std::mutex> lock(*self->mutex);
+    self->socket_fd = fd;
+  }
   self->watch = g_unix_fd_add(fd, G_IO_IN, on_socket_readable, self);
   return true;
 }
@@ -556,6 +633,7 @@ static void raccoon_view_plugin_handle_method_call(RaccoonViewPlugin* self,
       response = error_response("register", "could not register the texture");
     } else {
       const int64_t id = fl_texture_get_id(FL_TEXTURE(texture));
+      texture->registrar = self->registrar;
       (*self->textures)[id] = texture;
       g_autoptr(FlValue) result = fl_value_new_int(id);
       response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
@@ -601,8 +679,17 @@ static void raccoon_view_plugin_handle_method_call(RaccoonViewPlugin* self,
                                                         FL_TEXTURE(found->second));
       response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
     } else if (strcmp(method, "dispose") == 0) {
-      fl_texture_registrar_unregister_texture(self->registrar, FL_TEXTURE(found->second));
-      g_object_unref(found->second);
+      RaccoonGpuTexture* texture = found->second;
+      fl_texture_registrar_unregister_texture(self->registrar, FL_TEXTURE(texture));
+      texture->registrar = nullptr;
+      // The socket goes now, so the next texture's is not refused; the
+      // texture itself a second later, since the registrar hands it to the
+      // raster thread without a reference and a populate may be under way.
+      close_socket(texture);
+      g_timeout_add_seconds(1, [](gpointer data) {
+        g_object_unref(data);
+        return G_SOURCE_REMOVE;
+      }, texture);
       self->textures->erase(found);
       response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
     } else {
@@ -614,9 +701,10 @@ static void raccoon_view_plugin_handle_method_call(RaccoonViewPlugin* self,
 
 static void raccoon_view_plugin_dispose(GObject* object) {
   RaccoonViewPlugin* self = RACCOON_VIEW_PLUGIN(object);
-  for (auto& [id, texture] : *self->textures) {
-    fl_texture_registrar_unregister_texture(self->registrar, FL_TEXTURE(texture));
-    g_object_unref(texture);
+  // C++14, as Flutter's Linux template builds plugins.
+  for (auto& entry : *self->textures) {
+    fl_texture_registrar_unregister_texture(self->registrar, FL_TEXTURE(entry.second));
+    g_object_unref(entry.second);
   }
   delete self->textures;
   self->textures = nullptr;

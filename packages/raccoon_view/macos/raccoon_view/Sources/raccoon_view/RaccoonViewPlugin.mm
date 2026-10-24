@@ -152,6 +152,8 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
 // ---- The texture ---------------------------------------------------------
 
 @interface RaccoonGpuTexture : NSObject <FlutterTexture>
+// Tells Flutter a new frame is ready; main queue.
+@property(nonatomic, copy) void (^frameAvailable)(void);
 - (BOOL)connectToSocket:(NSString*)path;
 - (void)showGeneration:(uint32_t)generation index:(int)index;
 - (void)dispose;
@@ -291,8 +293,16 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
       std::fprintf(stderr, "raccoon_view: ring %u, %u surfaces %s\n", set->generation, count,
                    ports.size() == count ? "by port" : "by ID");
     }
-    std::lock_guard<std::mutex> lock(_mutex);
-    _pending = std::move(set);
+    bool named;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      named = set->generation == _shownGeneration;
+      _pending = std::move(set);
+    }
+    // The frame was named before its set came: Flutter asked for it then
+    // and keeps what it got, so it must ask again, or an idle app's pane
+    // stays as it was.
+    if (named && self.frameAvailable != nil) self.frameAvailable();
   }
   _inbox.erase(_inbox.begin(), _inbox.begin() + offset);
 }
@@ -413,6 +423,10 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
     RaccoonGpuTexture* texture = [[RaccoonGpuTexture alloc] init];
     const int64_t textureId = [_registry registerTexture:texture];
     _textures[@(textureId)] = texture;
+    __weak id<FlutterTextureRegistry> registry = _registry;
+    texture.frameAvailable = ^{
+      [registry textureFrameAvailable:textureId];
+    };
     result(@(textureId));
     return;
   }
@@ -444,6 +458,7 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
     return;
   }
   if ([call.method isEqualToString:@"dispose"]) {
+    texture.frameAvailable = nil;
     [_registry unregisterTexture:textureId.longLongValue];
     [texture dispose];
     [_textures removeObjectForKey:textureId];

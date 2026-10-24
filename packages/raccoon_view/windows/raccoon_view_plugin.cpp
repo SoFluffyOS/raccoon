@@ -38,6 +38,9 @@ namespace {
 using flutter::EncodableMap;
 using flutter::EncodableValue;
 
+// More buffers than a ring will ever have.
+constexpr uint32_t kMaxBuffers = 16;
+
 uint32_t Read32(const uint8_t* at) {
   return static_cast<uint32_t>(at[0]) | (static_cast<uint32_t>(at[1]) << 8) |
          (static_cast<uint32_t>(at[2]) << 16) | (static_cast<uint32_t>(at[3]) << 24);
@@ -110,21 +113,33 @@ class GpuTexture {
       socket = socket_;
       socket_ = INVALID_SOCKET;
     }
-    // Closing ends the reader's recv.
-    if (socket != INVALID_SOCKET) closesocket(socket);
+    // A shutdown ends the reader's recv; the socket is closed once the
+    // reader is done with it, so its handle is not reused under it.
+    if (socket != INVALID_SOCKET) shutdown(socket, SD_BOTH);
     if (reader_.joinable()) reader_.join();
+    if (socket != INVALID_SOCKET) closesocket(socket);
   }
 
  private:
   // On the raster thread: the latest frame's texture.
   const FlutterDesktopGpuSurfaceDescriptor* Surface() {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (pending_) current_ = std::move(pending_);
+    // A new ring waits until a frame of it is named: until then the frame
+    // shown is of the set at hand, and the new ring's buffers may be being
+    // drawn or never drawn.
+    if (pending_ && (!current_ || pending_->generation == shown_generation_)) {
+      current_ = std::move(pending_);
+    }
     if (!current_ || current_->handles.empty()) return nullptr;
     const BufferSet& set = *current_;
-    // Nothing of this set shown yet: the first buffer, rather than nothing,
-    // and not one to give back.
+    // The frame named is not of this set: the buffer bound last stays, or,
+    // with nothing of this set bound yet, the first, and not one to give
+    // back.
     int index = 0;
+    if (bound_generation_ == set.generation && bound_index_ >= 0 &&
+        static_cast<size_t>(bound_index_) < set.handles.size()) {
+      index = bound_index_;
+    }
     if (shown_generation_ == set.generation && shown_index_ >= 0 &&
         static_cast<size_t>(shown_index_) < set.handles.size()) {
       index = shown_index_;
@@ -174,7 +189,8 @@ class GpuTexture {
         offset += 4 + length;
         if (length < 32 || std::memcmp(payload, "RGPU", 4) != 0) continue;
         const uint32_t count = Read32(payload + 8);
-        if (length < 32 + count * 12) continue;  // no handles
+        // No handles, or a count no ring has; in 64 bits, so it cannot wrap.
+        if (count > kMaxBuffers || length < 32 + static_cast<uint64_t>(count) * 12) continue;
         auto set = std::make_unique<BufferSet>();
         set->generation = Read32(payload + 4);
         set->width = Read32(payload + 12);
