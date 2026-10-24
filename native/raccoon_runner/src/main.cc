@@ -764,6 +764,9 @@ int Serve(const Options& options) {
     // A client that arrives mid-run learns which field is active.
     SendTextField(host.text_input().state());
     SendPlugins();
+    // Its own first frame: after a client that took frames as GPU buffers,
+    // the latest is in one, and an idle app sends no other.
+    host.Redraw();
   };
   handler.on_text_editing = [&host](const raccoon::v1::TextEditing& editing) {
     host.text_input().ApplyEditing(editing.text(), editing.selection_base(),

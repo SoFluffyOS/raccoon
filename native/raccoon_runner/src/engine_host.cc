@@ -200,8 +200,15 @@ void EngineHost::Resize(size_t width, size_t height, double pixel_ratio) {
   metrics.height = height;
   metrics.pixel_ratio = pixel_ratio;
   metrics.display_id = kDisplayId;
+  metrics_ = metrics;
   loader_.procs().SendWindowMetricsEvent(engine_, &metrics);
   windows_.SetViewSize(width, height, pixel_ratio);
+}
+
+void EngineHost::Redraw() {
+  // The framework draws a frame for metrics it is sent, the same or not.
+  if (engine_ == nullptr || metrics_.width == 0) return;
+  loader_.procs().SendWindowMetricsEvent(engine_, &metrics_);
 }
 
 bool EngineHost::ConfigureRenderer(const std::string& wanted,

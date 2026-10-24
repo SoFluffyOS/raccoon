@@ -2451,6 +2451,47 @@ void main() {
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
+  // #138: after a client that took frames as GPU buffers, the latest frame
+  // was in one, and a client that came next to an idle app got none until
+  // it sent its size.
+  test(
+    'a client after a GPU buffer client gets a frame of its own',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      try {
+        final gpu = await RunnerClient.connect(endpoint, gpuBuffers: true);
+        await gpu.frames.first.timeout(const Duration(seconds: 15));
+        await gpu.close();
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+
+        // No resize: an idle app draws nothing for it unless the runner does.
+        final next = await RunnerClient.connect(endpoint);
+        final frame = await next.frames.first.timeout(
+          const Duration(seconds: 5),
+        );
+        expect(frame.inGpuBuffer, isFalse);
+        expect(frame.pixels, isNotEmpty);
+        next.shutdown();
+        await next.close();
+        expect(await _exitCode(runner), 0);
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   test(
     'the runner stops when its parent is gone',
     () async {

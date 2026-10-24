@@ -103,6 +103,10 @@ class EngineHost {
 #endif
 
   void Resize(size_t width, size_t height, double pixel_ratio);
+  // Draws the app again at the size it has: a client that arrives at an
+  // idle app gets a frame of its own, whatever the one before took them
+  // as (#138). Nothing before the first Resize.
+  void Redraw();
   void SendPointer(const FlutterPointerEvent& event);
   // Sends the key to the framework, then the legacy flutter/keyevent message
   // the framework waits for before dispatching it. A key down it does not
@@ -196,6 +200,8 @@ class EngineHost {
   // What Resize scaled the frame by to fit (#117), so pointer events from
   // the host scale with it (#130); 1 almost always. Loop thread.
   double input_scale_ = 1.0;
+  // The metrics Resize last sent, for Redraw. Loop thread.
+  FlutterWindowMetricsEvent metrics_{};
   static void OnLog(const char* tag, const char* message, void* user_data);
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* user_data);
