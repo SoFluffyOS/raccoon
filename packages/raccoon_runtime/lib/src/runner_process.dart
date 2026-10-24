@@ -143,7 +143,8 @@ final class RunnerProcess {
   /// The Dart VM service URI, once the engine printed it.
   Future<String> get vmServiceUri => _vmService.future;
 
-  /// What rasterizes: `software`, `gl` or `metal`, once the runner said;
+  /// What rasterizes: `software`, `gl`, `metal` or `vulkan`, once the runner
+  /// said;
   /// it says before it listens, so this is known after [start].
   String? get renderer => _renderer;
 

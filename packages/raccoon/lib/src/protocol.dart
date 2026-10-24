@@ -1,7 +1,6 @@
 /// Constants shared by the runner and its Dart clients.
 abstract final class RaccoonProtocol {
-  /// Bumped on incompatible changes. A runner refuses a client with a newer
-  /// major version.
+  /// Bumped on incompatible changes. Each side says its own in its hello.
   static const int version = 1;
 
   /// The environment variable the runner sets for every app it hosts. Its

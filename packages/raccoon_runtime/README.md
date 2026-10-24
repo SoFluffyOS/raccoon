@@ -3,14 +3,15 @@
 The host side of the Raccoon runtime, as Lumide uses it: the
 runtime store, runner process management and discovery, the custom-device
 configuration, and the frame and input client. Pure Dart, no Flutter, so
-`lumide_server` and command-line tools can share it.
+servers and command-line tools can share it.
 
 Connect with `gpuBuffers: true` (`RunnerClient.connect`) and a runner that
 rasterizes on the GPU describes its ring in `GpuBuffers`, then sends frames
 as buffer indices, no pixels; `releaseGpuBuffer` gives one back. What
 imports the buffers rides a second socket for a native host side: file
-descriptors on Linux, which Dart cannot hold, and IOSurface IDs on macOS.
-`raccoon_view` has the Linux and macOS sides. A frame the runner cannot put
+descriptors on Linux, which Dart cannot hold, IOSurfaces by Mach port (or
+ID) on macOS, and D3D11 shared handles on Windows. `raccoon_view` has the
+host sides. A frame the runner cannot put
 in a buffer still comes with pixels.
 
 An app that stops before its first frame, such as one whose `main()` awaits
@@ -39,13 +40,10 @@ The same holds on Linux, macOS and Windows. On every host the runner is
 reached through a Unix socket in the host's socket folder, which
 `RunnerDiscovery` watches: `$XDG_RUNTIME_DIR/raccoon` on Linux,
 `$TMPDIR/raccoon` on macOS, `%TEMP%\raccoon` on Windows, where dart:io
-speaks AF_UNIX too but no handles cross, so frames come inline. There the
+speaks AF_UNIX too but no handles cross, so pixel frames come inline. There the
 Flutter tool keeps its devices in `%APPDATA%\.flutter_custom_devices.json`,
 and each command starts the helper with Git for Windows' `bash.exe`.
 
-This package is developed inside the Lumide workspace (`packages/raccoon_runtime`)
-and resolves through it.
-
 ## Issues
 
-Report here: [SoFluffyOS/raccoon](https://github.com/SoFluffyOS/raccoon/issues). One tracker for every Raccoon repository, whichever piece the bug is in. Issues are off on this one.
+Report here: [SoFluffyOS/raccoon](https://github.com/SoFluffyOS/raccoon/issues). One tracker for every piece of Raccoon, whichever the bug is in.

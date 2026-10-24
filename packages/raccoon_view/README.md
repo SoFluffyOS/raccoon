@@ -28,9 +28,8 @@ nothing beyond the plugin registration the Flutter tool generates for any
 app depending on it; the macOS plugin comes as a Swift package and a
 podspec, for either way of integrating plugins.
 
-Imports only `flutter/widgets.dart`. Developed inside the Lumide workspace
-(`packages/raccoon_view`) and resolves through it.
+Uses no Material or Cupertino widgets.
 
 ## Issues
 
-Report here: [SoFluffyOS/raccoon](https://github.com/SoFluffyOS/raccoon/issues). One tracker for every Raccoon repository, whichever piece the bug is in. Issues are off on this one.
+Report here: [SoFluffyOS/raccoon](https://github.com/SoFluffyOS/raccoon/issues). One tracker for every piece of Raccoon, whichever the bug is in.

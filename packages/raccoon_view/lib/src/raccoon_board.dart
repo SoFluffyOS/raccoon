@@ -19,8 +19,8 @@ final class RaccoonBoardFrame {
   });
 
   /// A frame for a session's name: the device's size and ratio when the
-  /// name carries a sized device (`wonders@tablet`), the phone's otherwise,
-  /// placed to the right of [existing].
+  /// name carries a sized device (`wonders@tablet`), a phone's logical size
+  /// at a ratio of 2 otherwise, placed to the right of [existing].
   factory RaccoonBoardFrame.initial(
     String name, {
     Iterable<RaccoonBoardFrame> existing = const [],

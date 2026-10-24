@@ -31,7 +31,7 @@ final class PluginStatus {
 }
 
 /// Reads the Flutter tool's `.flutter-plugins-dependencies` and says, per
-/// plugin, what the runtime can do with it (see design note 004).
+/// plugin, what the runtime can do with it.
 final class PluginCompatibility {
   PluginCompatibility({
     this.servedByRaccoon = defaultServedByRaccoon,

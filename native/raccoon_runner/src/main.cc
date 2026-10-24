@@ -365,9 +365,11 @@ uint32_t Read32(const uint8_t* at) {
 //
 // macOS: a client that takes surfaces by Mach port sends 'RPRT'. The runner
 // answers 'RSVC', the length of a Mach service name, the name, then a
-// 16-byte token, and builds the next ring without global surfaces; the
-// client asks that service for each set's surfaces (surface_port_server.h).
-// A client that never sends 'RPRT' keeps looking surfaces up by ID.
+// 16-byte token, and announces the ring in use again; the client asks that
+// service for each set's surfaces (surface_port_server.h), and once an ask
+// has reached it the rings are built without global surfaces. A client
+// that never sends 'RPRT', or never reaches the service, keeps looking
+// surfaces up by ID.
 std::vector<uint8_t> GpuSocketPayload(const raccoon::GpuBufferSet& set) {
   std::vector<uint8_t> out;
   auto put32 = [&out](uint32_t value) {

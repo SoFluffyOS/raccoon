@@ -135,8 +135,9 @@ class ClientHello extends $pb.GeneratedMessage {
   void clearComposes() => $_clearField(5);
 
   /// The client can import GPU buffers (DRM dmabufs on Linux, IOSurfaces on
-  /// macOS) and will take their file descriptors or IDs from the runner's
-  /// GPU socket; frames then arrive as buffer indices, no pixels.
+  /// macOS, shared D3D11 textures on Windows) and will take what opens them
+  /// from the runner's GPU socket; frames then arrive as buffer indices, no
+  /// pixels.
   @$pb.TagNumber(6)
   $core.bool get gpuBuffers => $_getBF(5);
   @$pb.TagNumber(6)
@@ -1356,13 +1357,14 @@ class Frame extends $pb.GeneratedMessage {
 }
 
 /// A set of same-sized GPU buffers the engine renders into, one frame each:
-/// DRM dmabufs on Linux, IOSurfaces on macOS. What imports them is not
+/// DRM dmabufs on Linux, IOSurfaces on macOS, shared D3D11 textures on
+/// Windows. What imports them is not
 /// here: a native client takes it from the runner's GPU socket (socket),
 /// which carries a fixed little-endian layout rather than protobuf, framed
 /// like a message: 'RGPU', generation, count, width, height, fourcc (32 bits
 /// each), modifier (64), then count pairs of stride and offset. On Linux one
 /// descriptor per buffer rides along in index order; on macOS count
-/// IOSurface IDs follow the pairs. A new set, with a higher generation,
+/// IOSurface IDs follow the pairs, and on Windows count shared handles. A new set, with a higher generation,
 /// replaces the old one on resize.
 class GpuBuffers extends $pb.GeneratedMessage {
   factory GpuBuffers({

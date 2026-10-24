@@ -1,10 +1,9 @@
 # raccoon_runner
 
-[![CI](https://github.com/SoFluffyOS/raccoon_runner/actions/workflows/ci.yml/badge.svg)](https://github.com/SoFluffyOS/raccoon_runner/actions/workflows/ci.yml)
+[![CI](https://github.com/SoFluffyOS/raccoon/actions/workflows/runner-ci.yml/badge.svg)](https://github.com/SoFluffyOS/raccoon/actions/workflows/runner-ci.yml)
 
 The Raccoon runtime's runner: hosts a Flutter app on the C embedder API, for
 Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository at `native/raccoon_runner`; Lumide and the simulator take that repository as a git submodule.
-Design notes: `docs/internal_docs/raccoon/`.
 
 ## What it does
 
@@ -91,11 +90,12 @@ Design notes: `docs/internal_docs/raccoon/`.
   hello (`composes`), mirrors the field and types through it (#151).
 - Rasterizes on the GPU where the host offers one without a window: through
   EGL on Linux (Mesa: the surfaceless platform or a render node), through
-  Metal on macOS. By default each frame is read back as pixels in the
+  Metal on macOS, through Vulkan on Windows. By default each frame is read back as pixels in the
   host's order, so clients see the same frames as from the software
   renderer; at 2400×1600 that halves the runner's CPU. A client that asks
   for `gpu_buffers` gets a ring of four textures instead, exported as DRM
-  dmabufs on Linux and backed by IOSurfaces on macOS: the engine draws
+  dmabufs on Linux, backed by IOSurfaces on macOS and shared D3D11
+  textures on Windows: the engine draws
   straight into them and a frame is the index of its buffer, no pixels. The
   ring is described over a second socket, the main one's path with `.gpu`
   in place of `.sock` (its layout is in `main.cc`). On Linux the
@@ -110,8 +110,8 @@ Design notes: `docs/internal_docs/raccoon/`.
   a cross-process fence would save 0.6-0.8 ms at the median (measured, #60),
   and Metal shares none without XPC. A buffer goes back on either
   socket, with a fence of its own on the second where there are fences. The
-  raccoon_view plugin does this on Linux and macOS. `--renderer
-  auto|gl|metal|software`, or `RACCOON_RENDERER` in the environment: `auto`
+  raccoon_view plugin does this on Linux, macOS and Windows. `--renderer
+  auto|gl|metal|vulkan|software`, or `RACCOON_RENDERER` in the environment: `auto`
   falls back to software; the start-up log says which is in use, and
   `RACCOON_TRACE=1` traces every frame's buffer. On Linux, built when `egl`
   and `glesv2` are found by pkg-config (`libegl1-mesa-dev
@@ -136,8 +136,9 @@ Design notes: `docs/internal_docs/raccoon/`.
   loaded plugin's channels are answered before a client sees them, GLib's
   main context is pumped from the runner's loop, and a plugin's textures
   draw through the GL renderer. The registrar hands out no view: the
-  window plugins (`desktop_window`, `window_manager`, `window_size`,
-  `screen_retriever`) stay the runner's own, above. `example/plugins/echo`
+  window plugins (`desktop_window`, `window_manager`, `window_size`) stay
+  the runner's own, above; `screen_retriever` is not built either, and its
+  calls get no answer. `example/plugins/echo`
   is a plugin as the template makes one; `example/plugins_app` calls it.
 - Loads the project's native plugins on macOS too. A plugin framework links
   against `FlutterMacOS.framework` and uses its channel and codec classes;
@@ -233,8 +234,8 @@ Design notes: `docs/internal_docs/raccoon/`.
   answers gets an empty reply, which the app sees as
   `MissingPluginException` (Pigeon's `channel-error`), as on a desktop the
   plugin does not support; the first time a channel goes unanswered, for
-  each reason, stderr says `raccoon_runner: nothing answered CHANNEL
-  (WHY); the app sees no plugin`. The engine's own `flutter/` channels are
+  each reason, stderr says `🦝 nothing answered CHANNEL (WHY); the app
+  sees no plugin`. The engine's own `flutter/` channels are
   left out: a null reply there is normal. A message the client takes and
   does not answer within 5 seconds gets the same empty reply. No plugin is
   faked: a made-up success would break Pigeon plugins worse.
@@ -265,8 +266,8 @@ Design notes: `docs/internal_docs/raccoon/`.
   it the run starts at the size a host's board last gave the app
   (`<data>/raccoon/data/<app>/size`, raccoon_runtime's `AppSizes`); each run's
   output lands timestamped in the app's data directory as `runner.log`. A
-  runner that ends badly is said so in the run's output: `raccoon-device:
-  raccoon_runner exited with code N`, or `died of signal SEGV (11)`. So is
+  runner that ends badly is said so in the run's output: `🦝 raccoon_runner
+  exited with code N`, or `🦝 raccoon_runner died of signal SEGV (11)`. So is
   a run that can't start: an app not installed, no runner binary, or an
   engine that can't be downloaded (#119). Each run's socket is
   `<socket dir>/<app>.sock`; a key too long for a socket path (104 bytes
@@ -331,7 +332,9 @@ publishing them.
 tool/render_example.sh               # build/frame.png of example/hello
 ```
 
-Serve the example and look at it from `packages/raccoon_view/example`:
+Serve the example and look at it from `packages/raccoon_view/example`,
+run with `--dart-define=RACCOON_SOCKET=<the socket>` (it looks for
+`raccoon/runner.sock` otherwise):
 
 ```sh
 build/raccoon_runner serve \
@@ -349,7 +352,8 @@ Register the custom device and run any project on it:
 
 ```sh
 flutter config --enable-custom-devices
-(cd ../../packages/raccoon_runtime && dart run raccoon_runtime:raccoon_device setup --helper "$PWD/tool/raccoon-device")
+HELPER="$PWD/tool/raccoon-device"
+(cd ../../packages/raccoon_runtime && dart run raccoon_runtime:raccoon_device setup --helper "$HELPER")
 flutter run -d raccoon
 ```
 
@@ -380,15 +384,15 @@ wake descriptor (eventfd, a pipe, or a pair of sockets for Windows'
 `WSAPoll`), socket flags, the shared buffers' backing (a memfd, or an
 unlinked temporary file on macOS, whose POSIX shared memory cannot be read
 with `read()`; none on Windows, where no handle crosses a socket), the GPU
-renderer (EGL and dmabufs, or Metal and IOSurfaces), the engine library's
+renderer (EGL and dmabufs, Metal and IOSurfaces, or Vulkan and D3D11
+textures), the engine library's
 name, the pixel order, how the runner notices its parent is gone, and the
 native plugins' object model and main loop (GObject and GLib, or
 FlutterMacOS and the main run loop).
 
-Windows has the software renderer and inline frames; GPU frames
-([#25](https://github.com/SoFluffyOS/raccoon/issues/25)) and native plugins
-([#36](https://github.com/SoFluffyOS/raccoon/issues/36)) come later. The
-custom device starts the helper with Git for Windows' `bash.exe`, and the
+Windows has no shared memory across a socket, so pixel frames come inline;
+GPU frames go through the Vulkan renderer's shared D3D11 textures, and
+native plugins load as above. The custom device starts the helper with Git for Windows' `bash.exe`, and the
 runner stops when any process from its parent up through Git Bash to the
 tool ends. Measured on a Ryzen 9 7945HX: `flutter run -d raccoon` in
 example/hello reaches the VM service 4.4 s after Launching, hot reload
@@ -398,4 +402,4 @@ inline frames is the cost.
 
 ## Issues
 
-Report here: [SoFluffyOS/raccoon](https://github.com/SoFluffyOS/raccoon/issues). One tracker for every Raccoon repository, whichever piece the bug is in. Issues are off on this one.
+Report here: [SoFluffyOS/raccoon](https://github.com/SoFluffyOS/raccoon/issues). One tracker for every piece of Raccoon, whichever the bug is in.

@@ -9,9 +9,11 @@ licensed, like Flutter, so a plugin can use any license.
 ```dart
 import 'package:raccoon/raccoon.dart';
 
-final raccoon = Raccoon();
-if (raccoon.isPresent) {
-  // Hosted by the runner: use its services instead of the desktop embedder's.
+void main() {
+  if (Raccoon().isPresent) {
+    // Hosted by the runner: use its services instead of the desktop
+    // embedder's.
+  }
 }
 ```
 

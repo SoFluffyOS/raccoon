@@ -45,7 +45,8 @@ final class RuntimeStore {
        _download = download ?? httpDownload;
 
   /// `$XDG_CACHE_HOME/raccoon/engines`, or `~/.cache/raccoon/engines`, as
-  /// the runner's `tool/engine_dir.sh` keeps them. Windows programs rarely
+  /// the runner's `tool/engine_dir.sh` keeps them unless
+  /// `RACCOON_ENGINE_CACHE` says otherwise. Windows programs rarely
   /// see a `HOME`; the user's profile is the home Git Bash gives that tool.
   factory RuntimeStore.forHost(Map<String, String> environment) {
     final cacheHome = switch (environment['XDG_CACHE_HOME']) {
