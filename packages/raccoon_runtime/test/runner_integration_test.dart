@@ -2384,6 +2384,82 @@ void main() {
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
+  // #145: a client whose set came short says hello again without shared
+  // buffers; the runner sends it frames inline from then on.
+  test(
+    'a hello without shared buffers turns the runner to inline frames',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final socket = await RawSocket.connect(
+        InternetAddress(endpoint.path, type: InternetAddressType.unix),
+        0,
+      );
+      final unframer = MessageUnframer();
+      final messages = StreamController<RunnerMessage>.broadcast();
+      socket.listen((event) {
+        if (event != RawSocketEvent.read) return;
+        final message = socket.readMessage();
+        if (message == null) return;
+        for (final control in message.controlMessages) {
+          for (final handle in control.extractHandles()) {
+            handle.toFile().closeSync();
+          }
+        }
+        for (final payload in unframer.add(message.data)) {
+          messages.add(RunnerMessage.fromBuffer(payload));
+        }
+      });
+      void send(ClientMessage message) =>
+          socket.write(MessageFraming.frame(message.writeToBuffer()));
+      try {
+        final set = messages.stream.firstWhere((m) => m.hasSharedBuffers());
+        send(
+          ClientMessage(
+            hello: ClientHello(protocolVersion: 1, pid: 1, sharedBuffers: true),
+          ),
+        );
+        await set.timeout(const Duration(seconds: 15));
+
+        final inline = messages.stream.firstWhere(
+          (m) => m.hasFrame() && !m.frame.inSharedBuffer,
+        );
+        send(
+          ClientMessage(
+            hello: ClientHello(
+              protocolVersion: 1,
+              pid: 1,
+              sharedBuffers: false,
+            ),
+          ),
+        );
+        final frame = (await inline.timeout(const Duration(seconds: 5))).frame;
+        expect(frame.pixels, isNotEmpty);
+        send(ClientMessage(shutdown: Shutdown()));
+        expect(await _exitCode(runner), 0);
+      } finally {
+        await socket.close();
+        await messages.close();
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((ready, Platform.isWindows)) {
+      (false, _) => 'build the runner and example first',
+      (_, true) => 'shared buffers are Unix sockets',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   // #146: a single message past the unread limit, a 4K frame inline, let
   // a client go that was reading.
   test(

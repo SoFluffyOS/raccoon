@@ -29,19 +29,21 @@ final class RunnerClient
       onDone: _onDone,
       onError: _onError,
     );
-    send(
-      ClientMessage(
-        hello: ClientHello(
-          pid: io.pid,
-          composes: composes,
-          gpuBuffers: gpuBuffers,
-          protocolVersion: RaccoonProtocol.version,
-          clientName: 'raccoon_runtime',
-          sharedBuffers: _transport.receivesHandles,
-        ),
-      ),
-    );
+    _sayHello(sharedBuffers: _transport.receivesHandles);
   }
+
+  void _sayHello({required bool sharedBuffers}) => send(
+    ClientMessage(
+      hello: ClientHello(
+        pid: io.pid,
+        composes: composes,
+        gpuBuffers: gpuBuffers,
+        protocolVersion: RaccoonProtocol.version,
+        clientName: 'raccoon_runtime',
+        sharedBuffers: sharedBuffers,
+      ),
+    ),
+  );
 
   /// Connects to the runner at [endpoint] and sends the client hello.
   /// Connects to the runner at [endpoint] and sends the client hello. With
@@ -362,6 +364,9 @@ final class RunnerClient
     if (_handles.length < count) {
       _buffers = [];
       _closeHandles();
+      // The runner would go on filling buffers this client can't read:
+      // it is told to send frames inline instead (#145).
+      _sayHello(sharedBuffers: false);
       return;
     }
     _buffers = _handles.sublist(0, count);

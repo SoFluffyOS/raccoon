@@ -747,6 +747,12 @@ int Serve(const Options& options) {
 #endif
   handler.on_hello = [&](const raccoon::v1::ClientHello& hello) {
     client_shared = hello.shared_buffers();
+    // A client that says hello again without shared buffers, one whose set
+    // came short of its descriptors, takes frames inline from here (#145).
+    if (!client_shared && pool) {
+      host.frame().SetSharedPool(nullptr);
+      pool.reset();
+    }
     client_gpu = false;
     if (hello.gpu_buffers()) {
       std::string gpu_error;
