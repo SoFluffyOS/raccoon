@@ -2,22 +2,12 @@
 # runs raccoon_runtime's tests, whose integration tests drive the built runner.
 name: Runner CI
 
+# Only when asked for: from the Actions tab, or
+# gh workflow run runner-ci.yml --ref <branch> (#131).
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'native/raccoon_runner/**'
-      - 'packages/raccoon/**'
-      - 'packages/raccoon_runtime/**'
-      - '.github/workflows/runner-ci.yml'
-  pull_request:
-    paths:
-      - 'native/raccoon_runner/**'
-      - 'packages/raccoon/**'
-      - 'packages/raccoon_runtime/**'
-      - '.github/workflows/runner-ci.yml'
+  workflow_dispatch:
 
-# A newer push to the same branch or PR cancels the run it replaces.
+# A newer run on the same branch cancels the one it replaces.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -65,8 +55,9 @@ jobs:
 
       # The plugin prebuild takes minutes (six on macOS x64) and only checks
       # that the release's plugins still build, so it runs when what they
-      # build with changed. A base we can't fetch runs it. The release
-      # workflow always does.
+      # build with changed. A base we can't fetch runs it, and a run asked
+      # for by hand has none, so it always does. So does the release
+      # workflow.
       - name: Check what the plugin prebuild depends on
         id: plugins
         env:

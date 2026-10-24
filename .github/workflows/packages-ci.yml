@@ -2,18 +2,12 @@
 # in Runner CI, against the built runner.
 name: Packages CI
 
+# Only when asked for: from the Actions tab, or
+# gh workflow run packages-ci.yml --ref <branch> (#131).
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'packages/**'
-      - '.github/workflows/packages-ci.yml'
-  pull_request:
-    paths:
-      - 'packages/**'
-      - '.github/workflows/packages-ci.yml'
+  workflow_dispatch:
 
-# A newer push to the same branch or PR cancels the run it replaces.
+# A newer run on the same branch cancels the one it replaces.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
