@@ -45,6 +45,16 @@ final class _Runner {
   void send(RunnerMessage message) =>
       _client?.add(MessageFraming.frame(message.writeToBuffer()));
 
+  /// [messages] framed and written at once, so a test times the client
+  /// rather than a socket write per message, which Windows makes slow.
+  void sendAll(Iterable<RunnerMessage> messages) {
+    final out = BytesBuilder(copy: false);
+    for (final message in messages) {
+      out.add(MessageFraming.frame(message.writeToBuffer()));
+    }
+    _client?.add(out.takeBytes());
+  }
+
   /// [payload] framed as a message, whatever it is.
   void raw(List<int> payload) => _client?.add(MessageFraming.frame(payload));
 
@@ -106,11 +116,14 @@ void main() {
       'follow', () async {
     // #163: every line read the whole startup window again, two regexes
     // a line, so 150,000 lines took about 20 seconds.
+    runner.sendAll([
+      for (var i = 0; i < 150000; i++)
+        RunnerMessage(
+          log: LogLine(tag: 'stdout', message: 'flutter: step $i of a start'),
+        ),
+      RunnerMessage(log: LogLine(tag: 'stderr', message: _unanswered)),
+    ]);
     final stopwatch = Stopwatch()..start();
-    for (var i = 0; i < 150000; i++) {
-      runner.log('flutter: step $i of a long start');
-    }
-    runner.log(_unanswered);
     runner.frame();
     await client.frames.first.timeout(const Duration(seconds: 30));
     expect(stopwatch.elapsed, lessThan(const Duration(seconds: 6)));
