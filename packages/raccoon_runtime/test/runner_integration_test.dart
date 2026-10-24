@@ -303,6 +303,21 @@ void main() {
           contains('could not download the Flutter engine'),
         );
         expect('${run.stderr}', isNot(contains('usage:')));
+
+        // A runner that isn't there says so too, the engine found as usual.
+        final missing = await Process.run(
+          helper,
+          ['run', 'offline'],
+          environment: {
+            for (final MapEntry(:key, :value) in environment.entries)
+              if (!key.toLowerCase().contains('proxy') &&
+                  key != 'RACCOON_ENGINE_CACHE')
+                key: value,
+            'RACCOON_RUNNER': p.join(temp.path, 'no_runner'),
+          },
+        ).timeout(const Duration(seconds: 60));
+        expect(missing.exitCode, isNot(0));
+        expect('${missing.stderr}', contains('no runner at'));
       } finally {
         temp.deleteSync(recursive: true);
       }
