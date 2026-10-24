@@ -1345,6 +1345,19 @@ case "$verb" in
     # The project is two levels above its bundle; its native plugins are
     # built for this host and loaded into the runner.
     project="$(cd "$local_path/../.." && pwd)"
+    # Instances of one project (raccoon, raccoon-2) share its build/raccoon:
+    # the scoped package config, the native assets and their stamp. Their
+    # installs take turns (#136); a lock ten minutes old is a killed one's.
+    lock="$project/build/raccoon/.install-lock"
+    mkdir -p "$project/build/raccoon"
+    until mkdir "$lock" 2>/dev/null; do
+      if [ -n "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then
+        rmdir "$lock" 2>/dev/null || true
+        continue
+      fi
+      sleep 0.2
+    done
+    trap 'rmdir "$lock" 2>/dev/null' EXIT
     # Worked out once: for a pub workspace member it runs package_scope.
     config="$(package_config "$project")" || config=""
     build_plugins "$project" "$APPS/$key/plugins" "$config"
