@@ -69,6 +69,29 @@ class _FakeTextures implements HostGpuTextures {
   Future<void> dispose(int textureId) async => calls.add('dispose $textureId');
 }
 
+/// Textures whose creation waits for the test, each with an id of its own;
+/// a create may fail.
+class _GatedTextures extends _FakeTextures {
+  final pending = <Completer<int>>[];
+  var nextId = 1;
+
+  @override
+  Future<int> create() {
+    calls.add('create');
+    final made = Completer<int>();
+    pending.add(made);
+    return made.future;
+  }
+}
+
+rc.GpuBuffers _set(String socket) => rc.GpuBuffers(
+  generation: 1,
+  count: 3,
+  width: 800,
+  height: 600,
+  socket: socket,
+);
+
 /// The transform the texture is drawn through.
 Matrix4 _flipOf(WidgetTester tester) =>
     tester
@@ -303,5 +326,62 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     expect(connection.released, isEmpty);
     expect(textures.calls.last, 'dispose 7');
+  });
+
+  // #133: a texture made for the connection before was taken for the new
+  // one, and the loser leaked.
+  testWidgets('a texture made for a connection since swapped is let go', (
+    tester,
+  ) async {
+    final first = _GpuConnection();
+    final second = _GpuConnection();
+    final textures = _GatedTextures();
+    await tester.pumpWidget(
+      RaccoonView(connection: first, gpuTextures: textures),
+    );
+    first.sets.add(_set('/run/first.gpu'));
+    await tester.pump();
+    await tester.pumpWidget(
+      RaccoonView(connection: second, gpuTextures: textures),
+    );
+    second.sets.add(_set('/run/second.gpu'));
+    await tester.pump();
+    expect(textures.pending, hasLength(2));
+
+    textures.pending[0].complete(1);
+    await tester.pump();
+    textures.pending[1].complete(2);
+    await tester.pump();
+    await tester.pump();
+    expect(textures.calls, [
+      'create',
+      'create',
+      'dispose 1',
+      'connect 2 /run/second.gpu',
+    ]);
+
+    await tester.pumpWidget(const SizedBox());
+    expect(textures.calls.last, 'dispose 2');
+  });
+
+  testWidgets('a texture that fails to be made is tried again', (tester) async {
+    final connection = _GpuConnection();
+    final textures = _GatedTextures();
+    await tester.pumpWidget(
+      RaccoonView(connection: connection, gpuTextures: textures),
+    );
+    connection.sets.add(_set('/run/r.gpu'));
+    await tester.pump();
+    textures.pending[0].completeError(StateError('no texture'));
+    await tester.pump();
+
+    connection.sets.add(_set('/run/r.gpu'));
+    await tester.pump();
+    expect(textures.pending, hasLength(2));
+    textures.pending[1].complete(3);
+    await tester.pump();
+    await tester.pump();
+    expect(textures.calls.last, 'connect 3 /run/r.gpu');
+    await tester.pumpWidget(const SizedBox());
   });
 }

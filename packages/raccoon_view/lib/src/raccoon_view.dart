@@ -89,6 +89,10 @@ class _RaccoonViewState extends State<RaccoonView> {
   /// engine takes a mouse's leaving only from one it knows.
   bool _mouseIn = false;
 
+  /// Counts the GPU subscriptions dropped, so a texture made for one since
+  /// dropped is told apart.
+  var _gpuGeneration = 0;
+
   /// The keys the runner has seen go down and not yet up. An up or repeat
   /// it never saw the down of is not sent, and what is held when focus
   /// leaves is let go (#133).
@@ -171,25 +175,34 @@ class _RaccoonViewState extends State<RaccoonView> {
     if (gpu == null || _creatingTexture) return;
     if (_textureId == null) {
       _creatingTexture = true;
-      final id = await gpu.create();
-      if (!mounted) {
-        if (id >= 0) unawaited(gpu.dispose(id));
-        return;
-      }
-      if (id < 0) {
+      // A texture made for a connection since swapped, or for a view since
+      // gone, is let go: the new connection makes its own (#133).
+      final generation = _gpuGeneration;
+      bool current() => mounted && generation == _gpuGeneration;
+      var id = -1;
+      try {
+        id = await gpu.create();
+        if (id < 0 || !current()) {
+          if (id >= 0) unawaited(gpu.dispose(id));
+          if (current()) _creatingTexture = false;
+          return;
+        }
+        final releases = await gpu.connect(id, set.socket);
+        if (!current()) {
+          unawaited(gpu.dispose(id));
+          return;
+        }
+        // Frames name the texture only once the host reads the socket, so
+        // the host and the view agree on who gives each buffer back.
+        _textureId = id;
+        _hostReleases = releases;
         _creatingTexture = false;
+      } on Object {
+        // The next set tries again.
+        if (id >= 0) unawaited(gpu.dispose(id));
+        if (current()) _creatingTexture = false;
         return;
       }
-      final releases = await gpu.connect(id, set.socket);
-      if (!mounted) {
-        unawaited(gpu.dispose(id));
-        return;
-      }
-      // Frames name the texture only once the host reads the socket, so
-      // the host and the view agree on who gives each buffer back.
-      _textureId = id;
-      _hostReleases = releases;
-      _creatingTexture = false;
     }
     if (_unshownGpu case final frame?) {
       _unshownGpu = null;
@@ -198,6 +211,7 @@ class _RaccoonViewState extends State<RaccoonView> {
   }
 
   void _unsubscribeGpu() {
+    _gpuGeneration++;
     unawaited(_gpuSets?.cancel());
     _gpuSets = null;
     final connection = widget.connection;
