@@ -341,6 +341,72 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  // #120: pub encodes a relative rootUri (my%20libs); the helper looked for
+  // the encoded folder and skipped the package without a word.
+  test(
+    'a hook package in a folder with a space is found',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_space');
+      final helper = p.join(runnerDir, 'tool', 'raccoon-device');
+      final project = Directory(p.join(temp.path, 'app'))..createSync();
+      final hooked = Directory(p.join(temp.path, 'my libs', 'hooked'))
+        ..createSync(recursive: true);
+      File(p.join(hooked.path, 'hook', 'build.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('void main(List<String> args) {}\n');
+      File(
+        p.join(hooked.path, 'pubspec.yaml'),
+      ).writeAsStringSync('name: hooked\n');
+      File(
+        p.join(project.path, 'pubspec.yaml'),
+      ).writeAsStringSync('name: app\n');
+      File(p.join(project.path, 'lib', 'main.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('void main() {}\n');
+      File(p.join(project.path, '.dart_tool', 'package_config.json'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync(
+          jsonEncode({
+            'configVersion': 2,
+            'packages': [
+              {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+              {
+                'name': 'hooked',
+                'rootUri': '../../my%20libs/hooked',
+                'packageUri': 'lib/',
+              },
+            ],
+          }),
+        );
+      final bundle = Directory(p.join(project.path, 'build', 'flutter_assets'))
+        ..createSync(recursive: true);
+      try {
+        final install = await Process.run(
+          helper,
+          ['install', bundle.path, 'space_hook'],
+          environment: {
+            'RACCOON_RUNNER': binary!,
+            if (sdk != null) 'FLUTTER_ROOT': sdk,
+            'XDG_DATA_HOME': p.join(temp.path, 'data'),
+            'XDG_RUNTIME_DIR': temp.path,
+            'TMPDIR': '${temp.path}/',
+          },
+        );
+        // Built or not, the hook was found: the install says something
+        // about native assets rather than nothing.
+        expect('${install.stderr}', contains('native assets'));
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((ready, Platform.isWindows)) {
+      (false, _) => 'build the runner and example first',
+      (_, true) => 'the helper runs in Git Bash on Windows',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
+
   // #118: a socket path must fit in 104 bytes on macOS. An app whose key
   // doesn't fit runs under a shorter socket name, its key in a .name file.
   test(

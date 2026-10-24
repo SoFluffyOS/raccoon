@@ -394,7 +394,7 @@ status = []  # what never gets as far as a library, for the runner to relay
 packages = []
 for package in json.load(open(config)).get('packages', []):
     uri = package.get('rootUri', '')
-    root = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, uri))
+    root = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, unquote(uri)))
     pubspec_path = os.path.join(root, 'pubspec.yaml')
     if os.path.isfile(pubspec_path):
         packages.append((package['name'], root, open(pubspec_path).read()))
@@ -718,7 +718,7 @@ status = []  # what never gets as far as a library, for the runner to relay
 packages = []
 for package in json.load(open(config)).get('packages', []):
     uri = package.get('rootUri', '')
-    root = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, uri))
+    root = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, unquote(uri)))
     pubspec_path = os.path.join(root, 'pubspec.yaml')
     if os.path.isfile(pubspec_path):
         packages.append((package['name'], root, open(pubspec_path).read()))
@@ -1048,7 +1048,7 @@ for path in (config, os.path.join(project, 'pubspec.lock'), os.path.join(project
 roots = {}
 for package in json.load(open(config)).get('packages', []):
     uri = package.get('rootUri', '')
-    roots[package.get('name')] = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, uri))
+    roots[package.get('name')] = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, unquote(uri)))
 hooked = [name for name, root in roots.items() if os.path.isfile(os.path.join(root, 'hook', 'build.dart'))]
 if not hooked:
     sys.exit(3)

@@ -39,7 +39,8 @@ Future<void> main(List<String> arguments) async {
     final uri = '${package['rootUri'] ?? ''}';
     final root = uri.startsWith('file://')
         ? Uri.parse(uri).toFilePath()
-        : File('$dartTool/$uri').absolute.path;
+        // pub writes a relative URI encoded: my%20libs for my libs (#120).
+        : File('$dartTool/${Uri.decodeFull(uri)}').absolute.path;
     final pubspec = File('$root${Platform.pathSeparator}pubspec.yaml');
     if (!pubspec.existsSync()) continue;
     packages.add((
