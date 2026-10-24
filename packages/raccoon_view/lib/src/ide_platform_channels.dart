@@ -8,8 +8,12 @@ import 'package:raccoon_view/src/ide_url_launcher_channels.dart';
 final class IdePlatformChannels {
   const IdePlatformChannels({this.codec = const JSONMethodCodec()});
 
+  /// The codec of the platform channel's calls: JSON, as the framework
+  /// sends them.
   final MethodCodec codec;
 
+  /// The framework's channel for the clipboard, sounds, haptics and the
+  /// system chrome.
   static const String platformChannel = 'flutter/platform';
 
   /// Registers this and the plugin channels the IDE serves.
@@ -18,6 +22,8 @@ final class IdePlatformChannels {
     IdeUrlLauncherChannels().register(client);
   }
 
+  /// Answers a call on [platformChannel]; null for a method it does not
+  /// serve, which the app sees as "no plugin".
   Future<Uint8List?> handlePlatform(Uint8List data) async {
     final call = codec.decodeMethodCall(ByteData.sublistView(data));
     final result = await _dispatch(call);

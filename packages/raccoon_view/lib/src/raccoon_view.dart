@@ -34,8 +34,14 @@ class RaccoonView extends StatefulWidget {
     this.gpuTextures,
   });
 
+  /// The runner whose app to show. A [ComposingConnection] that composes
+  /// also gets the host's input method, a [GpuBufferConnection] that asked
+  /// for GPU buffers is shown through a texture, and a [ChannelConnection]
+  /// serves the app's mouse cursor.
   final RunnerConnection connection;
 
+  /// Whether the view takes the keys when first built, if nothing else
+  /// has focus; a click into the app takes them either way.
   final bool autofocus;
 
   /// Overrides the display's device pixel ratio, to preview a denser screen.

@@ -104,8 +104,14 @@ final class CustomDeviceConfig {
   /// The instance key the helper keeps this device's runs under: `1` for
   /// the first device, `2`, `phone`, `tablet`, `desktop`, or a name.
   final String instance;
+
+  /// What `flutter run -d` takes: `raccoon`, or `raccoon-<instance>`.
   final String id;
+
+  /// The name the tool's device list shows: `Raccoon`, `Raccoon Tablet`.
   final String label;
+
+  /// What the tool's device list shows for the device's SDK.
   final String sdkNameAndVersion;
 
   /// What the tool is told, see [platformFor].
@@ -124,6 +130,8 @@ final class CustomDeviceConfig {
     null => const [],
   };
 
+  /// The entry as `custom_devices.json` holds it: the helper's ping,
+  /// install, uninstall and run commands, each behind [launcher].
   Map<String, Object?> toJson() => {
     'id': id,
     'label': label,
@@ -194,6 +202,7 @@ final class CustomDevicesFile {
 
   static const _key = 'custom-devices';
 
+  /// Where the file is; a write through a symbolic link goes to its target.
   final String path;
 
   /// Adds or replaces the entry whose id matches [config]'s. Throws a

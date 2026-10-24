@@ -30,6 +30,7 @@ abstract interface class HostGpuTextures {
   /// Shows buffer [index] of [generation] as the texture's next frame.
   Future<void> show(int textureId, int generation, int index);
 
+  /// Unregisters the texture [textureId].
   Future<void> dispose(int textureId);
 }
 
@@ -37,6 +38,7 @@ abstract interface class HostGpuTextures {
 final class MethodChannelGpuTextures implements HostGpuTextures {
   const MethodChannelGpuTextures({required this.bottomUp});
 
+  /// The plugin's channel, `raccoon_view/gpu`.
   static const channel = MethodChannel('raccoon_view/gpu');
 
   @override

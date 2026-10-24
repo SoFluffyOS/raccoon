@@ -8,7 +8,11 @@ import 'package:raccoon_runtime/src/runner_endpoint.dart';
 final class Inbound {
   const Inbound(this.bytes, this.handles);
 
+  /// The bytes as one read gave them, not yet split into messages.
   final Uint8List bytes;
+
+  /// The descriptors that came with them, opened as files; always empty
+  /// where the socket carries none (Windows).
   final List<RandomAccessFile> handles;
 }
 
@@ -44,8 +48,12 @@ final class RunnerTransport {
   Completer<void>? _drained;
   Completer<void>? _hungUp;
 
+  /// What the runner sends, a read at a time; done once either side hangs
+  /// up.
   Stream<Inbound> get inbound => _inbound.stream;
 
+  /// Sends [bytes], queueing what the socket does not take yet until it
+  /// drains; ignored once closing.
   void write(Uint8List bytes) {
     if (_closed) return;
     _pending.add(bytes);

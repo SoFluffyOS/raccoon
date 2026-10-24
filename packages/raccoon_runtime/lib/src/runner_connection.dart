@@ -13,10 +13,14 @@ abstract interface class RunnerConnection {
   /// The latest frame first, then every new one.
   Stream<Frame> get frames;
 
+  /// Sizes the app: [width] and [height] in physical pixels, at
+  /// [pixelRatio] physical pixels to a logical one.
   void resize(int width, int height, double pixelRatio);
 
+  /// Sends a pointer event, its position in the frame's pixels.
   void sendPointer(PointerEvent event);
 
+  /// Sends a key going down, up or repeating.
   void sendKey(KeyEvent event);
 }
 
@@ -32,8 +36,11 @@ abstract interface class ComposingConnection implements RunnerConnection {
   /// The active field's latest state first, then every change.
   Stream<TextField> get textFields;
 
+  /// The active field's latest state; null until the runner sent one.
   TextField? get latestTextField;
 
+  /// Sends the value the host's input method produced for the active
+  /// field.
   void sendTextEditing(TextEditing editing);
 }
 
@@ -41,11 +48,13 @@ abstract interface class ComposingConnection implements RunnerConnection {
 /// and the host's native side shows them from the runner's GPU socket. Only
 /// a client that said so in its hello ([gpuBuffers]) gets them.
 abstract interface class GpuBufferConnection implements RunnerConnection {
+  /// Whether this client asked for GPU buffers in its hello.
   bool get gpuBuffers;
 
   /// Each set of GPU buffers as the runner describes it, the latest first.
   Stream<GpuBuffers> get gpuBufferSets;
 
+  /// The current set of GPU buffers; null until the runner described one.
   GpuBuffers? get latestGpuBuffers;
 
   /// Gives a GPU buffer back to the runner once the host is done with it.
@@ -56,7 +65,9 @@ abstract interface class GpuBufferConnection implements RunnerConnection {
 /// app sends on [channel] goes to the handler, whose answer goes back. A
 /// view serves what belongs to it this way (the app's mouse cursor).
 abstract interface class ChannelConnection implements RunnerConnection {
+  /// Serves [channel] with [handler], in place of any handler before.
   void registerChannel(String channel, PlatformChannelHandler handler);
 
+  /// Stops serving [channel]; the app's calls on it get "no plugin" again.
   void unregisterChannel(String channel);
 }

@@ -27,6 +27,7 @@ class RaccoonCanvas extends StatelessWidget {
   /// The device pixel ratio the app is shown at, for the label.
   final double? pixelRatio;
 
+  /// The hosted app, laid out at [size].
   final Widget child;
 
   /// The colour of the dots, the edge and the label, at their own
@@ -39,6 +40,8 @@ class RaccoonCanvas extends StatelessWidget {
   /// Distance between dots, in the canvas's pixels.
   final double spacing;
 
+  /// Space between the canvas's edge and the app; the label sits in its
+  /// bottom right.
   final EdgeInsets padding;
 
   /// What the label says: `390 × 844 · 3x`.

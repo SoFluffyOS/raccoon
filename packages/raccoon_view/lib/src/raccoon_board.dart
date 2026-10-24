@@ -44,6 +44,7 @@ final class RaccoonBoardFrame {
     );
   }
 
+  /// A frame as [toJson] wrote it.
   factory RaccoonBoardFrame.fromJson(Map<String, Object?> json) =>
       RaccoonBoardFrame(
         name: json['name'] as String,
@@ -64,9 +65,16 @@ final class RaccoonBoardFrame {
   /// No side goes under this when resized.
   static const minSide = 160.0;
 
+  /// The session's app name, `wonders@tablet`, which keys the frame.
   final String name;
+
+  /// The top left of the app, in board units; the title sits above it.
   final Offset position;
+
+  /// The app's logical size.
   final Size size;
+
+  /// The device pixel ratio the app draws at.
   final double pixelRatio;
 
   /// The device's label: `Raccoon Tablet`, `Raccoon 2`, `Raccoon`.
@@ -75,6 +83,7 @@ final class RaccoonBoardFrame {
     return RaccoonDevice.forKey(key)?.label ?? 'Raccoon $key';
   }
 
+  /// The project the session runs: `wonders` for `wonders@tablet`.
   String get project => RunnerDiscovery.projectOf(name);
 
   /// `820 × 1180 · 2x`.
@@ -90,6 +99,7 @@ final class RaccoonBoardFrame {
   /// a chip of its own beside it.
   String get title => '$device · $project';
 
+  /// This frame with the given fields replaced; the name stays.
   RaccoonBoardFrame copyWith({
     Offset? position,
     Size? size,
@@ -101,6 +111,7 @@ final class RaccoonBoardFrame {
     pixelRatio: pixelRatio ?? this.pixelRatio,
   );
 
+  /// The frame as a JSON map, for [RaccoonBoardFrame.fromJson].
   Map<String, Object?> toJson() => {
     'name': name,
     'x': position.dx,
@@ -130,6 +141,7 @@ class RaccoonBoardLayout extends ChangeNotifier {
 
   final _frames = <String, RaccoonBoardFrame>{};
 
+  /// Every frame, in the order they were made or loaded.
   List<RaccoonBoardFrame> get frames => List.unmodifiable(_frames.values);
 
   /// The frame for a session, made on first sight next to the others. Safe
@@ -143,6 +155,7 @@ class RaccoonBoardLayout extends ChangeNotifier {
     return frame;
   }
 
+  /// Moves [name]'s frame to [position], in board units.
   void move(String name, Offset position) {
     final frame = _frames[name];
     if (frame == null) return;
@@ -228,7 +241,10 @@ final class RaccoonBoardSession {
     this.onClose,
   });
 
+  /// The app name, `wonders@tablet`, which keys its frame in the layout.
   final String name;
+
+  /// The runner the frame shows.
   final RunnerConnection connection;
 
   /// Asked to shut the session down; without it the frame has no close.
@@ -259,7 +275,10 @@ class RaccoonBoard extends StatefulWidget {
     this.spacing = 24,
   });
 
+  /// The sessions to show, a frame each.
   final List<RaccoonBoardSession> sessions;
+
+  /// Where the frames sit; the board moves and resizes them in it.
   final RaccoonBoardLayout layout;
 
   /// The colour of the dots, the edges, the titles and the handles, at
@@ -278,18 +297,33 @@ class RaccoonBoard extends StatefulWidget {
   /// Distance between dots at zoom 1, in the board's pixels.
   final double spacing;
 
+  /// The key of [name]'s title bar, which drags the frame.
   static ValueKey<String> titleKey(String name) =>
       ValueKey('board-title-$name');
+
+  /// The key of [name]'s whole-frame handle, there while Alt is held.
   static ValueKey<String> grabKey(String name) => ValueKey('board-grab-$name');
+
+  /// The key of [name]'s corner resize handle.
   static ValueKey<String> resizeKey(String name) =>
       ValueKey('board-resize-$name');
+
+  /// The key of [name]'s close button.
   static ValueKey<String> closeKey(String name) =>
       ValueKey('board-close-$name');
+
+  /// The key of [name]'s size chip, which opens the size menu.
   static ValueKey<String> sizeKey(String name) => ValueKey('board-size-$name');
+
+  /// The key of the entry for the preset with instance key [device]
+  /// (`phone`) in [name]'s size menu.
   static ValueKey<String> sizeOptionKey(String name, String device) =>
       ValueKey('board-size-$name-$device');
 
+  /// The height of the title bar above each frame, in board units.
   static const titleHeight = 28.0;
+
+  /// The side of the corner resize handle, in board units.
   static const handleSize = 16.0;
 
   /// How far from the origin, in board units, a frame can sit and still be

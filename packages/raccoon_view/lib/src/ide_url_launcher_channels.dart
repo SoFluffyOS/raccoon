@@ -21,16 +21,27 @@ final class IdeUrlLauncherChannels {
              mode: launcher.LaunchMode.externalApplication,
            ));
 
+  /// `url_launcher_linux`'s canLaunchUrl channel.
   static const String linuxCanLaunchChannel =
       'dev.flutter.pigeon.url_launcher_linux.UrlLauncherApi.canLaunchUrl';
+
+  /// `url_launcher_linux`'s launchUrl channel.
   static const String linuxLaunchChannel =
       'dev.flutter.pigeon.url_launcher_linux.UrlLauncherApi.launchUrl';
+
+  /// `url_launcher_macos`'s canLaunchUrl channel.
   static const String macosCanLaunchChannel =
       'dev.flutter.pigeon.url_launcher_macos.UrlLauncherApi.canLaunchUrl';
+
+  /// `url_launcher_macos`'s launchUrl channel.
   static const String macosLaunchChannel =
       'dev.flutter.pigeon.url_launcher_macos.UrlLauncherApi.launchUrl';
+
+  /// `url_launcher_windows`'s canLaunchUrl channel.
   static const String windowsCanLaunchChannel =
       'dev.flutter.pigeon.url_launcher_windows.UrlLauncherApi.canLaunchUrl';
+
+  /// `url_launcher_windows`'s launchUrl channel.
   static const String windowsLaunchChannel =
       'dev.flutter.pigeon.url_launcher_windows.UrlLauncherApi.launchUrl';
 
@@ -41,6 +52,8 @@ final class IdeUrlLauncherChannels {
   final MessageCodec<Object?> _linuxCodec = const StandardMessageCodec();
   final MessageCodec<Object?> _macosCodec = const UrlLauncherMacosCodec();
 
+  /// Serves all three plugins' channels on [client], whichever one the
+  /// app's host uses.
   void register(RunnerClient client) {
     client
       ..registerChannel(linuxCanLaunchChannel, handleLinuxCanLaunch)
@@ -51,6 +64,8 @@ final class IdeUrlLauncherChannels {
       ..registerChannel(windowsLaunchChannel, handleWindowsLaunch);
   }
 
+  /// Pigeon's canLaunchUrl returns whether the URL can be opened; one that
+  /// does not parse is a `bad-url` error.
   Future<Uint8List?> handleLinuxCanLaunch(Uint8List data) async {
     final url = _url(data);
     if (url == null) return _reply(_linuxCodec, ['bad-url', 'not a url', null]);
@@ -70,18 +85,24 @@ final class IdeUrlLauncherChannels {
     ]);
   }
 
+  /// Pigeon's canLaunchUrl on macOS returns a result object: whether the
+  /// URL can be opened, or that it is invalid.
   Future<Uint8List?> handleMacosCanLaunch(Uint8List data) async {
     final url = _url(data);
     if (url == null) return _reply(_macosCodec, [_invalidUrl]);
     return _reply(_macosCodec, [UrlLauncherMacosResult(await _canLaunch(url))]);
   }
 
+  /// Pigeon's launchUrl on macOS returns a result object: whether it
+  /// launched, or that the URL is invalid.
   Future<Uint8List?> handleMacosLaunch(Uint8List data) async {
     final url = _url(data);
     if (url == null) return _reply(_macosCodec, [_invalidUrl]);
     return _reply(_macosCodec, [UrlLauncherMacosResult(await _launch(url))]);
   }
 
+  /// Pigeon's canLaunchUrl on Windows returns whether the URL can be
+  /// opened.
   Future<Uint8List?> handleWindowsCanLaunch(Uint8List data) =>
       _windowsReply(data, _canLaunch);
 

@@ -45,7 +45,6 @@ final class RunnerClient
     ),
   );
 
-  /// Connects to the runner at [endpoint] and sends the client hello.
   /// Connects to the runner at [endpoint] and sends the client hello. With
   /// [composes] the client promises to mirror the app's active text field in
   /// its own input method and to send what it produces; the runner then
@@ -243,11 +242,14 @@ final class RunnerClient
   @override
   void unregisterChannel(String channel) => _channels.remove(channel);
 
+  /// Frames [message] and writes it to the runner; nothing once closed.
   void send(ClientMessage message) {
     if (_closed.isCompleted) return;
     _transport.write(MessageFraming.frame(message.writeToBuffer()));
   }
 
+  /// Hangs up: stops reading, lets the transport send what is still
+  /// queued, and completes [closed].
   Future<void> close() async {
     await _subscription.cancel();
     await _transport.close();
@@ -453,6 +455,7 @@ final class RunnerClient
 class RunnerBusy implements Exception {
   const RunnerBusy(this.pid);
 
+  /// The other client's process id, 0 when it did not name itself.
   final int pid;
 
   @override

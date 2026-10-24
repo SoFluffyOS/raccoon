@@ -19,7 +19,10 @@ final class EngineRuntime {
     required this.platform,
   });
 
+  /// The engine revision, as an SDK's engine stamp names it.
   final String revision;
+
+  /// Where the engine's files are unpacked.
   final String directory;
 
   /// The bucket's name for the host, see [RuntimeStore.platformFor].
@@ -29,6 +32,8 @@ final class EngineRuntime {
   String get engineLibrary =>
       p.join(directory, RuntimeStore.engineLibraryOf(platform));
 
+  /// The embedder API's header: `flutter_embedder.h`, or the framework's
+  /// `FlutterEmbedder.h` on macOS.
   String get embedderHeader =>
       p.join(directory, RuntimeStore.embedderHeaderOf(platform));
 }
@@ -106,6 +111,7 @@ final class RuntimeStore {
     _ => '',
   };
 
+  /// The root the engines sit under, a folder per revision and platform.
   final String cacheDirectory;
 
   /// The bucket's name for the host this store serves, see [platformFor].
@@ -184,6 +190,7 @@ final class RuntimeStore {
     );
   }
 
+  /// Where [revision]'s engine for [platform] goes, installed or not.
   String directoryFor(String revision) =>
       p.join(cacheDirectory, revision, platform);
 

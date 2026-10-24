@@ -3,6 +3,7 @@ import 'dart:typed_data';
 /// The runner protocol's framing: a 4-byte little-endian length, then the
 /// serialized message.
 abstract final class MessageFraming {
+  /// Bytes in the length prefix.
   static const int prefixLength = 4;
 
   /// Prepends the length prefix to [payload].

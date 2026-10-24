@@ -44,6 +44,7 @@ sealed class RunnerEndpoint {
 final class UnixSocketEndpoint extends RunnerEndpoint {
   const UnixSocketEndpoint(this.path);
 
+  /// The socket file's path.
   final String path;
 
   @override

@@ -43,11 +43,13 @@ final class RunnerDiscovery {
         _ => null,
       };
 
+  /// The extension of a runner's socket file.
   static const String socketSuffix = '.sock';
 
   /// How often a watch that could not be set up polls instead.
   static const fallbackPollInterval = Duration(milliseconds: 500);
 
+  /// The directory the runners' sockets sit in.
   final String directory;
 
   /// How often to list the directory instead of watching it, see

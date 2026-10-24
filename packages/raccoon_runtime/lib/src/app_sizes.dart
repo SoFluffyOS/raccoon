@@ -21,6 +21,7 @@ final class AppSizes {
     return AppSizes(p.join(dataHome, 'raccoon', 'data'));
   }
 
+  /// The directory the size files sit under, a folder per app.
   final String directory;
 
   File _file(String app) => File(p.join(directory, app, 'size'));

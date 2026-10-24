@@ -18,6 +18,7 @@ final class RaccoonDevice {
   /// Lumide's previews run here.
   static const second = RaccoonDevice(key: '2', label: 'Raccoon 2');
 
+  /// A phone: 390 × 844 logical pixels at 3x.
   static const phone = RaccoonDevice(
     key: 'phone',
     label: 'Raccoon Phone',
@@ -25,6 +26,8 @@ final class RaccoonDevice {
     height: 844,
     pixelRatio: 3,
   );
+
+  /// A tablet: 820 × 1180 at 2x.
   static const tablet = RaccoonDevice(
     key: 'tablet',
     label: 'Raccoon Tablet',
@@ -32,6 +35,8 @@ final class RaccoonDevice {
     height: 1180,
     pixelRatio: 2,
   );
+
+  /// A desktop window: 1280 × 800 at 1x.
   static const desktop = RaccoonDevice(
     key: 'desktop',
     label: 'Raccoon Desktop',
@@ -93,14 +98,24 @@ final class RaccoonDevice {
   /// The key part of an app name: `wonders@tablet` is on `tablet`,
   /// `wonders` on `1`.
   final String key;
+
+  /// The name the picker shows: `Raccoon Tablet`.
   final String label;
+
+  /// The logical width the runner starts at; null for the host's size.
   final int? width;
+
+  /// The logical height the runner starts at; null for the host's size.
   final int? height;
+
+  /// The pixel ratio the runner starts at, 1 when null; unused without a
+  /// size.
   final double? pixelRatio;
 
   /// The Flutter tool's device id: `raccoon`, `raccoon-tablet`.
   String get id => key == '1' ? 'raccoon' : 'raccoon-$key';
 
+  /// Whether the device has a size of its own, rather than the host's.
   bool get hasSize => width != null && height != null;
 
   /// What the helper takes as `--size`: `390x844@3`; null without a size.

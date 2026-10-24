@@ -20,10 +20,14 @@ enum PluginSupport {
   notForThisPlatform,
 }
 
+/// One of a project's plugins and how it fares in the runtime.
 final class PluginStatus {
   const PluginStatus({required this.name, required this.support});
 
+  /// The plugin's package name.
   final String name;
+
+  /// What the runtime can do with it on this host.
   final PluginSupport support;
 
   @override
@@ -62,6 +66,8 @@ final class PluginCompatibility {
   /// The platform whose plugin list the report reads.
   final String platform;
 
+  /// The file the Flutter tool writes at a project's root, listing its
+  /// plugins per platform.
   static const String fileName = '.flutter-plugins-dependencies';
 
   /// The report for the project at [projectDirectory], or an empty list when

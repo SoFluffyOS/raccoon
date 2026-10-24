@@ -24,13 +24,28 @@ final class RunnerLaunch {
     this.cameraSource,
   });
 
+  /// The runner executable.
   final String runnerBinary;
+
+  /// The directory holding the engine's embedder library.
   final String engineDir;
+
+  /// The app bundle's `flutter_assets` directory.
   final String assets;
+
+  /// The engine's ICU data file, `icudtl.dat`.
   final String icuData;
+
+  /// The socket the runner listens on for its client.
   final UnixSocketEndpoint endpoint;
+
+  /// The app's first size in physical pixels, until a client sizes it.
   final int width;
+
+  /// See [width].
   final int height;
+
+  /// Physical pixels to a logical one at the first size.
   final double pixelRatio;
 
   /// Where the app's files live: its preferences, and on Linux the XDG
@@ -46,6 +61,8 @@ final class RunnerLaunch {
   /// pattern; on Windows a video too, played in a loop.
   final String? cameraSource;
 
+  /// The runner's command line after [runnerBinary]: `serve` and its
+  /// options.
   List<String> get arguments => [
     'serve',
     '--engine-dir',
@@ -116,6 +133,8 @@ final class RunnerProcess {
   }
 
   final Process _process;
+
+  /// What this runner was started with.
   final RunnerLaunch launch;
   final _listening = Completer<void>();
   final _vmService = Completer<String>();
@@ -144,14 +163,17 @@ final class RunnerProcess {
   Future<String> get vmServiceUri => _vmService.future;
 
   /// What rasterizes: `software`, `gl`, `metal` or `vulkan`, once the runner
-  /// said;
-  /// it says before it listens, so this is known after [start].
+  /// said; it says before it listens, so this is known after [start].
   String? get renderer => _renderer;
 
+  /// The runner's process id.
   int get pid => _process.pid;
 
+  /// Completes with the runner's exit code once it ends.
   Future<int> get exitCode => _process.exitCode;
 
+  /// Asks the system to end the runner; false when the signal could not
+  /// be sent.
   bool kill() => _process.kill();
 
   void _onStdoutLine(String line) {
@@ -205,6 +227,7 @@ final class RunnerProcess {
 final class RunnerExited implements Exception {
   const RunnerExited(this.exitCode, [this.lastLines = const []]);
 
+  /// The runner's exit code.
   final int exitCode;
 
   /// What it printed last, stdout and stderr together.
