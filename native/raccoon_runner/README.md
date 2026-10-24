@@ -215,8 +215,9 @@ Design notes: `docs/internal_docs/raccoon/`.
   `path_provider` names its directories after it
   (`~/Library/Application Support/dev.raccoon.app.<app>`). On Linux the same
   with the Linux bundle target (`debug_bundle_linux-x64_assets`); it unpacks
-  the GTK engine into `linux/flutter/ephemeral`, and the helper takes a
-  `linux/` folder away again when the project had none. `example/native_assets_app`
+  the GTK engine into `linux/flutter/ephemeral`, and the helper takes away
+  a `linux/` that holds nothing else, so a project without a Linux app gets
+  none, even after an install cut short. `example/native_assets_app`
   calls a C function from a hook (`example/native_add`) and prints
   `NATIVE:42`.
 - Never leaves the app waiting on a plugin nobody serves. A channel no one
@@ -238,6 +239,13 @@ Design notes: `docs/internal_docs/raccoon/`.
   `example/no_plugin` dies in `main()` of a call nobody serves;
   `example/no_plugin_late` makes the same call after its first frame and
   goes on.
+- Never lets a client hold up the app. What goes to the client queues,
+  written as far as its socket takes it, the rest when it can take more;
+  frames wait while anything is queued, the newest replacing the rest. A
+  client paused in a debugger keeps its place for as long as it likes; one
+  that leaves more than 16 MB unread behind the message being written is
+  let go. A client that says hello again without shared buffers gets
+  frames inline from then on.
 - `render`: writes one frame to a PPM file, for tests and a quick look.
 - `tool/raccoon-device`: ping, install, uninstall and run for the Flutter
   tool's custom device, so a stock `flutter run -d raccoon` works.
