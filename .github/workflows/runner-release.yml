@@ -52,9 +52,11 @@ jobs:
             exit 1
           fi
 
+      # The 22.04 image ships libunwind-14-dev, which keeps GStreamer's
+      # libunwind-dev from installing; it goes first.
       - name: Install CMake and Ninja
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libegl1-mesa-dev libgles2-mesa-dev libgtk-3-dev libepoxy-dev libsecret-1-dev libjsoncpp-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+        run: sudo apt-get update && (sudo apt-get remove -y libunwind-14-dev || true) && sudo apt-get install -y cmake ninja-build libegl1-mesa-dev libgles2-mesa-dev libgtk-3-dev libepoxy-dev libsecret-1-dev libjsoncpp-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - name: Install CMake and Ninja
         if: runner.os == 'macOS'
         run: brew install cmake ninja
