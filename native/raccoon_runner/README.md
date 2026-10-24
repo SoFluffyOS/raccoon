@@ -83,7 +83,12 @@ Design notes: `docs/internal_docs/raccoon/`.
   the second, no key ever reaches the app.
 - Types: it answers `flutter/textinput` and keeps the active field's editing
   state, so the keys the framework leaves unhandled insert text, delete,
-  move and act; `example/text` shows it. Composition (an IME) is not here yet.
+  move and act; `example/text` shows it. On a Mac they go back as the
+  selectors AppKit's key bindings name (`deleteWordBackward:`,
+  `moveToLeftEndOfLine:`, ...), as a Mac app's framework expects. Enter
+  inserts a newline only in a multiline field whose action is newline, and
+  always sends the action. A client with an input method says so in its
+  hello (`composes`), mirrors the field and types through it (#151).
 - Rasterizes on the GPU where the host offers one without a window: through
   EGL on Linux (Mesa: the surfaceless platform or a render node), through
   Metal on macOS. By default each frame is read back as pixels in the

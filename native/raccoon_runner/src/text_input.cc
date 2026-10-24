@@ -50,6 +50,7 @@ std::u16string ToUtf16(const std::string& utf8) {
       code = (code << 6) | (static_cast<unsigned char>(utf8[i + k]) & 0x3F);
     }
     i += length;
+    if (code > 0x10FFFF) code = 0xFFFD;
     if (code >= 0x10000) {
       code -= 0x10000;
       out.push_back(static_cast<char16_t>(0xD800 + (code >> 10)));
@@ -69,6 +70,8 @@ std::string ToUtf8(const std::u16string& utf16) {
         IsLowSurrogate(utf16[i + 1])) {
       code = 0x10000 + ((code - 0xD800) << 10) + (utf16[i + 1] - 0xDC00);
       ++i;
+    } else if (IsHighSurrogate(utf16[i]) || IsLowSurrogate(utf16[i])) {
+      code = 0xFFFD;
     }
     if (code < 0x80) {
       out.push_back(static_cast<char>(code));
@@ -101,11 +104,90 @@ int Int(const json& object, const char* key, int fallback) {
   return value.is_number_integer() ? value.get<int>() : fallback;
 }
 
+// Invalid UTF-8 from the app becomes U+FFFD rather than an exception on the
+// platform thread.
+std::string Dump(const json& value) {
+  return value.dump(-1, ' ', false, json::error_handler_t::replace);
+}
+
 bool Flag(const json& object, const char* key) {
   if (!object.is_object() || !object.contains(key)) return false;
   const json& value = object[key];
   return value.is_boolean() && value.get<bool>();
 }
+
+#if defined(__APPLE__)
+constexpr uint64_t kArrowDown = 0x100000301;
+constexpr uint64_t kArrowUp = 0x100000304;
+constexpr uint64_t kPageDown = 0x100000307;
+constexpr uint64_t kPageUp = 0x100000308;
+
+// What AppKit's standard key bindings make of a key in a text field, which a
+// Mac app's framework leaves unhandled and waits for as performSelectors.
+std::vector<const char*> MacSelectors(uint64_t logical, bool shift,
+                                      bool control, bool alt, bool meta) {
+  const bool line = meta || control;
+  switch (logical) {
+    case kArrowLeft:
+      if (alt) {
+        return {shift ? "moveWordLeftAndModifySelection:" : "moveWordLeft:"};
+      }
+      if (line) {
+        return {shift ? "moveToLeftEndOfLineAndModifySelection:"
+                      : "moveToLeftEndOfLine:"};
+      }
+      return {shift ? "moveLeftAndModifySelection:" : "moveLeft:"};
+    case kArrowRight:
+      if (alt) {
+        return {shift ? "moveWordRightAndModifySelection:" : "moveWordRight:"};
+      }
+      if (line) {
+        return {shift ? "moveToRightEndOfLineAndModifySelection:"
+                      : "moveToRightEndOfLine:"};
+      }
+      return {shift ? "moveRightAndModifySelection:" : "moveRight:"};
+    case kArrowUp:
+      if (shift && alt) return {"moveParagraphBackwardAndModifySelection:"};
+      if (alt) return {"moveBackward:", "moveToBeginningOfParagraph:"};
+      if (meta) {
+        return {shift ? "moveToBeginningOfDocumentAndModifySelection:"
+                      : "moveToBeginningOfDocument:"};
+      }
+      return {shift ? "moveUpAndModifySelection:" : "moveUp:"};
+    case kArrowDown:
+      if (shift && alt) return {"moveParagraphForwardAndModifySelection:"};
+      if (alt) return {"moveForward:", "moveToEndOfParagraph:"};
+      if (meta) {
+        return {shift ? "moveToEndOfDocumentAndModifySelection:"
+                      : "moveToEndOfDocument:"};
+      }
+      return {shift ? "moveDownAndModifySelection:" : "moveDown:"};
+    case kHome:
+      return {shift ? "moveToBeginningOfDocumentAndModifySelection:"
+                    : "scrollToBeginningOfDocument:"};
+    case kEnd:
+      return {shift ? "moveToEndOfDocumentAndModifySelection:"
+                    : "scrollToEndOfDocument:"};
+    case kPageUp:
+      return {shift ? "pageUpAndModifySelection:" : "scrollPageUp:"};
+    case kPageDown:
+      return {shift ? "pageDownAndModifySelection:" : "scrollPageDown:"};
+    case kBackspace:
+      if (alt) return {"deleteWordBackward:"};
+      if (meta) return {"deleteToBeginningOfLine:"};
+      return {"deleteBackward:"};
+    case kDelete:
+      if (alt) return {"deleteWordForward:"};
+      return {"deleteForward:"};
+    case kTab:
+      return {shift ? "insertBacktab:" : "insertTab:"};
+    case kEscape:
+      return {"cancelOperation:"};
+    default:
+      return {};
+  }
+}
+#endif
 
 }  // namespace
 
@@ -123,6 +205,9 @@ bool TextInput::Handle(const std::string& channel, const uint8_t* data,
   if (method == "TextInput.setClient") {
     SetClient(args);
     Changed();
+  } else if (method == "TextInput.updateConfig") {
+    ApplyConfig(args);
+    Changed();
   } else if (method == "TextInput.setEditingState") {
     SetEditingState(args);
     Changed();
@@ -138,7 +223,13 @@ void TextInput::SetClient(const json& args) {
     return;
   }
   client_id_ = args[0].get<int>();
-  const json& config = args[1];
+  ApplyConfig(args[1]);
+  text_.clear();
+  base_ = extent_ = 0;
+  composing_base_ = composing_extent_ = -1;
+}
+
+void TextInput::ApplyConfig(const json& config) {
   const json type = config.is_object() && config.contains("inputType")
                         ? config["inputType"]
                         : json();
@@ -146,28 +237,51 @@ void TextInput::SetClient(const json& args) {
   input_action_ = Str(config, "inputAction", "TextInputAction.done");
   delta_model_ = Flag(config, "enableDeltaModel");
   obscure_ = Flag(config, "obscureText");
-  text_.clear();
-  base_ = extent_ = 0;
-  composing_base_ = composing_extent_ = -1;
 }
 
 void TextInput::SetEditingState(const json& state) {
-  text_ = ToUtf16(Str(state, "text", ""));
+  SetState(ToUtf16(Str(state, "text", "")), Int(state, "selectionBase", -1),
+           Int(state, "selectionExtent", -1), Int(state, "composingBase", -1),
+           Int(state, "composingExtent", -1));
+}
+
+void TextInput::SetState(std::u16string text, int selection_base,
+                         int selection_extent, int composing_base,
+                         int composing_extent) {
+  text_ = std::move(text);
   const int size = static_cast<int>(text_.size());
-  auto clamp = [size](int value) {
-    return value < 0 ? size : std::min(value, size);
+  // Positions land on whole characters, so no edit splits a surrogate pair.
+  auto clamp = [this, size](int value) {
+    if (value < 0 || value > size) return size;
+    if (value > 0 && value < size && IsLowSurrogate(text_[value]) &&
+        IsHighSurrogate(text_[value - 1])) {
+      return value - 1;
+    }
+    return value;
   };
-  base_ = clamp(Int(state, "selectionBase", -1));
-  extent_ = clamp(Int(state, "selectionExtent", -1));
-  composing_base_ = Int(state, "composingBase", -1);
-  composing_extent_ = Int(state, "composingExtent", -1);
+  base_ = clamp(selection_base);
+  extent_ = clamp(selection_extent);
+  const bool composing = composing_base >= 0 &&
+                         composing_base <= composing_extent &&
+                         composing_extent <= size;
+  composing_base_ = composing ? composing_base : -1;
+  composing_extent_ = composing ? composing_extent : -1;
 }
 
 bool TextInput::HandleKey(uint64_t logical, const std::string& character,
                           bool shift, bool control, bool alt, bool meta) {
   if (client_id_ < 0) return false;
-  // Shortcuts belong to the framework; a key with those held types nothing.
-  if (control || alt || meta) return false;
+#if defined(__APPLE__)
+  const auto selectors = MacSelectors(logical, shift, control, alt, meta);
+  if (!selectors.empty()) {
+    PerformSelectors(selectors);
+    return true;
+  }
+#endif
+  // Shortcuts belong to the framework; a key with those held types nothing,
+  // but Option and AltGr (Ctrl+Alt on Windows) pick characters.
+  if (meta || (control && !alt)) return false;
+  if (alt) return TypeCharacter(character);
   const std::u16string before = text_;
   switch (logical) {
     case kBackspace: Backspace(); break;
@@ -178,24 +292,34 @@ bool TextInput::HandleKey(uint64_t logical, const std::string& character,
     case kEnd: MoveTo(static_cast<int>(text_.size()), shift); break;
     case kEnter:
     case kNumpadEnter:
-      if (multiline_ || input_action_ == "TextInputAction.newline") {
+      // As desktop embedders do: a newline only where the field asks for
+      // one, and the action every time.
+      if (multiline_ && input_action_ == "TextInputAction.newline") {
         AddText(u"\n");
-        break;
+        SendEditingState(before);
+        Changed();
       }
       PerformAction();
       return true;
     case kTab:
     case kEscape:
       return false;
-    default: {
-      // A composing client types through its input method, which brings
-      // the characters by ApplyEditing.
-      if (composer_ || character.empty()) return false;
-      const unsigned char first = character[0];
-      if (first < 0x20 || first == 0x7F) return false;
-      AddText(ToUtf16(character));
-    }
+    default:
+      return TypeCharacter(character);
   }
+  SendEditingState(before);
+  Changed();
+  return true;
+}
+
+bool TextInput::TypeCharacter(const std::string& character) {
+  // A composing client types through its input method, which brings the
+  // characters by ApplyEditing.
+  if (composer_ || character.empty()) return false;
+  const unsigned char first = character[0];
+  if (first < 0x20 || first == 0x7F) return false;
+  const std::u16string before = text_;
+  AddText(ToUtf16(character));
   SendEditingState(before);
   Changed();
   return true;
@@ -206,15 +330,8 @@ void TextInput::ApplyEditing(const std::string& text, int selection_base,
                              int composing_extent) {
   if (client_id_ < 0) return;
   const std::u16string before = text_;
-  text_ = ToUtf16(text);
-  const int size = static_cast<int>(text_.size());
-  auto clamp = [size](int value) {
-    return value < 0 ? size : std::min(value, size);
-  };
-  base_ = clamp(selection_base);
-  extent_ = clamp(selection_extent);
-  composing_base_ = composing_base;
-  composing_extent_ = composing_extent;
+  SetState(ToUtf16(text), selection_base, selection_extent, composing_base,
+           composing_extent);
   SendEditingState(before);
   Changed();
 }
@@ -242,6 +359,7 @@ void TextInput::DeleteSelection() {
   const int high = std::max(base_, extent_);
   text_.erase(low, high - low);
   base_ = extent_ = low;
+  composing_base_ = composing_extent_ = -1;
 }
 
 void TextInput::AddText(const std::u16string& text) {
@@ -264,6 +382,7 @@ void TextInput::Backspace() {
   }
   text_.erase(base_ - count, count);
   base_ = extent_ = base_ - count;
+  composing_base_ = composing_extent_ = -1;
 }
 
 void TextInput::Delete() {
@@ -279,6 +398,7 @@ void TextInput::Delete() {
     count = 2;
   }
   text_.erase(base_, count);
+  composing_base_ = composing_extent_ = -1;
 }
 
 void TextInput::Move(int direction, bool select) {
@@ -333,14 +453,22 @@ void TextInput::SendEditingState(const std::u16string& before) {
     call = {{"method", "TextInputClient.updateEditingState"},
             {"args", json::array({client_id_, state})}};
   }
-  sender_("flutter/textinput", call.dump());
+  sender_("flutter/textinput", Dump(call));
 }
 
 void TextInput::PerformAction() {
   if (!sender_) return;
   const json call = {{"method", "TextInputClient.performAction"},
                      {"args", json::array({client_id_, input_action_})}};
-  sender_("flutter/textinput", call.dump());
+  sender_("flutter/textinput", Dump(call));
+}
+
+void TextInput::PerformSelectors(const std::vector<const char*>& selectors) {
+  if (!sender_) return;
+  const json call = {
+      {"method", "TextInputClient.performSelectors"},
+      {"args", json::array({client_id_, json(selectors)})}};
+  sender_("flutter/textinput", Dump(call));
 }
 
 }  // namespace raccoon

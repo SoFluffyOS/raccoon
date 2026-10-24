@@ -72,7 +72,11 @@ class TextInput {
 
  private:
   void SetClient(const nlohmann::json& args);
+  void ApplyConfig(const nlohmann::json& config);
   void SetEditingState(const nlohmann::json& state);
+  void SetState(std::u16string text, int selection_base, int selection_extent,
+                int composing_base, int composing_extent);
+  bool TypeCharacter(const std::string& character);
   void AddText(const std::u16string& text);
   void DeleteSelection();
   void Backspace();
@@ -81,6 +85,7 @@ class TextInput {
   void MoveTo(int position, bool select);
   void SendEditingState(const std::u16string& before);
   void PerformAction();
+  void PerformSelectors(const std::vector<const char*>& selectors);
 
   void Changed();
 

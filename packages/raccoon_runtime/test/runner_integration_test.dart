@@ -2283,6 +2283,112 @@ void main() {
   );
 
   test(
+    'on a Mac, editing keys reach the field as AppKit selectors',
+    () async {
+      // A Mac app's framework leaves Option, Cmd and arrow keys in a text
+      // field to the platform and waits for performSelectors.
+      final textAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'text',
+        'build',
+        'flutter_assets',
+      );
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: textAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      runner.stderr.listen(output.add);
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.frames.first.timeout(const Duration(seconds: 15));
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        Future<void> send(KeyKind kind, int logical, int physical, String c) {
+          client.sendKey(
+            KeyEvent(
+              kind: kind,
+              physical: Int64(physical),
+              logical: Int64(logical),
+              character: c,
+              timestampMicros: Int64(DateTime.now().microsecondsSinceEpoch),
+            ),
+          );
+          return Future<void>.delayed(const Duration(milliseconds: 60));
+        }
+
+        Future<void> key(int logical, int physical, [String c = '']) async {
+          await send(KeyKind.KEY_KIND_DOWN, logical, physical, c);
+          await send(KeyKind.KEY_KIND_UP, logical, physical, '');
+        }
+
+        // A key with a modifier held: (logical, physical) pairs.
+        Future<void> held((int, int) modifier, (int, int) pressed) async {
+          await send(KeyKind.KEY_KIND_DOWN, modifier.$1, modifier.$2, '');
+          await key(pressed.$1, pressed.$2);
+          await send(KeyKind.KEY_KIND_UP, modifier.$1, modifier.$2, '');
+        }
+
+        await key(0x61, 0x00070004, 'a');
+        await key(0x62, 0x00070005, 'b');
+        await key(0x20, 0x0007002c, ' ');
+        await key(0x63, 0x00070006, 'c');
+        await key(0x64, 0x00070007, 'd');
+        // Option+Backspace deletes the word, Cmd+Left goes to the line's
+        // start.
+        await held((0x200000104, 0x000700e2), (0x100000008, 0x0007002a));
+        await held((0x200000106, 0x000700e3), (0x100000302, 0x00070050));
+        await key(0x78, 0x0007001b, 'x');
+        final deadline = DateTime.now().add(const Duration(seconds: 10));
+        while (!output.any((line) => line.contains('TEXT:xab ')) &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        final text =
+            output
+                .where((line) => line.contains('TEXT:'))
+                .map((line) => line.substring(line.indexOf('TEXT:')))
+                .toList();
+        expect(text, [
+          'TEXT:a',
+          'TEXT:ab',
+          'TEXT:ab ',
+          'TEXT:ab c',
+          'TEXT:ab cd',
+          'TEXT:ab ',
+          'TEXT:xab ',
+        ]);
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch (ready &&
+        Directory(
+          p.join(
+            p.dirname(p.dirname(p.dirname(assets))),
+            'text',
+            'build',
+            'flutter_assets',
+          ),
+        ).existsSync()) {
+      false => 'build the runner and the text example first',
+      true when !Platform.isMacOS => 'AppKit selectors are a Mac app\'s',
+      true => false,
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'a second client is told who has the runner, then hung up on',
     () async {
       final temp = Directory.systemTemp.createTempSync('raccoon_test');
