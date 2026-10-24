@@ -636,8 +636,11 @@ int Serve(const Options& options) {
           pending[id] = {handle, channel, std::chrono::steady_clock::now() + kReplyTimeout};
           out->set_response_id(id);
         }
-        if (!server_ptr->Send(message) && handle != nullptr) {
-          pending.erase(out->response_id());
+        // A send that fails closes the client, and closing answers what is
+        // pending, this one included: answered twice, the engine's handle
+        // would be used after it freed it (#138).
+        if (!server_ptr->Send(message) && handle != nullptr &&
+            pending.erase(out->response_id()) == 1) {
           host.RespondNoPlugin(channel, handle, "no client");
         }
       });

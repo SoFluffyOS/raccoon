@@ -155,6 +155,9 @@ RunnerServer::RunnerServer(EventLoop& loop, Handler handler)
     : loop_(loop), handler_(std::move(handler)) {}
 
 RunnerServer::~RunnerServer() {
+  // The runner is past its engine by now: what the client sent last is
+  // dropped, not dispatched to handlers whose state is gone (#138).
+  handler_ = Handler{};
   CloseClient();
   while (!lingering_.empty()) Unlinger(lingering_.front());
   if (listen_fd_ >= 0) {
@@ -243,9 +246,11 @@ void RunnerServer::Linger(int fd) {
 }
 
 void RunnerServer::Unlinger(int fd) {
+  const auto found = std::find(lingering_.begin(), lingering_.end(), fd);
+  if (found == lingering_.end()) return;
+  lingering_.erase(found);
   loop_.Unwatch(fd);
   CloseFd(fd);
-  lingering_.erase(std::find(lingering_.begin(), lingering_.end(), fd));
 }
 
 bool RunnerServer::ReadAvailable() {
@@ -304,27 +309,29 @@ void RunnerServer::OnClientReadable(short revents) {
 }
 
 void RunnerServer::DispatchInbox() {
-  size_t offset = 0;
-  while (inbox_.size() - offset >= kLengthPrefix) {
-    const uint32_t length = ReadLength(inbox_.data() + offset);
+  while (inbox_.size() - inbox_read_ >= kLengthPrefix) {
+    const uint32_t length = ReadLength(inbox_.data() + inbox_read_);
     if (length > kMaxMessage) {
       CloseClient();
       return;
     }
-    if (inbox_.size() - offset - kLengthPrefix < length) break;
+    if (inbox_.size() - inbox_read_ - kLengthPrefix < length) break;
+    const size_t at = inbox_read_ + kLengthPrefix;
+    inbox_read_ = at + length;
     if (handler_.on_raw) {
-      handler_.on_raw(inbox_.data() + offset + kLengthPrefix, length, fds_in_);
+      // A copy: a handler that closes the client reads into inbox_.
+      const std::vector<uint8_t> raw(inbox_.begin() + at, inbox_.begin() + at + length);
+      handler_.on_raw(raw.data(), length, fds_in_);
     } else {
       v1::ClientMessage message;
-      if (message.ParseFromArray(inbox_.data() + offset + kLengthPrefix,
-                                 static_cast<int>(length))) {
+      if (message.ParseFromArray(inbox_.data() + at, static_cast<int>(length))) {
         Dispatch(message);
       }
     }
-    offset += kLengthPrefix + length;
     if (client_fd_ < 0) return;
   }
-  inbox_.erase(inbox_.begin(), inbox_.begin() + offset);
+  inbox_.erase(inbox_.begin(), inbox_.begin() + inbox_read_);
+  inbox_read_ = 0;
 }
 
 void RunnerServer::Dispatch(const v1::ClientMessage& message) {
@@ -377,7 +384,10 @@ void RunnerServer::CloseClient() {
   loop_.Unwatch(client_fd_);
   CloseFd(client_fd_);
   client_fd_ = -1;
+  // Gone: a newcomer is not told it holds the runner.
+  client_pid_ = 0;
   inbox_.clear();
+  inbox_read_ = 0;
 #if !defined(_WIN32)
   for (int fd : fds_in_) close(fd);
 #endif

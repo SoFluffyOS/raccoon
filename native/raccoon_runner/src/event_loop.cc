@@ -1,6 +1,7 @@
 #include "event_loop.h"
 
 #include <cstdint>
+#include <tuple>
 #include <vector>
 
 #if defined(_WIN32)
@@ -119,15 +120,20 @@ void EventLoop::RunOnce(int timeout_ms) {
   if (dispatch_) dispatch_(fds.data() + own, fds.size() - own);
   if (ready <= 0) return;
   if (fds[0].revents & POLLIN) DrainWake(wake_fd_);
-  std::vector<std::pair<Handler, short>> pending;
+  std::vector<std::tuple<int, Handler, short>> pending;
   for (size_t i = 1; i < own; ++i) {
     if (fds[i].revents == 0) continue;
-    const auto watch = watches_.find(static_cast<int>(fds[i].fd));
+    const int fd = static_cast<int>(fds[i].fd);
+    const auto watch = watches_.find(fd);
     if (watch != watches_.end()) {
-      pending.push_back({watch->second.second, fds[i].revents});
+      pending.emplace_back(fd, watch->second.second, fds[i].revents);
     }
   }
-  for (auto& [handler, revents] : pending) handler(revents);
+  // A handler can close another's descriptor (a listen dropping the oldest
+  // lingering newcomer): that one no longer runs (#138).
+  for (auto& [fd, handler, revents] : pending) {
+    if (watches_.count(fd) != 0) handler(revents);
+  }
 }
 
 }  // namespace raccoon

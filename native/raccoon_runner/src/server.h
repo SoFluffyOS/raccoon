@@ -78,6 +78,10 @@ class RunnerServer {
   bool closing_ = false;
   static bool WriteAllTo(int fd, const uint8_t* data, size_t size);
   std::vector<uint8_t> inbox_;
+  // Where DispatchInbox is in inbox_: past each message before its handler
+  // runs, so a handler that closes the client, which dispatches what is
+  // left, starts after it, not again from the first (#138).
+  size_t inbox_read_ = 0;
   // Descriptors a raw client sent, not yet taken by the handler.
   std::vector<int> fds_in_;
   // Newcomers told the runner is busy, oldest first; a few at most.

@@ -2325,6 +2325,65 @@ void main() {
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
+  // #138: the runner kept the last client's pid after it left, and told a
+  // newcomer that one held it.
+  test(
+    'a client that left is not named to a newcomer',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final address = InternetAddress(
+        endpoint.path,
+        type: InternetAddressType.unix,
+      );
+      Socket? quiet;
+      try {
+        final first = await RunnerClient.connect(endpoint);
+        await first.frames.first.timeout(const Duration(seconds: 15));
+        await first.close();
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        // Holds the runner without a hello yet.
+        quiet = await Socket.connect(address, 0);
+        quiet.listen(null);
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        Object? failure;
+        RunnerClient? newcomer;
+        try {
+          newcomer = await RunnerClient.connect(endpoint);
+          await newcomer.hello.timeout(const Duration(seconds: 5));
+        } on Object catch (error) {
+          failure = error;
+        }
+        expect(failure, isA<RunnerBusy>().having((b) => b.pid, 'pid', 0));
+        await newcomer?.close();
+      } finally {
+        quiet?.destroy();
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        final last = await RunnerClient.connect(endpoint);
+        await last.hello.timeout(const Duration(seconds: 5));
+        last.shutdown();
+        await last.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((ready, Platform.isWindows)) {
+      (false, _) => 'build the runner and example first',
+      (_, true) => 'a raw socket stands in for a client',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   test(
     'the runner stops when its parent is gone',
     () async {
