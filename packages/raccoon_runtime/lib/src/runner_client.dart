@@ -398,7 +398,9 @@ final class RunnerClient
     final pixels = file.readSync(frame.rowBytes * frame.height);
     _releaseShared(index);
     _sharedFrames++;
-    return frame.deepCopy()
+    // The frame of a message parsed just now, nobody's but this one's:
+    // filled in place, not copied first.
+    return frame
       ..pixels = pixels
       ..inSharedBuffer = false;
   }
