@@ -322,4 +322,28 @@ void main() {
 
     expect(store.ensure('rev2'), throwsStateError);
   });
+
+  // #134: a download that stalled held ensure() for good.
+  test('a download that stalls fails', () async {
+    final stalled = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(stalled.close);
+    stalled.listen((socket) {
+      socket.listen((_) {
+        socket.write('HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\n\r\nabc');
+      });
+    });
+    await expectLater(
+      RuntimeStore.httpDownload(
+        Uri.parse('http://127.0.0.1:${stalled.port}/engine.zip'),
+        stallTimeout: const Duration(milliseconds: 300),
+      ).timeout(const Duration(seconds: 5)),
+      throwsA(
+        isA<TimeoutException>().having(
+          (e) => e.duration,
+          'duration',
+          const Duration(milliseconds: 300),
+        ),
+      ),
+    );
+  });
 }

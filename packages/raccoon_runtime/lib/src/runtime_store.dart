@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi' show Abi;
 import 'dart:io';
@@ -41,7 +42,7 @@ final class RuntimeStore {
     Downloader? download,
     String? platform,
   }) : platform = platform ?? hostPlatform,
-       _download = download ?? _httpDownload;
+       _download = download ?? httpDownload;
 
   /// `$XDG_CACHE_HOME/raccoon/engines`, or `~/.cache/raccoon/engines`, as
   /// the runner's `tool/engine_dir.sh` keeps them. Windows programs rarely
@@ -304,21 +305,28 @@ final class RuntimeStore {
     Process.runSync('chmod', ['755', file.path]);
   }
 
-  static Future<List<int>> _httpDownload(Uri uri) async {
-    final client = HttpClient();
+  /// Downloads [uri] whole. A connection, or a stretch of the body, with
+  /// no byte for [stallTimeout] fails with a [TimeoutException]: a stall
+  /// would otherwise hold every [ensure] of that revision for good (#134).
+  static Future<List<int>> httpDownload(
+    Uri uri, {
+    Duration stallTimeout = const Duration(seconds: 30),
+  }) async {
+    final client = HttpClient()..connectionTimeout = stallTimeout;
     try {
       final request = await client.getUrl(uri);
-      final response = await request.close();
+      final response = await request.close().timeout(stallTimeout);
       if (response.statusCode != HttpStatus.ok) {
         throw HttpException('${response.statusCode} for $uri', uri: uri);
       }
       final builder = BytesBuilder(copy: false);
-      await for (final chunk in response) {
+      await for (final chunk in response.timeout(stallTimeout)) {
         builder.add(chunk);
       }
       return builder.takeBytes();
     } finally {
-      client.close();
+      // Forced: a stalled connection would otherwise stay open.
+      client.close(force: true);
     }
   }
 }
