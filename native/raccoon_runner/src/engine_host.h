@@ -257,6 +257,9 @@ class EngineHost {
   // When the engine asked, and when the next frame is due (0: now).
   uint64_t vsync_asked_nanos_ = 0;
   uint64_t next_frame_nanos_ = 0;
+  // A frame went by readback for want of a ring buffer; a client drawing
+  // the ring does not show it, so the next release asks for another.
+  bool gpu_frame_owed_ = false;
   std::chrono::steady_clock::time_point started_;
   std::string assets_;
   std::string icu_;

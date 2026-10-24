@@ -415,6 +415,13 @@ bool EngineHost::GpuBufferSetNow(GpuBufferSet* out) const {
 void EngineHost::ReleaseGpuBuffer(uint32_t generation, int index, int fence_fd) {
   if (gpu_) {
     gpu_->Release(generation, index, fence_fd);
+    bool owed = false;
+    {
+      std::lock_guard<std::mutex> lock(vsync_mutex_);
+      std::swap(owed, gpu_frame_owed_);
+    }
+    // An app gone idle since would leave the client on an older frame.
+    if (owed && engine_ != nullptr) loader_.procs().ScheduleFrame(engine_);
     return;
   }
   if (fence_fd >= 0) close(fence_fd);
@@ -448,6 +455,7 @@ void EngineHost::ServiceVsync() {
     bool free = true;
     if (gpu_) free = gpu_->HasFreeBuffer();
     if (!free && now - vsync_asked_nanos_ < kRingHoldNanos) return;
+    if (!free) gpu_frame_owed_ = true;
     vsync_pending_ = false;
     baton = vsync_baton_;
     start = now;

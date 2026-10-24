@@ -2771,6 +2771,94 @@ void main() {
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
+  // #153: a frame that went by readback for want of a ring buffer was the
+  // last an idle app drew, and a client drawing the ring drops it.
+  test(
+    'a GPU client gets the frame it missed once it gives a buffer back',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint, gpuBuffers: true);
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        // Every buffer stays with the client, so the ring runs dry.
+        final held = <Frame>[];
+        final readback = Completer<void>();
+        final afterRelease = Completer<Frame>();
+        var released = false;
+        final frames = client.frames.listen((frame) {
+          if (frame.inGpuBuffer) {
+            if (released && !afterRelease.isCompleted) {
+              afterRelease.complete(frame);
+            }
+            held.add(frame);
+          } else if (!readback.isCompleted) {
+            readback.complete();
+          }
+        });
+        final first = await client.frames.first.timeout(
+          const Duration(seconds: 15),
+        );
+        // Without a GPU (a CI machine) the runner has no ring to run dry.
+        if (!first.inGpuBuffer) {
+          await frames.cancel();
+          printOnFailure('no GPU ring on this host');
+          return;
+        }
+        Future<void> tap() async {
+          for (final (phase, buttons) in [
+            (PointerPhase.POINTER_PHASE_DOWN, 1),
+            (PointerPhase.POINTER_PHASE_UP, 0),
+          ]) {
+            client.sendPointer(
+              PointerEvent(
+                phase: phase,
+                x: 400,
+                y: 300,
+                buttons: Int64(buttons),
+                device: PointerDevice.POINTER_DEVICE_MOUSE,
+                pointerId: 1,
+              ),
+            );
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+        }
+
+        for (var i = 0; i < 8 && !readback.isCompleted; i++) {
+          await tap();
+        }
+        await readback.future.timeout(const Duration(seconds: 5));
+        // The app is idle now; its last frame went by readback.
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        released = true;
+        for (final frame in held.toList()) {
+          client.releaseGpuBuffer(frame.gpuGeneration, frame.bufferIndex);
+        }
+        final again = await afterRelease.future.timeout(
+          const Duration(seconds: 3),
+        );
+        expect(again.inGpuBuffer, isTrue);
+        await frames.cancel();
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   // #144: a client let go kept its GPU socket, which refused the next
   // client's and took its buffers.
   test(
