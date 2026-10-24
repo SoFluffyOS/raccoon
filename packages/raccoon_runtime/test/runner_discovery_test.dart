@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -129,6 +130,37 @@ void main() {
       false => false,
     },
   );
+
+  // #137: a watch that could not be set up, as when Linux runs out of
+  // inotify watches, was set up again at once, for good, freezing the host.
+  test('a watch that cannot be set up falls back to polling', () async {
+    var watches = 0;
+    final watching = RunnerDiscovery(
+      p.join(temp.path, 'raccoon'),
+      watcher: (_) {
+        watches++;
+        // As the VM's watcher fails: an error, then the end.
+        final failed = StreamController<FileSystemEvent>();
+        failed
+          ..addError(const FileSystemException('inotify limit reached'))
+          ..close();
+        return failed.stream;
+      },
+    );
+    final seen = <List<String>>[];
+    final errors = <Object>[];
+    final subscription = watching
+        .watch()
+        .map((e) => e.map(RunnerDiscovery.appNameOf).toList())
+        .listen(seen.add, onError: errors.add);
+    await _until(() => seen.isNotEmpty);
+    final server = await _bind(p.join(watching.directory, 'app.sock'));
+    await _until(() => seen.any((names) => names.contains('app')));
+    expect(watches, 1);
+    expect(errors, hasLength(1));
+    await server.close();
+    await subscription.cancel();
+  });
 }
 
 /// Polls [condition] until it holds, failing after five seconds.
