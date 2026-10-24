@@ -132,6 +132,22 @@ void main() {
     },
   );
 
+  test('a write keeps the file\'s other keys', () {
+    final path = p.join(temp.path, 'custom_devices.json');
+    File(path).writeAsStringSync(
+      jsonEncode({
+        r'$schema': 'https://example.com/s.json',
+        'custom-devices': [],
+      }),
+    );
+    final file = CustomDevicesFile(path);
+    file.upsert(CustomDeviceConfig(deviceHelper: '/h/raccoon-device'));
+    file.remove('raccoon');
+    final decoded = jsonDecode(File(path).readAsStringSync()) as Map;
+    expect(decoded[r'$schema'], 'https://example.com/s.json');
+    expect(decoded['custom-devices'], isEmpty);
+  });
+
   test('a write lands whole, with nothing left beside the file', () {
     final file = CustomDevicesFile(p.join(temp.path, 'tool', 'devices.json'));
     file.upsert(CustomDeviceConfig(deviceHelper: '/h/raccoon-device'));

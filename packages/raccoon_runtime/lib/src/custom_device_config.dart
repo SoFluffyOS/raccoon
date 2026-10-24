@@ -201,8 +201,9 @@ final class CustomDevicesFile {
   /// the user's other devices.
   void upsert(CustomDeviceConfig config) {
     final devices = <Object?>[];
+    Object? decoded;
     if (File(path).existsSync()) {
-      final decoded = jsonDecode(File(path).readAsStringSync());
+      decoded = jsonDecode(File(path).readAsStringSync());
       if (decoded case {_key: final List<Object?> existing}) {
         devices.addAll(
           existing.where((d) => d is! Map || d['id'] != config.id),
@@ -210,7 +211,7 @@ final class CustomDevicesFile {
       }
     }
     devices.add(config.toJson());
-    _write(devices);
+    _write(decoded, devices);
   }
 
   /// Removes the entry with [id]; tells whether there was one. Throws a
@@ -222,18 +223,23 @@ final class CustomDevicesFile {
     if (decoded case {_key: final List<Object?> existing}) {
       final kept = existing.where((d) => d is! Map || d['id'] != id).toList();
       if (kept.length == existing.length) return false;
-      _write(kept);
+      _write(decoded, kept);
       return true;
     }
     return false;
   }
 
-  /// Written aside and renamed over the file, so a write cut short leaves
-  /// the old file, never half of the new one.
-  void _write(List<Object?> devices) {
+  /// [devices] in place of the ones in [decoded], the file as it was, its
+  /// other keys kept (#134). Written aside and renamed over the file, so a
+  /// write cut short leaves the old file, never half of the new one.
+  void _write(Object? decoded, List<Object?> devices) {
     final file = File(path)..parent.createSync(recursive: true);
+    final contents = {
+      if (decoded case final Map<String, Object?> rest) ...rest,
+      _key: devices,
+    };
     final staged = File('$path.$pid.tmp')..writeAsStringSync(
-      '${const JsonEncoder.withIndent('  ').convert({_key: devices})}\n',
+      '${const JsonEncoder.withIndent('  ').convert(contents)}\n',
     );
     staged.renameSync(file.path);
   }
