@@ -1124,7 +1124,6 @@ build_native_assets() {
   local -a target
   config="$(package_config "$project")" || config=""
   [ -n "$config" ] || return 0
-  command -v python3 >/dev/null || { echo "🦝 no python3; native assets skipped" >&2; return 0; }
   out="$project/build/raccoon/native_assets"
   case "$(uname -s)" in
     Darwin)
@@ -1143,6 +1142,7 @@ build_native_assets() {
       ;;
     *) return 0 ;;
   esac
+  command -v python3 >/dev/null || { echo "🦝 no python3; native assets skipped" >&2; return 0; }
   # What the build depends on, as one hash; none when no package has a hook.
   # The packages and their versions, the pubspecs (the workspace root's too),
   # the SDK's engine, the target, and every file of every package with a
