@@ -918,7 +918,9 @@ int Serve(const Options& options) {
     // wait in the renderer until the queue is empty, the newest replacing
     // the rest. A client paused in a debugger keeps its place; one that
     // leaves too much unread is let go by the server.
-    frames_held = server.backlog() > 0;
+    // The GPU socket's too: a frame must not reach the client before the
+    // fence it waits on (#146).
+    frames_held = server.backlog() > 0 || gpu_server.backlog() > 0;
     if (server.has_client()) {
       if (!vm_sent) {
         const std::string uri = host.vm_service_uri();

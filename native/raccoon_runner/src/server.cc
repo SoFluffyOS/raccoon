@@ -309,7 +309,12 @@ void RunnerServer::OnClientReadable(short revents) {
   bool closed = (revents & (POLLERR | POLLNVAL)) != 0;
   closed = ReadAvailable() || closed;
   DispatchInbox();
-  if (closed) CloseClient();
+  // A client done sending may still read: what is queued for it goes
+  // before the socket closes, as it did when writes blocked (#146).
+  if (closed) {
+    Drain(1000);
+    CloseClient();
+  }
 }
 
 void RunnerServer::DispatchInbox() {
@@ -515,7 +520,10 @@ bool RunnerServer::Enqueue(std::string bytes, std::vector<int> fds) {
   }
   backlog_ += bytes.size();
   outbox_.push_back({std::move(bytes), std::move(fds)});
-  if (backlog_ > kMaxBacklog) {
+  // What waits behind the message being written: a single large one, a
+  // 4K frame inline, is no sign of a client that stopped (#146).
+  const size_t front_left = outbox_.front().bytes.size() - outbox_sent_;
+  if (backlog_ - front_left > kMaxBacklog) {
     std::fprintf(stderr, "🦝 the client stopped reading; letting it go\n");
     CloseClient();
     return false;

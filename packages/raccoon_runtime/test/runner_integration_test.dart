@@ -2384,6 +2384,46 @@ void main() {
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
+  // #146: a single message past the unread limit, a 4K frame inline, let
+  // a client go that was reading.
+  test(
+    'a client reading a frame larger than the unread limit keeps its place',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          width: 3840,
+          height: 2400,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        // About 37 MB, inline: the first frame comes before shared buffers.
+        final frame = await client.frames.first.timeout(
+          const Duration(seconds: 20),
+        );
+        expect(frame.width, 3840);
+        var letGo = false;
+        unawaited(client.closed.then((_) => letGo = true));
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        expect(letGo, isFalse);
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   // #144: writes to a client that read nothing blocked the loop, the app's
   // platform thread, for up to 5 s at a time. They queue now: the runner
   // goes on, answering a newcomer at once, and the client keeps its place
