@@ -147,6 +147,8 @@ typedef struct {
 
 G_DEFINE_TYPE(RaccoonGpuTexture, raccoon_gpu_texture, fl_texture_gl_get_type())
 
+static void close_socket(RaccoonGpuTexture* self);
+
 static void destroy_imported(RaccoonGpuTexture* self) {
   if (!self->imported) return;
   destroy_set(*self->imported);
