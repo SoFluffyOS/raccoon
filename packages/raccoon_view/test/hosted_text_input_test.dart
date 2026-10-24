@@ -181,4 +181,26 @@ void main() {
       expect(tester.testTextInput.editingState?['text'], 'apps');
     },
   );
+
+  // #133: a password field that took over from another, the method still
+  // open, kept the first field's settings.
+  testWidgets('a field taking over gives the method its own settings', (
+    tester,
+  ) async {
+    final connection = _ComposingConnection();
+    await tester.pumpWidget(
+      RaccoonView(connection: connection, autofocus: true),
+    );
+    connection.fields.add(_field(text: 'simon'));
+    await tester.pump();
+    tester.testTextInput.log.clear();
+
+    connection.fields.add(_field()..obscure = true);
+    await tester.pump();
+    final updates = tester.testTextInput.log.where(
+      (call) => call.method == 'TextInput.updateConfig',
+    );
+    expect(updates, hasLength(1));
+    expect((updates.single.arguments as Map)['obscureText'], isTrue);
+  });
 }

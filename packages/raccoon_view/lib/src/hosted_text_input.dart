@@ -20,6 +20,9 @@ final class HostedTextInput with TextInputClient {
   rc.TextField? _field;
   TextEditingValue _value = TextEditingValue.empty;
 
+  /// The settings the method was opened or last updated with.
+  ({bool multiline, bool obscure, String action})? _settings;
+
   /// Whether the host's input method is open for the hosted field.
   bool get attached => _host?.attached ?? false;
 
@@ -72,22 +75,22 @@ final class HostedTextInput with TextInputClient {
     // A connection another client took is no longer ours to talk on: in a
     // release build its calls reach whatever client the engine has, or none,
     // and the macOS embedder crashes on none (#97).
+    final settings = (
+      multiline: field.multiline,
+      obscure: field.obscure,
+      action: field.inputAction,
+    );
     if (!attached) {
-      _host = TextInput.attach(
-        this,
-        TextInputConfiguration(
-          inputType: switch (field.multiline) {
-            true => TextInputType.multiline,
-            false => TextInputType.text,
-          },
-          obscureText: field.obscure,
-          inputAction: _action(field.inputAction),
-          autocorrect: false,
-          enableSuggestions: false,
-        ),
-      )..show();
-    } else if (value == _value) {
-      return;
+      _host = TextInput.attach(this, _configuration(field))..show();
+      _settings = settings;
+    } else {
+      // Another field, a password one say, took over without the method
+      // closing between them: it gets the new field's settings.
+      if (settings != _settings) {
+        _host?.updateConfig(_configuration(field));
+        _settings = settings;
+      }
+      if (value == _value) return;
     }
     _value = value;
     _host?.setEditingState(value);
@@ -96,8 +99,21 @@ final class HostedTextInput with TextInputClient {
   void _close() {
     _host?.close();
     _host = null;
+    _settings = null;
     _value = TextEditingValue.empty;
   }
+
+  static TextInputConfiguration _configuration(rc.TextField field) =>
+      TextInputConfiguration(
+        inputType: switch (field.multiline) {
+          true => TextInputType.multiline,
+          false => TextInputType.text,
+        },
+        obscureText: field.obscure,
+        inputAction: _action(field.inputAction),
+        autocorrect: false,
+        enableSuggestions: false,
+      );
 
   static TextInputAction _action(String name) {
     for (final action in TextInputAction.values) {
