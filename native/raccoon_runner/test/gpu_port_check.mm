@@ -5,7 +5,8 @@
 // the service makes the next ring private. Then checks that next ring.
 // With --never-ask it plays a client whose lookup failed: it takes the
 // answer and asks nothing, and the rings must stay global, so such a client
-// still finds its surfaces by ID.
+// still finds its surfaces by ID. With --renew it asks for the service twice
+// and checks that the first token no longer gets ports, the second does.
 // Passes when every surface comes, at the ring's size, none of them can be
 // looked up by ID any more, and a request with a wrong token gets none.
 // Prints one line; exits 0 on a pass.
@@ -82,6 +83,10 @@ std::vector<mach_port_t> AskPorts(mach_port_t service, uint32_t generation, cons
 int main(int argc, char** argv) {
   if (argc < 2) return Fail("usage: raccoon_gpu_port_check <gpu socket> [--never-ask]");
   const bool never_ask = argc > 2 && std::strcmp(argv[2], "--never-ask") == 0;
+  const bool renew = argc > 2 && std::strcmp(argv[2], "--renew") == 0;
+  // --renew: the token of the first answer, once the second has come.
+  std::vector<uint8_t> first_token;
+  int answers = 0;
   sockaddr_un address{};
   address.sun_family = AF_UNIX;
   std::strncpy(address.sun_path, argv[1], sizeof(address.sun_path) - 1);
@@ -120,6 +125,11 @@ int main(int argc, char** argv) {
       if (length >= 8 && std::memcmp(payload, "RSVC", 4) == 0) {
         const uint32_t size = Read32(payload + 4);
         if (length < 8 + size + kTokenSize) return Fail("a short RSVC");
+        if (renew && ++answers == 1) {
+          first_token.assign(payload + 8 + size, payload + 8 + size + kTokenSize);
+          send(fd, ask, sizeof(ask), 0);
+          continue;
+        }
         service.assign(reinterpret_cast<const char*>(payload + 8), size);
         std::memcpy(token, payload + 8 + size, kTokenSize);
         continue;
@@ -150,6 +160,17 @@ int main(int argc, char** argv) {
             global = true;
           }
         }
+      }
+      if (renew) {
+        const std::vector<mach_port_t> old = AskPorts(port, generation, first_token.data());
+        for (mach_port_t right : old) mach_port_deallocate(mach_task_self(), right);
+        const std::vector<mach_port_t> now = AskPorts(port, generation, token);
+        for (mach_port_t right : now) mach_port_deallocate(mach_task_self(), right);
+        mach_port_deallocate(mach_task_self(), port);
+        if (!old.empty()) return Fail("the first token still got ports");
+        if (now.size() != count) return Fail("the second token got no ports");
+        std::printf("RENEW ok: each answer's token replaces the one before\n");
+        return 0;
       }
       if (never_ask) {
         mach_port_deallocate(mach_task_self(), port);

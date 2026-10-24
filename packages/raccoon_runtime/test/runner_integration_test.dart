@@ -3936,6 +3936,64 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  test(
+    'on macOS a token given to one client is not good after the next answer',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final spinAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'spin',
+        'build',
+        'flutter_assets',
+      );
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: spinAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint, gpuBuffers: true);
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        final set = await client.gpuBufferSets.first.timeout(
+          const Duration(seconds: 10),
+        );
+        // Buffers go back as frames come, so the ring keeps turning.
+        Frame? previous;
+        final frames = client.frames.listen((frame) {
+          final last = previous;
+          if (last != null && last.inGpuBuffer) {
+            client.releaseGpuBuffer(last.gpuGeneration, last.bufferIndex);
+          }
+          previous = frame;
+        });
+        // #161: a request from a client that has gone, still queued, must
+        // not count as the next client's ask.
+        final check = await Process.run(portCheck, [set.socket, '--renew']);
+        await frames.cancel();
+        printOnFailure('${check.stdout}${check.stderr}');
+        expect(check.exitCode, 0);
+        expect('${check.stdout}', contains('RENEW ok'));
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        !Platform.isMacOS
+            ? 'Mach ports are macOS'
+            : ready && File(portCheck).existsSync()
+            ? false
+            : 'build the runner and its port check first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   // Built beside the runner on Windows: a GPU socket client that opens the
   // ring's textures by their shared handles and checks the frame in them.
   final handleCheck =

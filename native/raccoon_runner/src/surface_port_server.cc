@@ -67,6 +67,14 @@ bool SurfacePortServer::Start(Lookup lookup, std::string* error) {
   return true;
 }
 
+std::array<uint8_t, SurfacePortServer::kTokenSize> SurfacePortServer::RenewToken() {
+  std::array<uint8_t, kTokenSize> token;
+  arc4random_buf(token.data(), token.size());
+  std::lock_guard<std::mutex> lock(token_mutex_);
+  std::memcpy(token_, token.data(), token.size());
+  return token;
+}
+
 void SurfacePortServer::Serve() {
   // Room for a request and the largest trailer the kernel adds.
   union {
@@ -99,7 +107,12 @@ void SurfacePortServer::Answer(mach_msg_header_t* request) {
     const auto* body = reinterpret_cast<const Request*>(request);
     generation = body->generation;
     // Only the GPU socket's client knows the token; anyone else gets none.
-    if (std::memcmp(body->token, token_, kTokenSize) == 0) {
+    bool known;
+    {
+      std::lock_guard<std::mutex> lock(token_mutex_);
+      known = std::memcmp(body->token, token_, kTokenSize) == 0;
+    }
+    if (known) {
       if (!lookup_(generation, &ports) || ports.size() > kMaxPorts) {
         for (uint32_t port : ports) mach_port_deallocate(mach_task_self(), port);
         ports.clear();

@@ -16,9 +16,11 @@
 #if defined(__APPLE__)
 #include <mach/mach.h>
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -47,7 +49,10 @@ class SurfacePortServer {
   bool started() const { return port_ != MACH_PORT_NULL; }
 
   const std::string& name() const { return name_; }
-  const uint8_t* token() const { return token_; }
+  // A new token, which from now on is the only one that gets ports: each
+  // GPU socket client is given its own, so a request from one that has gone
+  // gets nothing.
+  std::array<uint8_t, kTokenSize> RenewToken();
 
  private:
   void Serve();
@@ -56,6 +61,7 @@ class SurfacePortServer {
 
   Lookup lookup_;
   std::string name_;
+  std::mutex token_mutex_;
   uint8_t token_[kTokenSize] = {};
   mach_port_t port_ = MACH_PORT_NULL;
   std::atomic<bool> stop_{false};

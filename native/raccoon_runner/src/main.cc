@@ -905,7 +905,7 @@ int Serve(const Options& options) {
   gpu_server_ptr = &gpu_server;
 #if RACCOON_HAS_METAL
   // Surfaces by Mach port, for a client that asks: the service starts at the
-  // first ask and stays; each ask gets its name and token.
+  // first ask and stays; each ask gets its name and a token of its own.
   raccoon::SurfacePortServer ports;
   SharePorts = [&] {
     std::string why;
@@ -925,8 +925,8 @@ int Serve(const Options& options) {
     const uint32_t length = static_cast<uint32_t>(ports.name().size());
     for (int i = 0; i < 4; ++i) answer.push_back(static_cast<uint8_t>(length >> (8 * i)));
     answer.insert(answer.end(), ports.name().begin(), ports.name().end());
-    answer.insert(answer.end(), ports.token(),
-                  ports.token() + raccoon::SurfacePortServer::kTokenSize);
+    const auto token = ports.RenewToken();
+    answer.insert(answer.end(), token.begin(), token.end());
     gpu_server.SendBytesWithFds(answer, {});
     // The ring in use again, global still: the client asks the service for
     // it, and that ask turns the next ring's surfaces private.
