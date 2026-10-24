@@ -149,19 +149,26 @@ void main() {
   });
 
   // #137: the rename replaced a dotfiles manager's link with a file.
-  test('a write through a link lands in the linked file', () {
-    final dotfiles = Directory(p.join(temp.path, 'dotfiles'))..createSync();
-    final tracked = File(p.join(dotfiles.path, 'devices.json'))
-      ..writeAsStringSync('{"custom-devices": []}');
-    final path = p.join(temp.path, 'custom_devices.json');
-    Link(path).createSync(p.join('dotfiles', 'devices.json'));
-    CustomDevicesFile(
-      path,
-    ).upsert(CustomDeviceConfig(deviceHelper: '/h/raccoon-device'));
-    expect(FileSystemEntity.isLinkSync(path), isTrue);
-    expect(tracked.readAsStringSync(), contains('raccoon'));
-    expect(CustomDevicesFile(path).ids(), ['raccoon']);
-  });
+  test(
+    'a write through a link lands in the linked file',
+    () {
+      final dotfiles = Directory(p.join(temp.path, 'dotfiles'))..createSync();
+      final tracked = File(p.join(dotfiles.path, 'devices.json'))
+        ..writeAsStringSync('{"custom-devices": []}');
+      final path = p.join(temp.path, 'custom_devices.json');
+      Link(path).createSync(p.join('dotfiles', 'devices.json'));
+      CustomDevicesFile(
+        path,
+      ).upsert(CustomDeviceConfig(deviceHelper: '/h/raccoon-device'));
+      expect(FileSystemEntity.isLinkSync(path), isTrue);
+      expect(tracked.readAsStringSync(), contains('raccoon'));
+      expect(CustomDevicesFile(path).ids(), ['raccoon']);
+    },
+    skip: switch (Platform.isWindows) {
+      true => 'file links need privileges on Windows',
+      false => false,
+    },
+  );
 
   test('a write lands whole, with nothing left beside the file', () {
     final file = CustomDevicesFile(p.join(temp.path, 'tool', 'devices.json'));
