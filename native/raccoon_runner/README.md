@@ -272,7 +272,8 @@ ninja -C build                       # first build also compiles protobuf-lite
 CI (`.github/workflows/runner-ci.yml`) does the same on Linux x64, both Mac
 architectures and Windows x64, bundles the examples, renders a frame, and
 runs `raccoon_runtime`'s tests, whose integration tests drive the built
-runner.
+runner. It runs when started by hand, from the Actions tab or with
+`gh workflow run runner-ci.yml --ref main`, not on every push.
 
 ## Prebuilt binaries
 
