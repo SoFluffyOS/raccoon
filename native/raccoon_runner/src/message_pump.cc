@@ -76,7 +76,10 @@ int MessagePump::Wait(pollfd* fds, size_t count, int timeout_ms) {
   // The sockets signal the event while they are watched; messages wake the
   // wait by themselves.
   for (size_t i = 0; i < count; ++i) {
-    WSAEventSelect(fds[i].fd, event_, FD_READ | FD_ACCEPT | FD_CLOSE);
+    // A socket the loop waits on to write, the client's while its queue is
+    // full, wakes the wait when it takes more (#147).
+    const long write = (fds[i].events & POLLOUT) != 0 ? FD_WRITE : 0;
+    WSAEventSelect(fds[i].fd, event_, FD_READ | FD_ACCEPT | FD_CLOSE | write);
   }
   MsgWaitForMultipleObjectsEx(1, &event_,
                               timeout_ms < 0 ? INFINITE : static_cast<DWORD>(timeout_ms),
