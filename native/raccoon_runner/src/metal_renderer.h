@@ -58,9 +58,10 @@ class MetalRenderer : public GpuRenderer {
 
   const std::string& description() const override;
   bool EnablePool(size_t count, std::string* error) override;
-  // From now on the ring's surfaces are not global: the host takes them by
-  // Mach port. The ring in use is rebuilt at the next frame.
-  void ShareByPort();
+  // Whether the ring's surfaces are not global, the host taking them by
+  // Mach port; global by default. A change rebuilds the ring in use at the
+  // next frame, and returns true.
+  bool ShareByPort(bool by_port);
   // Send rights to the surfaces of ring |generation|, in index order, for
   // the caller to pass on; false when that ring is gone.
   bool SurfacePorts(uint32_t generation, std::vector<uint32_t>* ports) const;

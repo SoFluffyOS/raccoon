@@ -6,9 +6,10 @@
 // of the latest frame whenever it asks.
 //
 // Surfaces by port: on connecting, this side sends 'RPRT'. A runner that
-// can answers 'RSVC' with a Mach service name and a token, and builds its
-// rings without global surfaces from then on; for each set, this side asks
-// that service for the surfaces' ports. The messages are kept in sync with
+// can answers 'RSVC' with a Mach service name and a token, then announces
+// its ring again; for each set, this side asks that service for the
+// surfaces' ports, and once an ask has reached it the runner builds its
+// rings without global surfaces. The messages are kept in sync with
 // the runner's surface_port_server.h: request msgh_id 'RPRT' with a
 // send-once reply port, the generation and the 16-byte token; reply msgh_id
 // 'RPRY', one port descriptor per surface, none when refused.

@@ -1,7 +1,11 @@
 // raccoon_gpu_port_check <gpu socket>: checks that a GPU socket client gets
 // the ring's IOSurfaces by Mach port (surface_port_server.h) on macOS. Asks
-// for them ('RPRT'), takes the service and token ('RSVC'), waits for the
-// ring built after that ('RGPU'), and asks the service for its surfaces.
+// for them ('RPRT'), takes the service and token ('RSVC'), and asks the
+// service for the ring in use, announced again ('RGPU'): an ask that reaches
+// the service makes the next ring private. Then checks that next ring.
+// With --never-ask it plays a client whose lookup failed: it takes the
+// answer and asks nothing, and the rings must stay global, so such a client
+// still finds its surfaces by ID.
 // Passes when every surface comes, at the ring's size, none of them can be
 // looked up by ID any more, and a request with a wrong token gets none.
 // Prints one line; exits 0 on a pass.
@@ -76,7 +80,8 @@ std::vector<mach_port_t> AskPorts(mach_port_t service, uint32_t generation, cons
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc < 2) return Fail("usage: raccoon_gpu_port_check <gpu socket>");
+  if (argc < 2) return Fail("usage: raccoon_gpu_port_check <gpu socket> [--never-ask]");
+  const bool never_ask = argc > 2 && std::strcmp(argv[2], "--never-ask") == 0;
   sockaddr_un address{};
   address.sun_family = AF_UNIX;
   std::strncpy(address.sun_path, argv[1], sizeof(address.sun_path) - 1);
@@ -89,11 +94,19 @@ int main(int argc, char** argv) {
 
   std::string service;
   uint8_t token[kTokenSize] = {};
+  bool asked = false;
+  // --never-ask: when the first global ring came after the answer.
+  std::chrono::steady_clock::time_point global_since{};
   std::vector<uint8_t> inbox;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
   timeval wait{0, 200000};
   setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &wait, sizeof(wait));
   while (std::chrono::steady_clock::now() < deadline) {
+    if (never_ask && global_since != std::chrono::steady_clock::time_point{} &&
+        std::chrono::steady_clock::now() - global_since > std::chrono::milliseconds(1500)) {
+      std::printf("GLOBAL ok: a client that never asks keeps global surfaces\n");
+      return 0;
+    }
     uint8_t buffer[4096];
     const ssize_t got = recv(fd, buffer, sizeof(buffer), 0);
     if (got == 0) return Fail("the runner hung up");
@@ -125,17 +138,37 @@ int main(int argc, char** argv) {
       // Not global: no lookup by ID, checked before this process holds any
       // of them (a process finds the surfaces it holds by ID).
       const uint8_t* ids = payload + 32 + count * 8;
+      bool global = false;
       if (length >= 32 + count * 12) {
-        for (uint32_t i = 0; i < count; ++i) {
+        for (uint32_t i = 0; i < count && !global; ++i) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
           IOSurfaceRef by_id = IOSurfaceLookup(Read32(ids + i * 4));
 #pragma clang diagnostic pop
           if (by_id != nullptr) {
             CFRelease(by_id);
-            return Fail("a surface is still global");
+            global = true;
           }
         }
+      }
+      if (never_ask) {
+        mach_port_deallocate(mach_task_self(), port);
+        if (!global) return Fail("a ring went private with no ask");
+        if (global_since == std::chrono::steady_clock::time_point{}) {
+          global_since = std::chrono::steady_clock::now();
+        }
+        continue;
+      }
+      if (global) {
+        // The ring from before the answer, announced once more for this
+        // ask; a second global one means the ask changed nothing.
+        if (asked) return Fail("a surface is still global");
+        asked = true;
+        for (mach_port_t right : AskPorts(port, generation, token)) {
+          mach_port_deallocate(mach_task_self(), right);
+        }
+        mach_port_deallocate(mach_task_self(), port);
+        continue;
       }
       uint8_t wrong[kTokenSize] = {};
       if (!AskPorts(port, generation, wrong).empty()) return Fail("a wrong token got ports");

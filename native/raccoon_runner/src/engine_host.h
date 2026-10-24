@@ -150,10 +150,11 @@ class EngineHost {
   // Every buffer is the runner's again: the client holding them is gone.
   void ReleaseAllGpuBuffers();
 #if RACCOON_HAS_METAL
-  // The host takes the ring's surfaces by Mach port: the next ring is not
-  // global, and a frame is asked for so it comes at once. False without
-  // the Metal renderer.
-  bool ShareGpuBuffersByPort();
+  // Whether the host takes the ring's surfaces by Mach port, the ring then
+  // not global; on a change a frame is asked for, so the new ring comes at
+  // once. False without the Metal renderer.
+  bool ShareGpuBuffersByPort(bool by_port);
+  bool can_share_gpu_buffers_by_port() const { return metal_ != nullptr; }
   // Send rights to ring |generation|'s surfaces, for the caller to pass on.
   bool GpuBufferPorts(uint32_t generation, std::vector<uint32_t>* ports) const;
 #endif

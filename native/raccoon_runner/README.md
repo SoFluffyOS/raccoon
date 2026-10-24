@@ -102,9 +102,11 @@ Design notes: `docs/internal_docs/raccoon/`.
   descriptors ride along, and a native fence goes ahead of every frame
   where EGL has them. On macOS a client that asks ('RPRT') gets the name of
   a Mach service of the runner's own and a token, and takes each ring's
-  surfaces from it by port; from then on the rings are not global, so no
-  other process can open them by ID. A client that never asks gets global
-  surfaces named by ID, as before. A frame leaves once the GPU has drawn it:
+  surfaces from it by port. The runner announces the ring in use once more,
+  the client asks for it, and once an ask has reached the service the rings
+  are not global, so no other process can open them by ID. A client that
+  never asks, or whose lookup of the service fails, keeps global surfaces
+  named by ID, and so does the next client once it has gone. A frame leaves once the GPU has drawn it:
   a cross-process fence would save 0.6-0.8 ms at the median (measured, #60),
   and Metal shares none without XPC. A buffer goes back on either
   socket, with a fence of its own on the second where there are fences. The

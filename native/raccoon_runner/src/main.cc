@@ -20,6 +20,7 @@
 #endif
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cerrno>
 #include <chrono>
@@ -858,6 +859,10 @@ int Serve(const Options& options) {
 #if RACCOON_HAS_METAL
   // Set once the GPU socket's server exists, below.
   std::function<void()> SharePorts;
+  // A request with the token reached the service: the client can take
+  // surfaces by port, so the ring stops being global. Until then a client
+  // whose lookup fails still sees global surfaces by ID.
+  std::atomic<bool> ports_asked{false};
 #endif
   raccoon::RunnerServer::Handler gpu_handler;
   gpu_handler.on_client_connected = [&] { gpu_fds_sent = 0; };
@@ -865,6 +870,11 @@ int Serve(const Options& options) {
     gpu_fds_sent = 0;
     // Whatever it held, nothing samples now.
     host.ReleaseAllGpuBuffers();
+#if RACCOON_HAS_METAL
+    // The next client may not ask for ports.
+    ports_asked = false;
+    host.ShareGpuBuffersByPort(false);
+#endif
   };
   gpu_handler.on_raw = [&](const uint8_t* payload, size_t size, std::vector<int>& fds) {
 #if RACCOON_HAS_METAL
@@ -896,11 +906,13 @@ int Serve(const Options& options) {
   SharePorts = [&] {
     std::string why;
     const bool started = ports.Start(
-        [&host](uint32_t generation, std::vector<uint32_t>* out) {
+        [&host, &loop, &ports_asked](uint32_t generation, std::vector<uint32_t>* out) {
+          ports_asked = true;
+          loop.Wake();
           return host.GpuBufferPorts(generation, out);
         },
         &why);
-    if (!started || !host.ShareGpuBuffersByPort()) {
+    if (!started || !host.can_share_gpu_buffers_by_port()) {
       std::fprintf(stderr, "🦝 no surfaces by port (%s); by ID as before\n",
                    started ? "no Metal renderer" : why.c_str());
       return;
@@ -912,6 +924,9 @@ int Serve(const Options& options) {
     answer.insert(answer.end(), ports.token(),
                   ports.token() + raccoon::SurfacePortServer::kTokenSize);
     gpu_server.SendBytesWithFds(answer, {});
+    // The ring in use again, global still: the client asks the service for
+    // it, and that ask turns the next ring's surfaces private.
+    gpu_fds_sent = 0;
   };
 #endif
   if (!gpu_server.Listen(gpu_socket, &error)) {
@@ -929,6 +944,9 @@ int Serve(const Options& options) {
   // plugin's modal dialog takes them while its own message loop holds
   // ours (MessagePump).
   auto Turn = [&]() {
+#if RACCOON_HAS_METAL
+    if (ports_asked.exchange(false)) host.ShareGpuBuffersByPort(true);
+#endif
     host.platform().RunDueTasks();
     host.ServiceVsync();
     host.ServiceCamera();

@@ -4,7 +4,9 @@
 // cannot carry Mach ports, so the runner checks in a Mach service of its own,
 // dev.raccoon.runner.<pid>, and names it, with a token, on the GPU socket;
 // only that socket's client learns the token, and only a request carrying it
-// gets ports. One thread answers.
+// gets ports. The rings stop being global only once such a request has come,
+// so a client that cannot reach the service still finds them by ID. One
+// thread answers.
 //
 // Messages, kept in sync with raccoon_view's RaccoonViewPlugin.mm:
 //   request: msgh_id 'RPRT', a send-once reply port, then the ring's

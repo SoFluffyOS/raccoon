@@ -391,10 +391,11 @@ bool EngineHost::EnableGpuBuffers(size_t count, std::string* error) {
 }
 
 #if RACCOON_HAS_METAL
-bool EngineHost::ShareGpuBuffersByPort() {
+bool EngineHost::ShareGpuBuffersByPort(bool by_port) {
   if (metal_ == nullptr) return false;
-  metal_->ShareByPort();
-  if (engine_ != nullptr) loader_.procs().ScheduleFrame(engine_);
+  if (metal_->ShareByPort(by_port) && engine_ != nullptr) {
+    loader_.procs().ScheduleFrame(engine_);
+  }
   return true;
 }
 
