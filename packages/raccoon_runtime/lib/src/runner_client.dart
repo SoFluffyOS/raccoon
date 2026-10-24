@@ -345,18 +345,18 @@ final class RunnerClient
     for (final old in _buffers) {
       old.closeSync();
     }
-    // The set's own descriptors came last; any before them are left from
-    // a set that came short, and are closed rather than taken.
+    // Descriptors arrive in order, and a later set's can come in the same
+    // read as the tail of this one: the set takes its count from the front.
+    // A set that came short of its count is dropped, its descriptors
+    // closed rather than leaked (#134, #137).
     final count = buffers.count;
-    final spare = _handles.length - count;
-    if (spare < 0) {
+    if (_handles.length < count) {
       _buffers = [];
       _closeHandles();
       return;
     }
-    _buffers = _handles.sublist(spare);
-    _handles.removeRange(spare, _handles.length);
-    _closeHandles();
+    _buffers = _handles.sublist(0, count);
+    _handles.removeRange(0, count);
   }
 
   void _closeHandles() {

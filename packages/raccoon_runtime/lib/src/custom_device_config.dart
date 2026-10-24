@@ -233,12 +233,19 @@ final class CustomDevicesFile {
   /// other keys kept (#134). Written aside and renamed over the file, so a
   /// write cut short leaves the old file, never half of the new one.
   void _write(Object? decoded, List<Object?> devices) {
-    final file = File(path)..parent.createSync(recursive: true);
+    // Through a link, as a dotfiles manager keeps the file, to its target:
+    // the rename replaces what it lands on (#137).
+    var target = path;
+    if (FileSystemEntity.isLinkSync(path)) {
+      final link = Link(path).targetSync();
+      target = p.isAbsolute(link) ? link : p.join(p.dirname(path), link);
+    }
+    final file = File(target)..parent.createSync(recursive: true);
     final contents = {
       if (decoded case final Map<String, Object?> rest) ...rest,
       _key: devices,
     };
-    final staged = File('$path.$pid.tmp')..writeAsStringSync(
+    final staged = File('${file.path}.$pid.tmp')..writeAsStringSync(
       '${const JsonEncoder.withIndent('  ').convert(contents)}\n',
     );
     staged.renameSync(file.path);
