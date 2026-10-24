@@ -259,7 +259,16 @@ final class RunnerClient
   void _onInbound(Inbound inbound) {
     _handles.addAll(inbound.handles);
     for (final payload in _unframer.add(inbound.bytes)) {
-      final message = RunnerMessage.fromBuffer(payload);
+      final RunnerMessage message;
+      try {
+        message = RunnerMessage.fromBuffer(payload);
+      } on Exception catch (error, stackTrace) {
+        // Not the protocol: what follows can't be trusted to be framed
+        // right either. The listeners hear why, and the client ends.
+        if (!_closed.isCompleted) _messages.addError(error, stackTrace);
+        unawaited(close());
+        return;
+      }
       if (message.hasHello() && !_hello.isCompleted) {
         _pid = message.hello.pid;
         _hello.complete(message.hello);

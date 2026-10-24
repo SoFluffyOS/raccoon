@@ -45,6 +45,9 @@ final class _Runner {
   void send(RunnerMessage message) =>
       _client?.add(MessageFraming.frame(message.writeToBuffer()));
 
+  /// [payload] framed as a message, whatever it is.
+  void raw(List<int> payload) => _client?.add(MessageFraming.frame(payload));
+
   void log(String line) =>
       send(RunnerMessage(log: LogLine(tag: 'stderr', message: line)));
 
@@ -97,6 +100,17 @@ void main() {
     await client.close();
     await runner.stop();
     temp.deleteSync(recursive: true);
+  });
+
+  test('a message that does not parse ends the client, with no uncaught '
+      'error', () async {
+    // A stream that stops being the protocol can't be trusted to be framed
+    // right after it either.
+    final errors = <Object>[];
+    client.messages.listen((_) {}, onError: errors.add);
+    runner.raw([0xff, 0xff, 0xff, 0xff]);
+    await client.closed.timeout(const Duration(seconds: 5));
+    expect(errors, hasLength(1));
   });
 
   test('an app that died before its first frame is reported, with the '
