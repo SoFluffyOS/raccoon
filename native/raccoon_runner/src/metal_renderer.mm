@@ -82,6 +82,8 @@ struct MetalRenderer::Impl {
   uint32_t generation = 0;
   // The pool buffer being drawn, -1 for the readback texture.
   int current = -1;
+  // A frame went by readback with every pool buffer taken.
+  bool missed = false;
   // Where the search for a free buffer starts: after the one drawn last, so
   // the ring goes round and a buffer just given back is drawn into last.
   size_t next = 0;
@@ -356,6 +358,13 @@ bool MetalRenderer::pool_set(GpuBufferSet* out) const {
   return true;
 }
 
+bool MetalRenderer::TakeMissedFrame() {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  const bool missed = impl_->missed;
+  impl_->missed = false;
+  return missed;
+}
+
 bool MetalRenderer::HasFreeBuffer() const {
   const Impl& m = *impl_;
   std::lock_guard<std::mutex> lock(m.mutex);
@@ -433,6 +442,7 @@ bool MetalRenderer::NextDrawable(size_t width, size_t height, int64_t* texture_i
     }
     // Every buffer is with the client: this frame goes by readback.
     if (kTrace) std::fprintf(stderr, "🦝 metal texture -> readback\n");
+    if (!m.pool.empty()) m.missed = true;
   }
   if (!m.EnsureReadback(width, height)) return false;
   *texture_id = kReadbackTexture;

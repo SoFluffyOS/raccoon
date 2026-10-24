@@ -69,6 +69,7 @@ class MetalRenderer : public GpuRenderer {
   void SetGpuFrameCallback(GpuFrameCallback callback) override;
   bool pool_set(GpuBufferSet* out) const override;
   bool HasFreeBuffer() const override;
+  bool TakeMissedFrame() override;
   void Release(uint32_t generation, int index, int fence_fd) override;
   void ReleaseAll() override;
 

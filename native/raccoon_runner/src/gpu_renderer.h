@@ -63,6 +63,10 @@ class GpuRenderer {
   // Every buffer is the renderer's again, fences dropped: for a client
   // that went away holding some.
   virtual void ReleaseAll() = 0;
+  // Whether a frame went by readback since last asked because every pool
+  // buffer was taken: a client drawing the ring never sees it. Asking
+  // clears it.
+  virtual bool TakeMissedFrame() { return false; }
 };
 
 }  // namespace raccoon

@@ -76,6 +76,7 @@ class GlRenderer : public GpuRenderer {
   }
   bool pool_set(GpuBufferSet* out) const override;
   bool HasFreeBuffer() const override;
+  bool TakeMissedFrame() override;
   void Release(uint32_t generation, int index, int fence_fd) override;
   void ReleaseAll() override;
 
@@ -160,6 +161,8 @@ class GlRenderer : public GpuRenderer {
   uint64_t modifier_ = 0;
   // The pool buffer being drawn, -1 for the readback framebuffer.
   int current_ = -1;
+  // A frame went by readback with every pool buffer taken; mutex_.
+  bool missed_ = false;
   GpuFrameCallback gpu_frame_;
 };
 

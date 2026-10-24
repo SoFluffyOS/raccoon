@@ -324,6 +324,13 @@ bool GlRenderer::pool_set(GpuBufferSet* out) const {
   return true;
 }
 
+bool GlRenderer::TakeMissedFrame() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  const bool missed = missed_;
+  missed_ = false;
+  return missed;
+}
+
 bool GlRenderer::HasFreeBuffer() const {
   std::lock_guard<std::mutex> lock(mutex_);
   if (!pool_wanted_ || pool_.empty()) return true;
@@ -518,6 +525,7 @@ uint32_t GlRenderer::Fbo(size_t width, size_t height) {
     }
     if (fbo == 0) {
       if (kTrace && pool_wanted_) std::fprintf(stderr, "🦝 gl fbo -> readback\n");
+      if (pool_wanted_ && !pool_.empty()) missed_ = true;
       fbo = EnsureSize(width, height) ? fbo_ : 0;
     }
   }

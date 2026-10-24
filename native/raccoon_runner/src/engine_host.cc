@@ -420,6 +420,9 @@ void EngineHost::ReleaseGpuBuffer(uint32_t generation, int index, int fence_fd) 
       std::lock_guard<std::mutex> lock(vsync_mutex_);
       std::swap(owed, gpu_frame_owed_);
     }
+    // The renderer knows where the frame went: on GL the buffer is taken
+    // at the frame before, so the vsync's guess can miss it.
+    if (gpu_->TakeMissedFrame()) owed = true;
     // An app gone idle since would leave the client on an older frame.
     if (owed && engine_ != nullptr) loader_.procs().ScheduleFrame(engine_);
     return;
