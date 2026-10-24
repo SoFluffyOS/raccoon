@@ -296,7 +296,13 @@ class _RaccoonViewState extends State<RaccoonView> {
         final frame = _pending;
         if (frame == null) return;
         _pending = null;
-        final image = await decodeFrame(frame);
+        final ui.Image image;
+        try {
+          image = await decodeFrame(frame);
+        } on Object {
+          // A frame that can't be shown is skipped; the next one may be.
+          continue;
+        }
         if (!mounted) {
           image.dispose();
           return;

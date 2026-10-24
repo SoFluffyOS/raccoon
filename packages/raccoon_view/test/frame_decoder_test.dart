@@ -68,4 +68,36 @@ void main() {
       0xFF,
     ]);
   });
+
+  // #133: a frame its pixels can't fill never called back, and every frame
+  // after it waited.
+  test(
+    'a frame its pixels cannot fill fails instead of never ending',
+    () async {
+      final short = rc.Frame(
+        sequence: Int64(1),
+        width: 4,
+        height: 4,
+        rowBytes: 16,
+        format: rc.PixelFormat.PIXEL_FORMAT_BGRA8888,
+        pixels: List.filled(20, 0),
+      );
+      await expectLater(decodeFrame(short), throwsArgumentError);
+      final empty = rc.Frame(sequence: Int64(1));
+      await expectLater(decodeFrame(empty), throwsArgumentError);
+    },
+  );
+
+  test('rows lie end to end when the frame does not say', () async {
+    final frame = rc.Frame(
+      sequence: Int64(1),
+      width: 2,
+      height: 2,
+      format: rc.PixelFormat.PIXEL_FORMAT_RGBA8888,
+      pixels: List.filled(16, 0xFF),
+    );
+    final image = await decodeFrame(frame);
+    expect(image.height, 2);
+    image.dispose();
+  });
 }
