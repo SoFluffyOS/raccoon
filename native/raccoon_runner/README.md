@@ -289,6 +289,9 @@ cmake -S . -B build -G Ninja -DRACCOON_ENGINE_DIR="$(tool/engine_dir.sh)"
 ninja -C build                       # first build also compiles protobuf-lite
 ```
 
+Without `-DCMAKE_BUILD_TYPE` the build is RelWithDebInfo: optimised, with
+symbols. Unoptimised, the pixel path costs about four times the CPU (#159).
+
 CI (`.github/workflows/runner-ci.yml`) does the same on Linux x64, both Mac
 architectures and Windows x64, bundles the examples, renders a frame, and
 runs `raccoon_runtime`'s tests, whose integration tests drive the built

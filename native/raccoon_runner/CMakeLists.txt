@@ -5,6 +5,13 @@ cmake_minimum_required(VERSION 3.24)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Oldest macOS the runner runs on")
 project(raccoon_runner CXX)
 
+# Optimised, with symbols, unless a type is given: a checkout's runner is the
+# one tool/raccoon-device runs, and unoptimised its pixel path costs four
+# times the CPU. The runner uses no assert, so nothing is lost.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # On Windows the C runtime is linked in, protobuf's too, so a prebuilt runner
