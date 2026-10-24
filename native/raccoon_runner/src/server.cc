@@ -395,6 +395,10 @@ void RunnerServer::CloseClient() {
   if (handler_.on_client_disconnected) handler_.on_client_disconnected();
 }
 
+bool RunnerServer::CanWrite() const {
+  return client_fd_ >= 0 && WaitWritable(client_fd_, 0);
+}
+
 bool RunnerServer::WriteAll(const uint8_t* data, size_t size) {
   return WriteAllTo(client_fd_, data, size);
 }

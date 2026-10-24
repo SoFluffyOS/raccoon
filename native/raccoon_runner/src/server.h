@@ -41,6 +41,9 @@ class RunnerServer {
   bool Listen(const std::string& socket_path, std::string* error);
 
   bool has_client() const { return client_fd_ >= 0; }
+  // Whether the client's socket takes more now, without waiting: a frame
+  // waits for it rather than block the loop on a client reading slowly.
+  bool CanWrite() const;
 
   // Sends |message| to the client. Returns false when there is no client or
   // it went away.

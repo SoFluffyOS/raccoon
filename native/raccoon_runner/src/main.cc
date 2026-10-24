@@ -19,6 +19,7 @@
 #include <sys/prctl.h>
 #endif
 
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <chrono>
@@ -560,6 +561,7 @@ int Serve(const Options& options) {
 
   bool stop = false;
   size_t last_sent = 0;
+  bool frames_held = false;
   bool vm_sent = false;
   bool client_shared = false;
   std::unique_ptr<raccoon::SharedBufferPool> pool;
@@ -902,6 +904,10 @@ int Serve(const Options& options) {
     host.ServiceVsync();
     host.ServiceCamera();
     SendLogs();
+    // A client that reads slowly leaves its socket full: frames wait in
+    // the renderer, the newest replacing the rest, rather than block the
+    // platform thread, the app's, on the write (#138).
+    frames_held = server.has_client() && !server.CanWrite();
     if (server.has_client()) {
       if (!vm_sent) {
         const std::string uri = host.vm_service_uri();
@@ -927,7 +933,7 @@ int Serve(const Options& options) {
           }
         }
         raccoon::SoftwareFrame::Gpu gpu;
-        if (host.frame().TakeGpu(&gpu)) {
+        if (!frames_held && host.frame().TakeGpu(&gpu)) {
           // The fence goes first, to a client holding this set's buffers.
           if (gpu.fence_fd >= 0) {
             if (gpu_server.has_client() && gpu_fds_sent == gpu.generation) {
@@ -951,7 +957,7 @@ int Serve(const Options& options) {
         }
       }
       raccoon::SoftwareFrame::Shared shared;
-      if (host.frame().TakeShared(&shared)) {
+      if (!frames_held && host.frame().TakeShared(&shared)) {
         raccoon::v1::RunnerMessage message;
         raccoon::v1::Frame* frame = message.mutable_frame();
         frame->set_sequence(shared.sequence);
@@ -966,7 +972,7 @@ int Serve(const Options& options) {
         last_sent = shared.sequence;
       }
       raccoon::SoftwareFrame::Copy copy;
-      if (host.frame().CopyLatest(&copy, last_sent)) {
+      if (!frames_held && host.frame().CopyLatest(&copy, last_sent)) {
         raccoon::v1::RunnerMessage message;
         raccoon::v1::Frame* frame = message.mutable_frame();
         frame->set_sequence(copy.sequence);
@@ -1018,7 +1024,8 @@ int Serve(const Options& options) {
 #endif
   while (!stop && g_stop == 0) {
     Turn();
-    loop.RunOnce(NextWait(host, ExpireReplies(1000)));
+    // Frames held for a full socket go as soon as it drains.
+    loop.RunOnce(NextWait(host, std::min(ExpireReplies(1000), frames_held ? 4 : 1000)));
   }
 
   if (server.has_client()) {
