@@ -29,7 +29,7 @@ if [ -z "$REV" ]; then
 fi
 
 BUCKET="https://storage.googleapis.com/flutter_infra_release/flutter/$REV"
-CACHE="${RACCOON_ENGINE_CACHE:-$HOME/.cache/raccoon/engines}/$REV"
+CACHE="${RACCOON_ENGINE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/engines}/$REV"
 case "$(uname -s)" in
   Darwin)
     # One universal framework serves both Mac architectures.
