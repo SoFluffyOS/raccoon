@@ -102,6 +102,33 @@ void main() {
       await subscription.cancel();
     });
   }
+
+  // #134: the watch ended when its directory went, so runners started
+  // after that never showed.
+  test(
+    'a watch goes on when its directory is removed',
+    () async {
+      final watching = RunnerDiscovery(p.join(temp.path, 'raccoon'));
+      final seen = <List<String>>[];
+      final subscription = watching
+          .watch()
+          .map((e) => e.map(RunnerDiscovery.appNameOf).toList())
+          .listen(seen.add, onDone: () => seen.add(['done']));
+      await _until(() => seen.isNotEmpty);
+      Directory(watching.directory).deleteSync(recursive: true);
+      await _until(() => Directory(watching.directory).existsSync());
+
+      final server = await _bind(p.join(watching.directory, 'app.sock'));
+      await _until(() => seen.any((names) => names.contains('app')));
+      expect(seen, isNot(contains(['done'])));
+      await server.close();
+      await subscription.cancel();
+    },
+    skip: switch (Platform.isMacOS) {
+      true => 'macOS polls',
+      false => false,
+    },
+  );
 }
 
 /// Polls [condition] until it holds, failing after five seconds.

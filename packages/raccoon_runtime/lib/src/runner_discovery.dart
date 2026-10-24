@@ -83,8 +83,15 @@ final class RunnerDiscovery {
   List<UnixSocketEndpoint> list() {
     final dir = Directory(directory);
     if (!dir.existsSync()) return const [];
+    final List<FileSystemEntity> entities;
+    try {
+      entities = dir.listSync();
+    } on FileSystemException {
+      // Removed since it was checked: no runners there.
+      return const [];
+    }
     final found = <UnixSocketEndpoint>[
-      for (final entity in dir.listSync())
+      for (final entity in entities)
         if (entity.path.endsWith(socketSuffix) &&
             FileSystemEntity.typeSync(entity.path) ==
                 FileSystemEntityType.unixDomainSock)
@@ -115,6 +122,37 @@ final class RunnerDiscovery {
       controller.add(found);
     }
 
+    var cancelled = false;
+    // The watch ends when the directory goes, as a temp cleaner can take
+    // it: it is made again and watched again, so runners started later
+    // still show (#134).
+    void startWatching() {
+      try {
+        if (!dir.existsSync()) dir.createSync(recursive: true);
+      } on FileSystemException catch (error, stackTrace) {
+        controller
+          ..addError(error, stackTrace)
+          ..close();
+        return;
+      }
+      events = dir
+          .watch(
+            events:
+                FileSystemEvent.create |
+                FileSystemEvent.delete |
+                FileSystemEvent.move,
+          )
+          .listen(
+            (_) => emitIfChanged(),
+            onError: controller.addError,
+            onDone: () {
+              if (cancelled) return;
+              emitIfChanged();
+              startWatching();
+            },
+          );
+    }
+
     controller = StreamController(
       onListen: () {
         emitIfChanged();
@@ -122,21 +160,11 @@ final class RunnerDiscovery {
           case final interval?:
             timer = Timer.periodic(interval, (_) => emitIfChanged());
           case null:
-            events = dir
-                .watch(
-                  events:
-                      FileSystemEvent.create |
-                      FileSystemEvent.delete |
-                      FileSystemEvent.move,
-                )
-                .listen(
-                  (_) => emitIfChanged(),
-                  onError: controller.addError,
-                  onDone: controller.close,
-                );
+            startWatching();
         }
       },
       onCancel: () {
+        cancelled = true;
         timer?.cancel();
         return events?.cancel();
       },
