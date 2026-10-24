@@ -65,8 +65,13 @@ esac
 
 if [ ! -e "$LIBRARY" ]; then
   mkdir -p "$DIR/dl" "$UNZIP_INTO"
-  curl -sfLo "$DIR/dl/embedder.zip" "$URL"
-  unzip -q -o "$DIR/dl/embedder.zip" -d "$UNZIP_INTO"
+  # Said plainly: offline, a first run with a new SDK fails here (#119).
+  if ! curl -sfLo "$DIR/dl/embedder.zip" "$URL" ||
+    ! unzip -q -o "$DIR/dl/embedder.zip" -d "$UNZIP_INTO"; then
+    rm -rf "$DIR/dl"
+    echo "🦝 could not download the Flutter engine $REV from $URL; check the network" >&2
+    exit 1
+  fi
   rm -rf "$DIR/dl"
 fi
 if command -v cygpath >/dev/null; then cygpath -m "$DIR"; else echo "$DIR"; fi

@@ -1261,11 +1261,14 @@ case "$verb" in
     # tool's output. The tool stops a run by stopping this script, which
     # passes it on; the runner watches the tool itself, which may go
     # without a word.
+    # Before the runner: an engine that can't be had stops the run with
+    # engine_dir.sh's word on why, not with the runner's usage (#119).
+    engine_dir="$("$ROOT/tool/engine_dir.sh")" || exit 1
     export RACCOON_PARENT_PID="$PPID"
     # The tool passes its engine switches as one argument; split on spaces.
     # shellcheck disable=SC2068
     "$binary" serve \
-      --engine-dir "$("$ROOT/tool/engine_dir.sh")" \
+      --engine-dir "$engine_dir" \
       --assets "$APPS/$key/flutter_assets" \
       --icu "$(sdk_icu)" \
       --socket "$(socket_path "$key")" \

@@ -268,6 +268,53 @@ void main() {
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );
+  // #119: an engine that can't be downloaded stops the run with a word on
+  // why, not with the runner's usage text.
+  test(
+    'a run whose engine can\'t be downloaded says so',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_offline');
+      final helper = p.join(runnerDir, 'tool', 'raccoon-device');
+      final environment = {
+        'RACCOON_RUNNER': binary!,
+        if (sdk != null) 'FLUTTER_ROOT': sdk,
+        'XDG_DATA_HOME': p.join(temp.path, 'data'),
+        'XDG_RUNTIME_DIR': temp.path,
+        'TMPDIR': '${temp.path}/',
+        // No engine cached, and no way to fetch one.
+        'RACCOON_ENGINE_CACHE': p.join(temp.path, 'engines'),
+        'https_proxy': 'http://127.0.0.1:9',
+        'HTTPS_PROXY': 'http://127.0.0.1:9',
+      };
+      try {
+        final install = await Process.run(helper, [
+          'install',
+          assets,
+          'offline',
+        ], environment: environment);
+        expect(install.exitCode, 0, reason: '${install.stderr}');
+        final run = await Process.run(helper, [
+          'run',
+          'offline',
+        ], environment: environment).timeout(const Duration(seconds: 60));
+        expect(run.exitCode, isNot(0));
+        expect(
+          '${run.stderr}',
+          contains('could not download the Flutter engine'),
+        );
+        expect('${run.stderr}', isNot(contains('usage:')));
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((ready, Platform.isWindows)) {
+      (false, _) => 'build the runner and example first',
+      (_, true) => 'the helper runs in Git Bash on Windows',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   // #118: a socket path must fit in 104 bytes on macOS. An app whose key
   // doesn't fit runs under a shorter socket name, its key in a .name file.
   test(
