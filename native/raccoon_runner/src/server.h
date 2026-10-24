@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <string>
 #include <vector>
@@ -41,17 +42,18 @@ class RunnerServer {
   bool Listen(const std::string& socket_path, std::string* error);
 
   bool has_client() const { return client_fd_ >= 0; }
-  // Whether the client's socket takes more now, without waiting: a frame
-  // waits for it rather than block the loop on a client reading slowly.
-  bool CanWrite() const;
+  // Bytes queued for the client and not yet written: frames wait while
+  // there are any, the newest replacing the rest.
+  size_t backlog() const { return backlog_; }
   // Lets the client go, as when it hangs up.
   void Disconnect() { CloseClient(); }
-  // Bytes written whole to the client so far: a client that takes any is
-  // reading, however slowly.
-  uint64_t bytes_sent() const { return bytes_sent_; }
+  // Writes what is queued, waiting for the client up to |timeout_ms|: for
+  // the last messages before the runner exits.
+  void Drain(int timeout_ms);
 
-  // Sends |message| to the client. Returns false when there is no client or
-  // it went away.
+  // Queues |message| for the client and writes what the socket takes now;
+  // the rest goes as it drains, never blocking the loop (#144). Returns
+  // false when there is no client or it went away.
   bool Send(const v1::RunnerMessage& message);
 
   // Sends |message| with |fds| attached as ancillary data (SCM_RIGHTS).
@@ -70,7 +72,13 @@ class RunnerServer {
   // Reads what the client sent until there is nothing more right now.
   // Returns true when the client hung up or the socket failed.
   bool ReadAvailable();
-  bool WriteAll(const uint8_t* data, size_t size);
+  // Queues |bytes|, a framed message, with |fds| (the server's own, closed
+  // once sent) riding on its first byte, then writes what it can.
+  bool Enqueue(std::string bytes, std::vector<int> fds);
+  // Writes the queue until the socket takes no more; then the client's
+  // watch asks to hear when it does.
+  void Flush();
+  void WatchClient();
   void Dispatch(const v1::ClientMessage& message);
   // Keeps a newcomer told the runner is busy until it hangs up, reading and
   // dropping what it sends (see server.cc); Unlinger lets one go.
@@ -90,7 +98,18 @@ class RunnerServer {
   // runs, so a handler that closes the client, which dispatches what is
   // left, starts after it, not again from the first (#138).
   size_t inbox_read_ = 0;
-  uint64_t bytes_sent_ = 0;
+  // What waits to be written, the front partly written; descriptors go
+  // with a message's first byte. A client that leaves more than
+  // kMaxBacklog unread has stopped, and is let go.
+  struct Outgoing {
+    std::string bytes;
+    std::vector<int> fds;
+  };
+  std::deque<Outgoing> outbox_;
+  size_t outbox_sent_ = 0;
+  size_t backlog_ = 0;
+  bool watching_writable_ = false;
+  static constexpr size_t kMaxBacklog = 16 * 1024 * 1024;
   // Descriptors a raw client sent, not yet taken by the handler.
   std::vector<int> fds_in_;
   // Newcomers told the runner is busy, oldest first; a few at most.

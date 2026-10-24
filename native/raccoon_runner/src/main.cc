@@ -70,9 +70,6 @@ struct Options {
 // How long the client may take to answer a platform message before the app
 // gets "no plugin" instead: a reply that never comes must not hang it.
 constexpr auto kReplyTimeout = std::chrono::seconds(5);
-// How long frames wait for a client that reads nothing before it is let
-// go: as long as a blocked write waited before frames waited instead.
-constexpr auto kStalledClient = std::chrono::seconds(5);
 const std::string kNoReplyWhy =
     "the client did not answer in " + std::to_string(kReplyTimeout.count()) + " s";
 
@@ -565,8 +562,6 @@ int Serve(const Options& options) {
   bool stop = false;
   size_t last_sent = 0;
   bool frames_held = false;
-  std::chrono::steady_clock::time_point held_since;
-  uint64_t sent_when_held = 0;
   bool vm_sent = false;
   bool client_shared = false;
   std::unique_ptr<raccoon::SharedBufferPool> pool;
@@ -918,28 +913,12 @@ int Serve(const Options& options) {
     host.ServiceVsync();
     host.ServiceCamera();
     SendLogs();
-    // A client that reads slowly leaves its socket full: frames wait in
-    // the renderer, the newest replacing the rest, rather than block the
-    // platform thread, the app's, on the write (#138).
-    // Held only with a frame to send: an idle app's client, paused in a
-    // debugger say, waits as long as it likes (#142).
-    const bool waiting = host.frame().FrameCount() > last_sent;
-    const bool held = server.has_client() && waiting && !server.CanWrite();
-    const auto now = std::chrono::steady_clock::now();
-    // The stall counts from the last time the client took anything, so
-    // one that reads slower than the app logs is not taken for stopped.
-    if (!held || !frames_held || server.bytes_sent() != sent_when_held) {
-      held_since = now;
-      sent_when_held = server.bytes_sent();
-    }
-    frames_held = held;
-    // One that reads nothing for as long as a blocked write used to wait
-    // has stopped: it is let go, so the runner is free for another (#139).
-    if (held && now - held_since > kStalledClient) {
-      std::fprintf(stderr, "🦝 the client stopped reading; letting it go\n");
-      server.Disconnect();
-      frames_held = false;
-    }
+    // Nothing the client is sent blocks the loop, the app's platform
+    // thread: messages queue while its socket is full (#144), and frames
+    // wait in the renderer until the queue is empty, the newest replacing
+    // the rest. A client paused in a debugger keeps its place; one that
+    // leaves too much unread is let go by the server.
+    frames_held = server.backlog() > 0;
     if (server.has_client()) {
       if (!vm_sent) {
         const std::string uri = host.vm_service_uri();
@@ -1056,14 +1035,16 @@ int Serve(const Options& options) {
 #endif
   while (!stop && g_stop == 0) {
     Turn();
-    // Frames held for a full socket go as soon as it drains.
-    loop.RunOnce(NextWait(host, std::min(ExpireReplies(1000), frames_held ? 4 : 1000)));
+    // Frames held for the queue go once it drains: the socket's readiness
+    // wakes the loop.
+    loop.RunOnce(NextWait(host, ExpireReplies(1000)));
   }
 
   if (server.has_client()) {
     raccoon::v1::RunnerMessage exited;
     exited.mutable_exited()->set_code(0);
     server.Send(exited);
+    server.Drain(2000);
   }
   host.Shutdown();
   capture.Stop();

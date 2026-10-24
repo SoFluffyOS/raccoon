@@ -2384,10 +2384,12 @@ void main() {
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
-  // #139: frames waited for a client that read nothing, for good, and
-  // kept the runner from anyone else.
+  // #144: writes to a client that read nothing blocked the loop, the app's
+  // platform thread, for up to 5 s at a time. They queue now: the runner
+  // goes on, answering a newcomer at once, and the client keeps its place
+  // however long it pauses, as in a debugger.
   test(
-    'a client that stops reading is let go',
+    'a client that reads nothing holds up neither the runner nor its place',
     () async {
       final temp = Directory.systemTemp.createTempSync('raccoon_test');
       final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
@@ -2400,46 +2402,64 @@ void main() {
           endpoint: endpoint,
         ),
       );
-      final stalled = await Socket.connect(
+      final paused = await Socket.connect(
         InternetAddress(endpoint.path, type: InternetAddressType.unix),
         0,
       );
       try {
-        // Says hello, then reads nothing: frames pile up behind it.
-        stalled.add(
+        // Says hello, then reads nothing: its first frame, megabytes, waits
+        // in the runner's queue behind a full socket.
+        paused.add(
           MessageFraming.frame(
             ClientMessage(
               hello: ClientHello(protocolVersion: 1, pid: 1),
             ).writeToBuffer(),
           ),
         );
-        await stalled.flush();
-        final deadline = DateTime.now().add(const Duration(seconds: 15));
-        RunnerClient? next;
-        while (next == null) {
-          expect(DateTime.now().isBefore(deadline), isTrue);
-          final RunnerClient client;
-          try {
-            client = await RunnerClient.connect(endpoint);
-          } on SocketException {
-            // Its queue is full while a write to the stalled client waits.
-            await Future<void>.delayed(const Duration(milliseconds: 500));
-            continue;
+        await paused.flush();
+        await Future<void>.delayed(const Duration(seconds: 1));
+
+        // The loop is free: a newcomer is told at once that the runner is
+        // taken, not after a write to the paused client gave up.
+        final started = DateTime.now();
+        final newcomer = await RunnerClient.connect(endpoint);
+        await expectLater(
+          newcomer.hello.timeout(const Duration(seconds: 2)),
+          throwsA(isA<RunnerBusy>()),
+        );
+        expect(
+          DateTime.now().difference(started),
+          lessThan(const Duration(seconds: 2)),
+        );
+        await newcomer.close();
+
+        // Paused past what a blocked write used to wait, it still has its
+        // place, and its frame is there once it reads.
+        await Future<void>.delayed(const Duration(seconds: 6));
+        final received = <int>[];
+        final ended = Completer<void>();
+        paused.listen(received.addAll, onDone: () => ended.complete());
+        final unframer = MessageUnframer();
+        final deadline = DateTime.now().add(const Duration(seconds: 10));
+        var sawFrame = false;
+        while (!sawFrame && DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          for (final payload in unframer.add(List.of(received))) {
+            if (RunnerMessage.fromBuffer(payload).hasFrame()) sawFrame = true;
           }
-          try {
-            await client.hello.timeout(const Duration(seconds: 2));
-            next = client;
-          } on Object {
-            await client.close();
-            await Future<void>.delayed(const Duration(milliseconds: 500));
-          }
+          received.clear();
         }
-        await next.frames.first.timeout(const Duration(seconds: 10));
-        next.shutdown();
-        await next.close();
+        expect(sawFrame, isTrue);
+        expect(ended.isCompleted, isFalse);
+        paused.add(
+          MessageFraming.frame(
+            ClientMessage(shutdown: Shutdown()).writeToBuffer(),
+          ),
+        );
+        await paused.flush();
         expect(await _exitCode(runner), 0);
       } finally {
-        stalled.destroy();
+        paused.destroy();
         temp.deleteSync(recursive: true);
       }
     },

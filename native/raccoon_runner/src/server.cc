@@ -13,7 +13,10 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
+#include <cstdio>
 #include <cstring>
+#include <utility>
 
 namespace raccoon {
 
@@ -219,6 +222,7 @@ void RunnerServer::OnListenReadable() {
   }
   client_fd_ = fd;
   inbox_.clear();
+  watching_writable_ = false;
   loop_.Watch(client_fd_, POLLIN,
               [this](short revents) { OnClientReadable(revents); });
   if (handler_.on_client_connected) handler_.on_client_connected();
@@ -388,6 +392,16 @@ void RunnerServer::CloseClient() {
   client_pid_ = 0;
   inbox_.clear();
   inbox_read_ = 0;
+  // What it never took goes, with the descriptors that were to ride along.
+#if !defined(_WIN32)
+  for (const auto& left : outbox_) {
+    for (const int fd : left.fds) close(fd);
+  }
+#endif
+  outbox_.clear();
+  outbox_sent_ = 0;
+  backlog_ = 0;
+  watching_writable_ = false;
 #if !defined(_WIN32)
   for (int fd : fds_in_) close(fd);
 #endif
@@ -395,15 +409,6 @@ void RunnerServer::CloseClient() {
   if (handler_.on_client_disconnected) handler_.on_client_disconnected();
 }
 
-bool RunnerServer::CanWrite() const {
-  return client_fd_ >= 0 && WaitWritable(client_fd_, 0);
-}
-
-bool RunnerServer::WriteAll(const uint8_t* data, size_t size) {
-  if (!WriteAllTo(client_fd_, data, size)) return false;
-  bytes_sent_ += size;
-  return true;
-}
 
 bool RunnerServer::WriteAllTo(int fd, const uint8_t* data, size_t size) {
   size_t sent = 0;
@@ -422,6 +427,54 @@ bool RunnerServer::WriteAllTo(int fd, const uint8_t* data, size_t size) {
   return true;
 }
 
+namespace {
+
+// A framed message: its 4-byte little-endian length, then |payload|.
+std::string Framed(const void* payload, size_t size) {
+  std::string bytes(kLengthPrefix + size, '\0');
+  const uint32_t length = static_cast<uint32_t>(size);
+  for (size_t i = 0; i < kLengthPrefix; ++i) {
+    bytes[i] = static_cast<char>((length >> (8 * i)) & 0xff);
+  }
+  if (size > 0) std::memcpy(bytes.data() + kLengthPrefix, payload, size);
+  return bytes;
+}
+
+#if !defined(_WIN32)
+// Writes what the socket takes of |data| with |fds| riding on its first
+// byte.
+ssize_t SendWithDescriptors(int fd, const uint8_t* data, size_t size,
+                            const std::vector<int>& fds) {
+  iovec part{const_cast<uint8_t*>(data), size};
+  std::vector<uint8_t> control(CMSG_SPACE(sizeof(int) * fds.size()));
+  msghdr header{};
+  header.msg_iov = &part;
+  header.msg_iovlen = 1;
+  header.msg_control = control.data();
+  header.msg_controllen = control.size();
+  cmsghdr* cmsg = CMSG_FIRSTHDR(&header);
+  cmsg->cmsg_level = SOL_SOCKET;
+  cmsg->cmsg_type = SCM_RIGHTS;
+  cmsg->cmsg_len = CMSG_LEN(sizeof(int) * fds.size());
+  std::memcpy(CMSG_DATA(cmsg), fds.data(), sizeof(int) * fds.size());
+  return sendmsg(fd, &header, kSendFlags);
+}
+#endif
+
+}  // namespace
+
+bool RunnerServer::Send(const v1::RunnerMessage& message) {
+  if (client_fd_ < 0) return false;
+  // Serialized after the length prefix's room: one copy of the message.
+  std::string bytes(kLengthPrefix, '\0');
+  if (!message.AppendToString(&bytes)) return false;
+  const uint32_t length = static_cast<uint32_t>(bytes.size() - kLengthPrefix);
+  for (size_t i = 0; i < kLengthPrefix; ++i) {
+    bytes[i] = static_cast<char>((length >> (8 * i)) & 0xff);
+  }
+  return Enqueue(std::move(bytes), {});
+}
+
 bool RunnerServer::SendWithFds(const v1::RunnerMessage& message,
                                const std::vector<int>& fds) {
   std::string serialized;
@@ -430,93 +483,106 @@ bool RunnerServer::SendWithFds(const v1::RunnerMessage& message,
       std::vector<uint8_t>(serialized.begin(), serialized.end()), fds);
 }
 
-#if defined(_WIN32)
-
-bool RunnerServer::SendBytesWithFds(const std::vector<uint8_t>& payload,
-                                    const std::vector<int>& fds) {
-  // No descriptor crosses a Windows socket; a set named by IDs still goes.
-  if (client_fd_ < 0 || !fds.empty()) return false;
-  const uint32_t length = static_cast<uint32_t>(payload.size());
-  const uint8_t prefix[kLengthPrefix] = {
-      static_cast<uint8_t>(length), static_cast<uint8_t>(length >> 8),
-      static_cast<uint8_t>(length >> 16), static_cast<uint8_t>(length >> 24)};
-  if (!WriteAll(prefix, kLengthPrefix) || !WriteAll(payload.data(), payload.size())) {
-    CloseClient();
-    return false;
-  }
-  return true;
-}
-
-#else
-
 bool RunnerServer::SendBytesWithFds(const std::vector<uint8_t>& payload,
                                     const std::vector<int>& fds) {
   if (client_fd_ < 0) return false;
-  const uint32_t length = static_cast<uint32_t>(payload.size());
-  uint8_t prefix[kLengthPrefix] = {
-      static_cast<uint8_t>(length), static_cast<uint8_t>(length >> 8),
-      static_cast<uint8_t>(length >> 16), static_cast<uint8_t>(length >> 24)};
-  iovec parts[2] = {{prefix, kLengthPrefix},
-                    {const_cast<uint8_t*>(payload.data()), payload.size()}};
-  std::vector<uint8_t> control(CMSG_SPACE(sizeof(int) * fds.size()));
-  msghdr header{};
-  header.msg_iov = parts;
-  header.msg_iovlen = 2;
-  // Nothing to attach (a set named by IDs) goes as plain bytes.
-  if (!fds.empty()) {
-    header.msg_control = control.data();
-    header.msg_controllen = control.size();
-    cmsghdr* cmsg = CMSG_FIRSTHDR(&header);
-    cmsg->cmsg_level = SOL_SOCKET;
-    cmsg->cmsg_type = SCM_RIGHTS;
-    cmsg->cmsg_len = CMSG_LEN(sizeof(int) * fds.size());
-    std::memcpy(CMSG_DATA(cmsg), fds.data(), sizeof(int) * fds.size());
-  }
-  ssize_t sent;
-  while (true) {
-    sent = sendmsg(client_fd_, &header, kSendFlags);
-    if (sent >= 0) break;
-    if (WouldBlock()) {
-      if (!WaitWritable(client_fd_, 5000)) {
-        CloseClient();
-        return false;
-      }
-      continue;
-    }
-    CloseClient();
-    return false;
-  }
-  // The descriptors travelled with the first bytes; write whatever is left.
-  const size_t total = kLengthPrefix + payload.size();
-  if (static_cast<size_t>(sent) < total) {
-    std::vector<uint8_t> rest;
-    rest.insert(rest.end(), prefix, prefix + kLengthPrefix);
-    rest.insert(rest.end(), payload.begin(), payload.end());
-    if (!WriteAll(rest.data() + sent, total - sent)) {
-      CloseClient();
+#if defined(_WIN32)
+  // No descriptor crosses a Windows socket; a set named by IDs still goes.
+  if (!fds.empty()) return false;
+  std::vector<int> own;
+#else
+  // The queue's own copies: the caller may close its descriptors (a fence)
+  // before they are written.
+  std::vector<int> own;
+  for (const int fd : fds) {
+    const int copy = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    if (copy < 0) {
+      for (const int taken : own) close(taken);
       return false;
     }
+    own.push_back(copy);
   }
-  return true;
+#endif
+  return Enqueue(Framed(payload.data(), payload.size()), std::move(own));
 }
 
+bool RunnerServer::Enqueue(std::string bytes, std::vector<int> fds) {
+  if (client_fd_ < 0) {
+#if !defined(_WIN32)
+    for (const int fd : fds) close(fd);
 #endif
-
-bool RunnerServer::Send(const v1::RunnerMessage& message) {
-  if (client_fd_ < 0) return false;
-  std::string payload;
-  if (!message.SerializeToString(&payload)) return false;
-  const uint32_t length = static_cast<uint32_t>(payload.size());
-  const uint8_t prefix[kLengthPrefix] = {
-      static_cast<uint8_t>(length), static_cast<uint8_t>(length >> 8),
-      static_cast<uint8_t>(length >> 16), static_cast<uint8_t>(length >> 24)};
-  if (!WriteAll(prefix, kLengthPrefix) ||
-      !WriteAll(reinterpret_cast<const uint8_t*>(payload.data()),
-                payload.size())) {
+    return false;
+  }
+  backlog_ += bytes.size();
+  outbox_.push_back({std::move(bytes), std::move(fds)});
+  if (backlog_ > kMaxBacklog) {
+    std::fprintf(stderr, "🦝 the client stopped reading; letting it go\n");
     CloseClient();
     return false;
   }
-  return true;
+  Flush();
+  return client_fd_ >= 0;
+}
+
+void RunnerServer::Flush() {
+  while (!outbox_.empty() && client_fd_ >= 0) {
+    Outgoing& front = outbox_.front();
+    const auto* data =
+        reinterpret_cast<const uint8_t*>(front.bytes.data()) + outbox_sent_;
+    const size_t left = front.bytes.size() - outbox_sent_;
+#if defined(_WIN32)
+    const auto wrote = SendSome(client_fd_, data, left);
+#else
+    const auto wrote = front.fds.empty()
+                           ? SendSome(client_fd_, data, left)
+                           : SendWithDescriptors(client_fd_, data, left, front.fds);
+#endif
+    if (wrote < 0) {
+      if (WouldBlock()) break;
+      CloseClient();
+      return;
+    }
+    if (wrote == 0) break;
+#if !defined(_WIN32)
+    // They went with these first bytes.
+    for (const int fd : front.fds) close(fd);
+#endif
+    front.fds.clear();
+    outbox_sent_ += static_cast<size_t>(wrote);
+    backlog_ -= static_cast<size_t>(wrote);
+    if (outbox_sent_ == front.bytes.size()) {
+      outbox_.pop_front();
+      outbox_sent_ = 0;
+    }
+  }
+  WatchClient();
+}
+
+void RunnerServer::WatchClient() {
+  if (client_fd_ < 0) return;
+  const bool want = !outbox_.empty();
+  if (want == watching_writable_) return;
+  watching_writable_ = want;
+  loop_.Watch(client_fd_, want ? (POLLIN | POLLOUT) : POLLIN,
+              [this](short revents) {
+                if ((revents & POLLOUT) != 0) Flush();
+                if (client_fd_ >= 0 && (revents & ~POLLOUT) != 0) {
+                  OnClientReadable(revents);
+                }
+              });
+}
+
+void RunnerServer::Drain(int timeout_ms) {
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+  while (!outbox_.empty() && client_fd_ >= 0) {
+    Flush();
+    if (outbox_.empty() || client_fd_ < 0) return;
+    const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          deadline - std::chrono::steady_clock::now())
+                          .count();
+    if (left <= 0 || !WaitWritable(client_fd_, static_cast<int>(left))) return;
+  }
 }
 
 }  // namespace raccoon
