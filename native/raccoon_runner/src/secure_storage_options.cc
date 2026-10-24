@@ -52,10 +52,7 @@ bool RewriteSecureStorageCall(const std::string& channel, const uint8_t* data, s
   }
   arguments.emplace_back("options", CodecValue::Map(std::move(options)));
 
-  // A StandardMethodCodec call is the method's name, then its arguments.
-  *out = EncodeValue(CodecValue::String(call.method));
-  const std::vector<uint8_t> encoded = EncodeValue(CodecValue::Map(std::move(arguments)));
-  out->insert(out->end(), encoded.begin(), encoded.end());
+  *out = EncodeMethodCall(call.method, CodecValue::Map(std::move(arguments)));
   return true;
 }
 

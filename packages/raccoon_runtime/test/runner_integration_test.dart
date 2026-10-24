@@ -2389,6 +2389,43 @@ void main() {
   );
 
   test(
+    'a socket it cannot listen on ends the runner cleanly',
+    () async {
+      // By then the engine runs: it goes down before the runner returns,
+      // rather than under its threads.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final socket = p.join(temp.path, '${'s' * 200}.sock');
+      final runner = await Process.start(binary ?? '', [
+        'serve',
+        '--engine-dir',
+        engineDir ?? '',
+        '--assets',
+        assets,
+        '--icu',
+        icu ?? '',
+        '--socket',
+        socket,
+      ]);
+      final errors = <String>[];
+      runner.stderr
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .listen(errors.add);
+      unawaited(runner.stdout.drain<void>());
+      try {
+        final code = await runner.exitCode.timeout(const Duration(seconds: 15));
+        expect(code, 1, reason: errors.join('\n'));
+        expect(errors.join('\n'), isNot(contains('stopped')));
+      } finally {
+        runner.kill();
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
+  test(
     'a second client is told who has the runner, then hung up on',
     () async {
       final temp = Directory.systemTemp.createTempSync('raccoon_test');

@@ -848,6 +848,8 @@ int Serve(const Options& options) {
   server_ptr = &server;
   if (!server.Listen(options.socket, &error)) {
     std::fprintf(stderr, "🦝 %s\n", error.c_str());
+    // The engine runs already: its threads post to objects about to go.
+    host.Shutdown();
     return 1;
   }
   // The GPU socket: a native client takes the buffers' descriptors here,
@@ -914,6 +916,8 @@ int Serve(const Options& options) {
 #endif
   if (!gpu_server.Listen(gpu_socket, &error)) {
     std::fprintf(stderr, "🦝 %s\n", error.c_str());
+    // The engine runs already: its threads post to objects about to go.
+    host.Shutdown();
     return 1;
   }
   std::fprintf(stdout, "🦝 listening on unix:%s\n",

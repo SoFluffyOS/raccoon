@@ -41,9 +41,12 @@ class PlatformTaskRunner {
  private:
   struct Pending {
     uint64_t target_time;
+    // Tasks due at the same time run in the order they were posted.
+    uint64_t order;
     FlutterTask task;
     bool operator>(const Pending& other) const {
-      return target_time > other.target_time;
+      return target_time != other.target_time ? target_time > other.target_time
+                                              : order > other.order;
     }
   };
 
@@ -58,6 +61,7 @@ class PlatformTaskRunner {
   std::mutex mutex_;
   std::priority_queue<Pending, std::vector<Pending>, std::greater<Pending>>
       queue_;
+  uint64_t posted_ = 0;
 };
 
 }  // namespace raccoon

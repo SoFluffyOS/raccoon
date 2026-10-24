@@ -23,7 +23,7 @@ bool PlatformTaskRunner::RunsOnCurrentThread() const {
 void PlatformTaskRunner::Post(FlutterTask task, uint64_t target_time) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    queue_.push({target_time, task});
+    queue_.push({target_time, posted_++, task});
   }
   if (wake_) wake_();
 }

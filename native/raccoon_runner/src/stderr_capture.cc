@@ -34,6 +34,9 @@ constexpr int kStderr = STDERR_FILENO;
 using ReadResult = ssize_t;
 #endif
 constexpr size_t kLongestLine = 64 * 1024;
+// Reads of 4 KB taken from the pipe once stopping: more than a pipe holds,
+// and a bound for a child that inherited stderr and keeps writing.
+constexpr int kDrainReads = 64;
 
 #if defined(_WIN32)
 ReadResult ReadFd(int fd, char* buffer, size_t size) {
@@ -202,7 +205,7 @@ void StderrCapture::Run() {
   while (!stopping_ && Pump(read_fd_)) {
   }
   // Stopping: what is still in the pipe, without waiting for more.
-  while (Pending(read_fd_) && Pump(read_fd_)) {
+  for (int i = 0; i < kDrainReads && Pending(read_fd_) && Pump(read_fd_); ++i) {
   }
   if (!partial_.empty() && on_line_) on_line_(partial_);
   partial_.clear();
@@ -218,17 +221,15 @@ void StderrCapture::Run() {
       if (errno == EINTR) continue;
       break;
     }
-    if (fds[0].revents & (POLLIN | POLLHUP)) {
-      if (!Pump(read_fd_)) break;
-      continue;
-    }
+    // The stop first: a pipe that never runs dry must not hold it up.
     if (fds[1].revents & POLLIN) {
       // Stopping: what is still in the pipe, without waiting for more.
       fcntl(read_fd_, F_SETFL, fcntl(read_fd_, F_GETFL) | O_NONBLOCK);
-      while (Pump(read_fd_)) {
+      for (int i = 0; i < kDrainReads && Pump(read_fd_); ++i) {
       }
       break;
     }
+    if ((fds[0].revents & (POLLIN | POLLHUP)) && !Pump(read_fd_)) break;
   }
   if (!partial_.empty() && on_line_) on_line_(partial_);
   partial_.clear();
