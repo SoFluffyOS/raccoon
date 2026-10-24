@@ -125,6 +125,35 @@ void main() {
     expect(connection.keys, isEmpty);
   });
 
+  // #143: an up held back while composing left the key down in the app.
+  testWidgets('a key the app saw go down goes up, composing or not', (
+    tester,
+  ) async {
+    final connection = _ComposingConnection();
+    await tester.pumpWidget(
+      RaccoonView(connection: connection, autofocus: true),
+    );
+    connection.fields.add(_field());
+    await tester.pump();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.backspace);
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'ti',
+        selection: TextSelection.collapsed(offset: 2),
+        composing: TextRange(start: 0, end: 2),
+      ),
+    );
+    await tester.pump();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.backspace);
+    expect(
+      connection.keys
+          .where((k) => k.logical.toInt() == 0x100000008)
+          .map((k) => k.kind),
+      [rc.KeyKind.KEY_KIND_DOWN, rc.KeyKind.KEY_KIND_UP],
+    );
+  });
+
   // #97: a release build crashed the host in the engine's setEditingState.
   testWidgets(
     'a host field takes the method; the view takes it back on focus',

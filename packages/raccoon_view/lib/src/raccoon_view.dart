@@ -111,7 +111,8 @@ class _RaccoonViewState extends State<RaccoonView> {
     if (oldWidget.connection == widget.connection) return;
     unawaited(_frames?.cancel());
     _unsubscribeText();
-    _unsubscribeGpu();
+    // The old runner's buffers go back to it, not to the new one (#143).
+    _unsubscribeGpu(oldWidget.connection);
     _unsubscribeCursor();
     _sentSize = null;
     _mouseIn = false;
@@ -125,7 +126,7 @@ class _RaccoonViewState extends State<RaccoonView> {
     _releaseKeys();
     unawaited(_frames?.cancel());
     _unsubscribeText();
-    _unsubscribeGpu();
+    _unsubscribeGpu(widget.connection);
     _unsubscribeCursor();
     _focus.dispose();
     _image.value?.dispose();
@@ -210,11 +211,12 @@ class _RaccoonViewState extends State<RaccoonView> {
     }
   }
 
-  void _unsubscribeGpu() {
+  /// Lets go of the GPU texture and gives [connection], the one the
+  /// buffers came from, back what the view still holds.
+  void _unsubscribeGpu(RunnerConnection connection) {
     _gpuGeneration++;
     unawaited(_gpuSets?.cancel());
     _gpuSets = null;
-    final connection = widget.connection;
     if (connection is GpuBufferConnection) {
       if (_shown case (final generation, final index) when !_hostReleases) {
         connection.releaseGpuBuffer(generation, index);
@@ -278,14 +280,15 @@ class _RaccoonViewState extends State<RaccoonView> {
     // pixel frame is the runner going by readback for one frame, and
     // decoding it would be for nothing. A ring quiet for a while is given
     // up on, so an app whose ring died still shows.
-    if (_gpuLive) {
-      final last = _lastGpuFrame;
-      if (last != null && DateTime.now().difference(last) < _ringQuiet) return;
-      setState(() => _gpuLive = false);
-    }
+    if (_gpuLive && !_ringQuietNow) return;
     _pending = frame;
     unawaited(_decodePending());
   }
+
+  bool get _ringQuietNow => switch (_lastGpuFrame) {
+    final last? => DateTime.now().difference(last) >= _ringQuiet,
+    null => true,
+  };
 
   /// Names the frame's buffer to the host's texture, then gives the one
   /// shown before back to the runner, unless the host does that itself once
@@ -306,6 +309,7 @@ class _RaccoonViewState extends State<RaccoonView> {
     final previous = _shown;
     final shown = (frame.gpuGeneration, frame.bufferIndex);
     _shown = shown;
+    final generation = _gpuGeneration;
     await gpu.show(id, frame.gpuGeneration, frame.bufferIndex);
     // The buffer shown before, unless it is this one again: a view made
     // anew on a connection first shows the last frame, which the view
@@ -317,7 +321,8 @@ class _RaccoonViewState extends State<RaccoonView> {
     ) when !_hostReleases && previous != shown) {
       connection.releaseGpuBuffer(generation, index);
     }
-    if (!mounted) return;
+    // A show that ends after a swap says nothing of the new connection.
+    if (!mounted || generation != _gpuGeneration) return;
     if (!_gpuLive) setState(() => _gpuLive = true);
   }
 
@@ -343,6 +348,10 @@ class _RaccoonViewState extends State<RaccoonView> {
         final previous = _image.value;
         _image.value = image;
         previous?.dispose();
+        // The texture goes only once a frame has taken its place: before,
+        // the view showed what it had decoded before the ring came, or
+        // nothing, until the next frame (#143).
+        if (_gpuLive && _ringQuietNow) setState(() => _gpuLive = false);
       }
     } finally {
       _decoding = false;
@@ -425,7 +434,10 @@ class _RaccoonViewState extends State<RaccoonView> {
     // keys are the app's, unless the method is composing, when they are
     // its own.
     if (isEditingKey(event)) {
-      if (text.composing) return KeyEventResult.ignored;
+      // The up of a key the app saw go down is the app's, composing or not.
+      if (text.composing && !_pressed.containsKey(event.physicalKey)) {
+        return KeyEventResult.ignored;
+      }
       // The up of a key whose down the method took is the method's too.
       if (!_sendKey(event)) return KeyEventResult.ignored;
       return KeyEventResult.handled;

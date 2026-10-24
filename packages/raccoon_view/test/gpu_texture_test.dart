@@ -411,4 +411,82 @@ void main() {
     expect(connection.released, [(1, 0)]);
     await tester.pumpWidget(const SizedBox());
   });
+
+  // #143: on a swap, the old runner's buffers went back to the new one,
+  // which could free the buffer it showed.
+  testWidgets('a swap gives the old runner back its own buffers', (
+    tester,
+  ) async {
+    final first = _GpuConnection();
+    final second = _GpuConnection();
+    final textures = _FakeTextures();
+    await tester.pumpWidget(
+      RaccoonView(connection: first, gpuTextures: textures),
+    );
+    first.sets.add(_set('/run/first.gpu'));
+    await tester.pump();
+    first.frameController.add(
+      rc.Frame(
+        sequence: Int64(1),
+        inGpuBuffer: true,
+        bufferIndex: 0,
+        gpuGeneration: 1,
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    await tester.pumpWidget(
+      RaccoonView(connection: second, gpuTextures: textures),
+    );
+    expect(first.released, [(1, 0)]);
+    expect(second.released, isEmpty);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  // #143: a quiet ring was given up before the pixel frame decoded, and a
+  // frame that failed left the view on stale content.
+  testWidgets('the texture stays until a pixel frame has taken its place', (
+    tester,
+  ) async {
+    final connection = _GpuConnection();
+    final textures = _FakeTextures();
+    await tester.pumpWidget(
+      RaccoonView(connection: connection, gpuTextures: textures),
+    );
+    connection.sets.add(_set('/run/r.gpu'));
+    await tester.pump();
+    connection.frameController.add(
+      rc.Frame(
+        sequence: Int64(1),
+        inGpuBuffer: true,
+        bufferIndex: 0,
+        gpuGeneration: 1,
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(Texture), findsOneWidget);
+
+    // The ring goes quiet; a pixel frame that can't be decoded comes.
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 600)),
+    );
+    connection.frameController.add(
+      rc.Frame(
+        sequence: Int64(2),
+        width: 4,
+        height: 4,
+        rowBytes: 16,
+        format: rc.PixelFormat.PIXEL_FORMAT_BGRA8888,
+        pixels: List.filled(8, 0),
+      ),
+    );
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump();
+    expect(find.byType(Texture), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
 }
