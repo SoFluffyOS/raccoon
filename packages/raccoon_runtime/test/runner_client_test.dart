@@ -293,4 +293,37 @@ void main() {
       expect(client.latestFrame, isNull);
     },
   );
+
+  // #145: a later listener was given the last GPU frame, whose buffer an
+  // earlier one may have given back.
+  test('a frame in a GPU buffer is not replayed to a later listener', () async {
+    runner.send(
+      RunnerMessage(
+        frame: Frame(
+          sequence: Int64(1),
+          width: 1,
+          height: 1,
+          inGpuBuffer: true,
+          bufferIndex: 0,
+          gpuGeneration: 1,
+        ),
+      ),
+    );
+    await client.messages
+        .firstWhere((m) => m.hasFrame())
+        .timeout(const Duration(seconds: 5));
+    expect(client.latestFrame?.inGpuBuffer, isTrue);
+    final replayed = await client.frames.first
+        .then<Frame?>((f) => f)
+        .timeout(const Duration(milliseconds: 300), onTimeout: () => null);
+    expect(replayed, isNull);
+
+    // A frame with pixels still is.
+    runner.frame();
+    await client.messages
+        .firstWhere((m) => m.hasFrame())
+        .timeout(const Duration(seconds: 5));
+    final again = await client.frames.first.timeout(const Duration(seconds: 1));
+    expect(again.inGpuBuffer, isFalse);
+  });
 }

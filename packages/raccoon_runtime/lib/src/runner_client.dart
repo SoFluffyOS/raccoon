@@ -134,9 +134,14 @@ final class RunnerClient
   /// runner's, so it stays out of [messages] and the streams built on it.
   Stream<Object> get channelErrors => _channelErrors.stream;
 
+  /// The runner's frames as they come, the latest first when it has
+  /// pixels. One in a GPU buffer is not replayed: a listener before may
+  /// have given that buffer back, and showing it, then giving it back
+  /// again, frees a buffer the runner may be drawing into (#145). A view
+  /// sends its size as it lays out, which draws a fresh frame.
   @override
   Stream<Frame> get frames async* {
-    if (_latestFrame case final frame?) yield frame;
+    if (_latestFrame case final frame? when !frame.inGpuBuffer) yield frame;
     yield* messages.where((m) => m.hasFrame()).map((m) => m.frame);
   }
 
