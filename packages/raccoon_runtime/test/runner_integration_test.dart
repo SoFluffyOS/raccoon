@@ -2389,6 +2389,98 @@ void main() {
   );
 
   test(
+    'Alt picks a character on a Mac (Option) only, not elsewhere',
+    () async {
+      // Option types what the key gives on a Mac; elsewhere Alt with a
+      // letter is a shortcut nobody took, and GTK and Windows type nothing.
+      final textAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'text',
+        'build',
+        'flutter_assets',
+      );
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: textAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      runner.stderr.listen(output.add);
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.frames.first.timeout(const Duration(seconds: 15));
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        Future<void> send(KeyKind kind, int logical, int physical, String c) {
+          client.sendKey(
+            KeyEvent(
+              kind: kind,
+              physical: Int64(physical),
+              logical: Int64(logical),
+              character: c,
+              timestampMicros: Int64(DateTime.now().microsecondsSinceEpoch),
+            ),
+          );
+          return Future<void>.delayed(const Duration(milliseconds: 60));
+        }
+
+        Future<void> key(int logical, int physical, [String c = '']) async {
+          await send(KeyKind.KEY_KIND_DOWN, logical, physical, c);
+          await send(KeyKind.KEY_KIND_UP, logical, physical, '');
+        }
+
+        await key(0x61, 0x00070004, 'a');
+        // Alt+F, the character as the host reports it: Option gives ƒ.
+        await send(KeyKind.KEY_KIND_DOWN, 0x200000104, 0x000700e2, '');
+        await key(0x66, 0x00070009, Platform.isMacOS ? 'ƒ' : 'f');
+        await send(KeyKind.KEY_KIND_UP, 0x200000104, 0x000700e2, '');
+        await key(0x62, 0x00070005, 'b');
+        final deadline = DateTime.now().add(const Duration(seconds: 10));
+        final last = Platform.isMacOS ? 'TEXT:aƒb' : 'TEXT:ab';
+        while (!output.any((line) => line.contains(last)) &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        final text =
+            output
+                .where((line) => line.contains('TEXT:'))
+                .map((line) => line.substring(line.indexOf('TEXT:')))
+                .toList();
+        expect(
+          text,
+          Platform.isMacOS
+              ? ['TEXT:a', 'TEXT:aƒ', 'TEXT:aƒb']
+              : ['TEXT:a', 'TEXT:ab'],
+        );
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch (ready &&
+        Directory(
+          p.join(
+            p.dirname(p.dirname(p.dirname(assets))),
+            'text',
+            'build',
+            'flutter_assets',
+          ),
+        ).existsSync()) {
+      false => 'build the runner and the text example first',
+      true => false,
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'a socket it cannot listen on ends the runner cleanly',
     () async {
       // By then the engine runs: it goes down before the runner returns,
@@ -2638,16 +2730,18 @@ void main() {
       void send(ClientMessage message) =>
           socket.write(MessageFraming.frame(message.writeToBuffer()));
       try {
-        final first = messages.stream.firstWhere((m) => m.hasFrame());
+        // The first frame may come inline, before the hello is read.
+        final first = messages.stream
+            .firstWhere((m) => m.hasFrame() && m.frame.inGpuBuffer)
+            .then<RunnerMessage?>((m) => m)
+            .timeout(const Duration(seconds: 15), onTimeout: () => null);
         send(
           ClientMessage(
             hello: ClientHello(protocolVersion: 1, pid: 1, gpuBuffers: true),
           ),
         );
         // Without a GPU (a CI machine) there is no ring to leave.
-        if (!(await first.timeout(
-          const Duration(seconds: 15),
-        )).frame.inGpuBuffer) {
+        if (await first == null) {
           send(ClientMessage(shutdown: Shutdown()));
           expect(await _exitCode(runner), 0);
           return;
@@ -2915,11 +3009,13 @@ void main() {
             readback.complete();
           }
         });
-        final first = await client.frames.first.timeout(
-          const Duration(seconds: 15),
-        );
+        // The first frame may come inline, before the hello is read.
+        final first = await client.frames
+            .firstWhere((frame) => frame.inGpuBuffer)
+            .then<Frame?>((frame) => frame)
+            .timeout(const Duration(seconds: 15), onTimeout: () => null);
         // Without a GPU (a CI machine) the runner has no ring to run dry.
-        if (!first.inGpuBuffer) {
+        if (first == null) {
           await frames.cancel();
           printOnFailure('no GPU ring on this host');
           return;

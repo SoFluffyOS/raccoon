@@ -41,8 +41,8 @@ SurfacePortServer::~SurfacePortServer() {
     wake.msgh_size = sizeof(wake);
     wake.msgh_remote_port = port_;
     wake.msgh_id = kWakeId;
-    while (mach_msg(&wake, MACH_SEND_MSG | MACH_SEND_TIMEOUT, sizeof(wake), 0,
-                    MACH_PORT_NULL, 100, MACH_PORT_NULL) == MACH_SEND_TIMED_OUT) {
+    while (!exited_ && mach_msg(&wake, MACH_SEND_MSG | MACH_SEND_TIMEOUT, sizeof(wake), 0,
+                                MACH_PORT_NULL, 100, MACH_PORT_NULL) == MACH_SEND_TIMED_OUT) {
     }
     thread_.join();
   }
@@ -87,6 +87,7 @@ void SurfacePortServer::Serve() {
     // Whatever the request carried that was not used.
     mach_msg_destroy(&buffer.header);
   }
+  exited_ = true;
 }
 
 void SurfacePortServer::Answer(mach_msg_header_t* request) {

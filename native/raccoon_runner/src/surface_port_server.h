@@ -59,6 +59,8 @@ class SurfacePortServer {
   uint8_t token_[kTokenSize] = {};
   mach_port_t port_ = MACH_PORT_NULL;
   std::atomic<bool> stop_{false};
+  // The serving thread has left its loop: a wake message would go unread.
+  std::atomic<bool> exited_{false};
   std::thread thread_;
 };
 

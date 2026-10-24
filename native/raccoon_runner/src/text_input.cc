@@ -279,9 +279,17 @@ bool TextInput::HandleKey(uint64_t logical, const std::string& character,
   }
 #endif
   // Shortcuts belong to the framework; a key with those held types nothing,
-  // but Option and AltGr (Ctrl+Alt on Windows) pick characters.
-  if (meta || (control && !alt)) return false;
-  if (alt) return TypeCharacter(character);
+  // but Option on a Mac and AltGr (Ctrl+Alt) on Windows pick characters.
+  // Elsewhere Alt types nothing, as GTK's input method and WM_SYSCHAR don't.
+#if defined(__APPLE__)
+  const bool picks = alt && !control && !meta;
+#elif defined(_WIN32)
+  const bool picks = alt && control && !meta;
+#else
+  const bool picks = false;
+#endif
+  if (picks) return TypeCharacter(character);
+  if (control || alt || meta) return false;
   const std::u16string before = text_;
   switch (logical) {
     case kBackspace: Backspace(); break;
