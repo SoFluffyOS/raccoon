@@ -29,6 +29,7 @@ const PointerPhase$json = {
     {'1': 'POINTER_PHASE_PAN_ZOOM_START', '2': 7},
     {'1': 'POINTER_PHASE_PAN_ZOOM_UPDATE', '2': 8},
     {'1': 'POINTER_PHASE_PAN_ZOOM_END', '2': 9},
+    {'1': 'POINTER_PHASE_CANCEL', '2': 10},
   ],
 };
 
@@ -39,7 +40,7 @@ final $typed_data.Uint8List pointerPhaseDescriptor = $convert.base64Decode(
     'X0hPVkVSEAMSFgoSUE9JTlRFUl9QSEFTRV9ET1dOEAQSFgoSUE9JTlRFUl9QSEFTRV9NT1ZFEA'
     'USFAoQUE9JTlRFUl9QSEFTRV9VUBAGEiAKHFBPSU5URVJfUEhBU0VfUEFOX1pPT01fU1RBUlQQ'
     'BxIhCh1QT0lOVEVSX1BIQVNFX1BBTl9aT09NX1VQREFURRAIEh4KGlBPSU5URVJfUEhBU0VfUE'
-    'FOX1pPT01fRU5EEAk=');
+    'FOX1pPT01fRU5EEAkSGAoUUE9JTlRFUl9QSEFTRV9DQU5DRUwQCg==');
 
 @$core.Deprecated('Use pointerDeviceDescriptor instead')
 const PointerDevice$json = {

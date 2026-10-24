@@ -41,6 +41,12 @@ class PointerPhase extends $pb.ProtobufEnum {
   static const PointerPhase POINTER_PHASE_PAN_ZOOM_END =
       PointerPhase._(9, _omitEnumNames ? '' : 'POINTER_PHASE_PAN_ZOOM_END');
 
+  /// The host took a press away (a gesture of its own, a lost window): the
+  /// app drops it, with no tap (#133). A runner that predates it takes an
+  /// unknown phase as this too.
+  static const PointerPhase POINTER_PHASE_CANCEL =
+      PointerPhase._(10, _omitEnumNames ? '' : 'POINTER_PHASE_CANCEL');
+
   static const $core.List<PointerPhase> values = <PointerPhase>[
     POINTER_PHASE_UNSPECIFIED,
     POINTER_PHASE_ADD,
@@ -52,10 +58,11 @@ class PointerPhase extends $pb.ProtobufEnum {
     POINTER_PHASE_PAN_ZOOM_START,
     POINTER_PHASE_PAN_ZOOM_UPDATE,
     POINTER_PHASE_PAN_ZOOM_END,
+    POINTER_PHASE_CANCEL,
   ];
 
   static final $core.List<PointerPhase?> _byValue =
-      $pb.ProtobufEnum.$_initByValueList(values, 9);
+      $pb.ProtobufEnum.$_initByValueList(values, 10);
   static PointerPhase? valueOf($core.int value) =>
       value < 0 || value >= _byValue.length ? null : _byValue[value];
 

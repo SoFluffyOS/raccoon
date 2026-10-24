@@ -15,7 +15,10 @@ rc.PointerEvent? toRunnerPointer(PointerEvent event, double pixelRatio) {
     PointerMoveEvent() => rc.PointerPhase.POINTER_PHASE_MOVE,
     PointerUpEvent() => rc.PointerPhase.POINTER_PHASE_UP,
     PointerHoverEvent() => rc.PointerPhase.POINTER_PHASE_HOVER,
-    PointerCancelEvent() => rc.PointerPhase.POINTER_PHASE_UP,
+    // A cancel is not a release: the app drops the press, with no tap.
+    PointerCancelEvent() => rc.PointerPhase.POINTER_PHASE_CANCEL,
+    // The mouse left: hover states in the app end.
+    PointerExitEvent() => rc.PointerPhase.POINTER_PHASE_REMOVE,
     PointerScrollEvent() => rc.PointerPhase.POINTER_PHASE_HOVER,
     PointerPanZoomStartEvent() => rc.PointerPhase.POINTER_PHASE_PAN_ZOOM_START,
     PointerPanZoomUpdateEvent() =>

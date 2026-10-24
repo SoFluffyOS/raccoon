@@ -59,6 +59,10 @@ enum PointerPhase {
   POINTER_PHASE_PAN_ZOOM_START = 7;
   POINTER_PHASE_PAN_ZOOM_UPDATE = 8;
   POINTER_PHASE_PAN_ZOOM_END = 9;
+  // The host took a press away (a gesture of its own, a lost window): the
+  // app drops it, with no tap (#133). A runner that predates it takes an
+  // unknown phase as this too.
+  POINTER_PHASE_CANCEL = 10;
 }
 
 enum PointerDevice {

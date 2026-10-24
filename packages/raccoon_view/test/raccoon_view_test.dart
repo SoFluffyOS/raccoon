@@ -179,6 +179,49 @@ void main() {
     expect(paints[0], 1);
   });
 
+  // #133: a mouse that left the view left the app's hover states on.
+  testWidgets('a mouse that leaves the view leaves the app too', (
+    tester,
+  ) async {
+    final connection = _FakeConnection();
+    await tester.pumpWidget(
+      const Directionality(
+        textDirection: TextDirection.ltr,
+        child: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(width: 100, height: 100),
+        ),
+      ),
+    );
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 100,
+            height: 100,
+            child: RaccoonView(connection: connection, pixelRatio: 1),
+          ),
+        ),
+      ),
+    );
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer(location: const Offset(300, 300));
+    // Leaving before it ever came in sends nothing.
+    await mouse.moveTo(const Offset(200, 200));
+    await mouse.moveTo(const Offset(50, 50));
+    await mouse.moveTo(const Offset(300, 300));
+    await tester.pump();
+
+    final phases = connection.pointers.map((p) => p.phase).toList();
+    expect(phases, [
+      rc.PointerPhase.POINTER_PHASE_HOVER,
+      rc.PointerPhase.POINTER_PHASE_REMOVE,
+    ]);
+  });
+
   testWidgets('forwards taps as down and up in frame pixels', (tester) async {
     final connection = _FakeConnection();
     await tester.pumpWidget(

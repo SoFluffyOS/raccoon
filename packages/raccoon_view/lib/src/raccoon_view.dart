@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart' show PointerDeviceKind, PointerExitEvent;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:raccoon/raccoon.dart' as rc;
@@ -82,6 +83,10 @@ class _RaccoonViewState extends State<RaccoonView> {
   Size? _sentSize;
   double _pixelRatio = 1;
 
+  /// Whether the runner has heard of the mouse since it last left: the
+  /// engine takes a mouse's leaving only from one it knows.
+  bool _mouseIn = false;
+
   @override
   void initState() {
     super.initState();
@@ -97,6 +102,7 @@ class _RaccoonViewState extends State<RaccoonView> {
     _unsubscribeGpu();
     _unsubscribeCursor();
     _sentSize = null;
+    _mouseIn = false;
     _subscribe();
   }
 
@@ -319,7 +325,17 @@ class _RaccoonViewState extends State<RaccoonView> {
     // A click into the app is a click into the app: the keys follow it.
     if (event is PointerDownEvent && !_focus.hasFocus) _focus.requestFocus();
     final mapped = toRunnerPointer(event, _pixelRatio);
-    if (mapped != null) widget.connection.sendPointer(mapped);
+    if (mapped == null) return;
+    if (event.kind == PointerDeviceKind.mouse) _mouseIn = true;
+    widget.connection.sendPointer(mapped);
+  }
+
+  /// The mouse left the view; not while it drags, which goes on outside.
+  void _onExit(PointerExitEvent event) {
+    if (event.kind != PointerDeviceKind.mouse) return;
+    if (!_mouseIn || event.buttons != 0) return;
+    _onPointer(event);
+    _mouseIn = false;
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
@@ -361,6 +377,7 @@ class _RaccoonViewState extends State<RaccoonView> {
         child: MouseRegion(
           // What the app asks for (see HostedMouseCursor).
           cursor: _cursor,
+          onExit: _onExit,
           child: Listener(
             onPointerDown: _onPointer,
             onPointerMove: _onPointer,

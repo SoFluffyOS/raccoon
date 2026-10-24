@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:raccoon/raccoon.dart' as rc;
 import 'package:raccoon_view/src/input_mapping.dart';
 
 void main() {
@@ -68,5 +69,17 @@ void main() {
     );
     expect(toRunnerPointer(first, 2)?.pointerId, 7);
     expect(toRunnerPointer(second, 2)?.pointerId, 8);
+  });
+
+  // #133: a cancel went on as a release, so a button under it fired.
+  test('a cancel is a cancel, and a mouse leaving is its removal', () {
+    expect(
+      toRunnerPointer(const PointerCancelEvent(device: 1), 2)?.phase,
+      rc.PointerPhase.POINTER_PHASE_CANCEL,
+    );
+    expect(
+      toRunnerPointer(const PointerExitEvent(device: 1), 2)?.phase,
+      rc.PointerPhase.POINTER_PHASE_REMOVE,
+    );
   });
 }
