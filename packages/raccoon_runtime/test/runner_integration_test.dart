@@ -2603,6 +2603,77 @@ void main() {
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
+  // #153: a hello again without GPU buffers left the ring in use, and the
+  // client got no frames at all.
+  test(
+    'a hello without GPU buffers turns the runner back to pixel frames',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final socket = await RawSocket.connect(
+        InternetAddress(endpoint.path, type: InternetAddressType.unix),
+        0,
+      );
+      final unframer = MessageUnframer();
+      final messages = StreamController<RunnerMessage>.broadcast();
+      socket.listen((event) {
+        if (event != RawSocketEvent.read) return;
+        final message = socket.readMessage();
+        if (message == null) return;
+        for (final control in message.controlMessages) {
+          for (final handle in control.extractHandles()) {
+            handle.toFile().closeSync();
+          }
+        }
+        for (final payload in unframer.add(message.data)) {
+          messages.add(RunnerMessage.fromBuffer(payload));
+        }
+      });
+      void send(ClientMessage message) =>
+          socket.write(MessageFraming.frame(message.writeToBuffer()));
+      try {
+        final first = messages.stream.firstWhere((m) => m.hasFrame());
+        send(
+          ClientMessage(
+            hello: ClientHello(protocolVersion: 1, pid: 1, gpuBuffers: true),
+          ),
+        );
+        // Without a GPU (a CI machine) there is no ring to leave.
+        if (!(await first.timeout(
+          const Duration(seconds: 15),
+        )).frame.inGpuBuffer) {
+          send(ClientMessage(shutdown: Shutdown()));
+          expect(await _exitCode(runner), 0);
+          return;
+        }
+
+        final inline = messages.stream.firstWhere(
+          (m) => m.hasFrame() && !m.frame.inGpuBuffer,
+        );
+        send(ClientMessage(hello: ClientHello(protocolVersion: 1, pid: 1)));
+        final frame = (await inline.timeout(const Duration(seconds: 5))).frame;
+        expect(frame.pixels, isNotEmpty);
+        send(ClientMessage(shutdown: Shutdown()));
+        expect(await _exitCode(runner), 0);
+      } finally {
+        await socket.close();
+        await messages.close();
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   // #146: a single message past the unread limit, a 4K frame inline, let
   // a client go that was reading.
   test(

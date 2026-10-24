@@ -774,6 +774,8 @@ int Serve(const Options& options) {
                      gpu_error.c_str());
       }
     }
+    // A client that says hello again without GPU buffers takes pixels.
+    if (!client_gpu) host.DisableGpuBuffers();
     gpu_told = 0;
     host.text_input().SetComposer(hello.composes());
     // A client that arrives mid-run learns which field is active.
