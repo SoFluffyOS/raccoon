@@ -380,20 +380,36 @@ def fetch_prebuilt():
     if os.path.exists(marker):
         return
     os.makedirs(cache, exist_ok=True)
+    # Unpacked aside, then moved in entry by entry: an interrupted fetch
+    # leaves no half entry that would count as cached (#122).
+    import tempfile
+    staging = tempfile.mkdtemp(prefix='.prebuilt-', dir=cache)
+    archive = os.path.join(staging, 'archive.tar.gz')
+    remember = True
     try:
-        archive = os.path.join(cache, 'prebuilt-%s.tar.gz' % runner_version)
         # Only when downloading: importing it costs every install 20 ms.
-        import urllib.request
+        import urllib.error, urllib.request
         urllib.request.urlretrieve(prebuilt_url, archive)
         with tarfile.open(archive) as tar:
             members = [m for m in tar.getmembers()
                        if m.isfile() and m.name.endswith('.so') and '..' not in m.name]
-            tar.extractall(cache, members=members)
+            tar.extractall(staging, members=members)
         os.remove(archive)
+        for entry in os.listdir(staging):
+            if not os.path.exists(os.path.join(cache, entry)):
+                os.replace(os.path.join(staging, entry), os.path.join(cache, entry))
         print('🦝 prebuilt plugins fetched for runner %s' % runner_version, file=sys.stderr)
-    except Exception:
-        pass  # no archive for this version, or no network: build here instead
-    open(marker, 'w').close()
+    except Exception as error:
+        # No archive for this version is worth remembering; a network
+        # failure or a server error is not, so the next install asks again.
+        if isinstance(error, urllib.error.HTTPError):
+            remember = error.code == 404
+        elif isinstance(error, urllib.error.URLError):
+            remember = False
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    if remember:
+        open(marker, 'w').close()
 
 
 def can_build():
@@ -495,9 +511,15 @@ for plugin in wanted:
             empty.append(name)
             status.append({'name': name, 'state': 'built_nothing', 'detail': 'built and made no library'})
             continue
-        os.makedirs(cached, exist_ok=True)
+        # Copied aside, then renamed into place: an interrupted copy leaves
+        # no entry that counts as cached (#122).
+        staging = cached + '.partial'
+        shutil.rmtree(staging, ignore_errors=True)
+        os.makedirs(staging)
         for so in libs:
-            shutil.copy2(so, cached)
+            shutil.copy2(so, staging)
+        shutil.rmtree(cached, ignore_errors=True)
+        os.replace(staging, cached)
         libs = sorted(glob.glob(os.path.join(cached, '*.so')))
         built.append(name)
     for so in libs:
@@ -653,26 +675,42 @@ def fetch_prebuilt():
     if os.path.exists(marker):
         return
     os.makedirs(cache, exist_ok=True)
+    # Unpacked aside, then moved in entry by entry: an interrupted fetch
+    # leaves no half entry that would count as cached (#122).
+    import tempfile
+    staging = tempfile.mkdtemp(prefix='.prebuilt-', dir=cache)
+    archive = os.path.join(staging, 'archive.tar.gz')
+    remember = True
     try:
-        archive = os.path.join(cache, 'prebuilt-%s.tar.gz' % runner_version)
         # Only when downloading: importing it costs every install 20 ms.
-        import urllib.request
+        import urllib.error, urllib.request
         urllib.request.urlretrieve(prebuilt_url, archive)
         with tarfile.open(archive) as tar:
             # Frameworks, with their symlinks; nothing that would land or
             # point outside the cache.
             if hasattr(tarfile, 'data_filter'):
-                tar.extractall(cache, filter='data')
+                tar.extractall(staging, filter='data')
             else:
                 members = [m for m in tar.getmembers()
                            if not m.name.startswith('/') and '..' not in m.name.split('/')
                            and not (m.issym() and (m.linkname.startswith('/') or '..' in m.linkname.split('/')[:-1]))]
-                tar.extractall(cache, members=members)
+                tar.extractall(staging, members=members)
         os.remove(archive)
+        for entry in os.listdir(staging):
+            if not os.path.exists(os.path.join(cache, entry)):
+                os.replace(os.path.join(staging, entry), os.path.join(cache, entry))
         print('🦝 prebuilt plugins fetched for runner %s' % runner_version, file=sys.stderr)
-    except Exception:
-        pass  # no archive for this version, or no network: build here instead
-    open(marker, 'w').close()
+    except Exception as error:
+        # No archive for this version is worth remembering; a network
+        # failure or a server error is not, so the next install asks again.
+        if isinstance(error, urllib.error.HTTPError):
+            remember = error.code == 404
+        elif isinstance(error, urllib.error.URLError):
+            remember = False
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    if remember:
+        open(marker, 'w').close()
 
 
 def frameworks(directory):
@@ -957,18 +995,23 @@ if misses:
             broken[name] = None
             continue
         # A fresh entry: one built again replaces what an older helper left.
-        shutil.rmtree(cached, ignore_errors=True)
-        os.makedirs(cached)
+        # Copied aside, then renamed into place: an interrupted copy leaves
+        # no entry that counts as cached (#122).
+        staging = cached + '.partial'
+        shutil.rmtree(staging, ignore_errors=True)
+        os.makedirs(staging)
         for d, f in made:
-            shutil.copytree(os.path.join(release, d, f), os.path.join(cached, f), symlinks=True,
+            shutil.copytree(os.path.join(release, d, f), os.path.join(staging, f), symlinks=True,
                             dirs_exist_ok=True)
         for path in vendored([os.path.join(release, d, f) for d, f in made],
                              [plugin['sources'], os.path.join(pods, 'Pods')]):
-            target = os.path.join(cached, os.path.basename(path))
+            target = os.path.join(staging, os.path.basename(path))
             if os.path.isdir(path):
                 shutil.copytree(path, target, symlinks=True, dirs_exist_ok=True)
             else:
                 shutil.copy2(path, target)
+        shutil.rmtree(cached, ignore_errors=True)
+        os.replace(staging, cached)
         built.append(name)
 
 entries = []

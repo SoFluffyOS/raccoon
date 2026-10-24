@@ -905,6 +905,102 @@ void main() {
     },
     timeout: const Timeout(Duration(minutes: 5)),
   );
+  // #122: one failed download turned prebuilts off for good, and an
+  // interrupted unpack left half entries that counted as cached.
+  test(
+    'on macOS a prebuilt download that fails is asked again next time',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_prebuilt');
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      // A plugin whose pod doesn't compile: never cached, so every install
+      // asks for a prebuilt first.
+      write(
+        'plugin_np/macos/plugin_np.podspec',
+        "Pod::Spec.new do |s|\n  s.name = 'plugin_np'\n  s.version = '1.0.0'\n"
+            "  s.summary = 'plugin_np'\n  s.homepage = 'https://example.com'\n"
+            "  s.license = { :type => 'BSD' }\n  s.author = 'Raccoon'\n"
+            "  s.source = { :path => '.' }\n  s.source_files = 'Classes/**/*'\n"
+            "  s.dependency 'FlutterMacOS'\n  s.platform = :osx, '10.15'\nend\n",
+      );
+      write('plugin_np/macos/Classes/PluginNp.m', 'this does not compile\n');
+      write(
+        'plugin_np/pubspec.yaml',
+        'name: plugin_np\nversion: 1.0.0\nflutter:\n  plugin:\n    platforms:\n'
+            '      macos:\n        pluginClass: PluginNp\n',
+      );
+      write('app/pubspec.yaml', 'name: app\ndependencies:\n  plugin_np:\n');
+      write(
+        'app/.dart_tool/package_config.json',
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+            {
+              'name': 'plugin_np',
+              'rootUri': '../../plugin_np',
+              'packageUri': 'lib/',
+            },
+          ],
+        }),
+      );
+      final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+        ..createSync(recursive: true);
+      final cache = Directory(p.join(temp.path, 'cache'));
+      Future<void> install(String prebuilt) async {
+        await Process.run(
+          p.join(runnerDir, 'tool', 'raccoon-device'),
+          ['install', bundle.path, 'app'],
+          environment: {
+            'RACCOON_RUNNER': binary!,
+            if (sdk != null) 'FLUTTER_ROOT': sdk,
+            'XDG_DATA_HOME': p.join(temp.path, 'data'),
+            'RACCOON_PLUGIN_CACHE': cache.path,
+            'RACCOON_PREBUILT_PLUGINS': prebuilt,
+          },
+        );
+      }
+
+      Iterable<String> names() =>
+          cache.existsSync()
+              ? cache.listSync().map((e) => p.basename(e.path))
+              : const [];
+      try {
+        // No archive there, as with no network: nothing is remembered.
+        await install(Uri.file(p.join(temp.path, 'missing.tar.gz')).toString());
+        expect(names().where((n) => n.endsWith('.done')), isEmpty);
+        expect(names().where((n) => n.startsWith('.prebuilt-')), isEmpty);
+
+        // An archive there: its entries move in, and the fetch is noted.
+        final source = Directory(p.join(temp.path, 'archive', 'some-entry'))
+          ..createSync(recursive: true);
+        File(p.join(source.path, 'lib.dylib')).writeAsStringSync('x');
+        final archive = p.join(temp.path, 'prebuilt.tar.gz');
+        final tar = await Process.run('tar', [
+          '-czf',
+          archive,
+          '-C',
+          p.join(temp.path, 'archive'),
+          'some-entry',
+        ]);
+        expect(tar.exitCode, 0, reason: '${tar.stderr}');
+        await install(Uri.file(archive).toString());
+        expect(names(), contains('some-entry'));
+        expect(names().where((n) => n.endsWith('.done')), hasLength(1));
+        expect(names().where((n) => n.startsWith('.prebuilt-')), isEmpty);
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isMacOS)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'the macOS plugin builder',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
   test(
     'on macOS a pod asking for an older macOS builds for this one',
     () async {
