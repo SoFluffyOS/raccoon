@@ -33,7 +33,19 @@ struct Reply {
 
 SurfacePortServer::~SurfacePortServer() {
   stop_ = true;
-  if (thread_.joinable()) thread_.join();
+  if (thread_.joinable()) {
+    // A message of its own wakes the receive, which waits with no timeout.
+    // Sent again while the queue is full: the thread is draining it.
+    mach_msg_header_t wake{};
+    wake.msgh_bits = MACH_MSGH_BITS(MACH_MSG_TYPE_MAKE_SEND, 0);
+    wake.msgh_size = sizeof(wake);
+    wake.msgh_remote_port = port_;
+    wake.msgh_id = kWakeId;
+    while (mach_msg(&wake, MACH_SEND_MSG | MACH_SEND_TIMEOUT, sizeof(wake), 0,
+                    MACH_PORT_NULL, 100, MACH_PORT_NULL) == MACH_SEND_TIMED_OUT) {
+    }
+    thread_.join();
+  }
   if (port_ != MACH_PORT_NULL) {
     mach_port_mod_refs(mach_task_self(), port_, MACH_PORT_RIGHT_RECEIVE, -1);
   }
@@ -65,14 +77,13 @@ void SurfacePortServer::Serve() {
     std::memset(&buffer, 0, sizeof(buffer));
     buffer.header.msgh_size = sizeof(buffer);
     buffer.header.msgh_local_port = port_;
-    // A timeout, so a stop is noticed without destroying the port under
-    // the receive.
-    const mach_msg_return_t received =
-        mach_msg(&buffer.header, MACH_RCV_MSG | MACH_RCV_TIMEOUT, 0, sizeof(buffer), port_, 250,
-                 MACH_PORT_NULL);
-    if (received == MACH_RCV_TIMED_OUT) continue;
+    // No timeout, so an idle runner sleeps here; the destructor's wake
+    // message ends it.
+    const mach_msg_return_t received = mach_msg(&buffer.header, MACH_RCV_MSG, 0, sizeof(buffer),
+                                                port_, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
+    if (received == MACH_RCV_INVALID_NAME || received == MACH_RCV_PORT_DIED) break;
     if (received != MACH_MSG_SUCCESS) continue;
-    Answer(&buffer.header);
+    if (buffer.header.msgh_id != kWakeId) Answer(&buffer.header);
     // Whatever the request carried that was not used.
     mach_msg_destroy(&buffer.header);
   }

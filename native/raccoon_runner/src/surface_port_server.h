@@ -33,6 +33,7 @@ class SurfacePortServer {
 
   static constexpr mach_msg_id_t kRequestId = 0x52505254;  // 'RPRT'
   static constexpr mach_msg_id_t kReplyId = 0x52505259;    // 'RPRY'
+  static constexpr mach_msg_id_t kWakeId = 0x5257414b;     // 'RWAK', its own
   static constexpr size_t kTokenSize = 16;
 
   SurfacePortServer() = default;
