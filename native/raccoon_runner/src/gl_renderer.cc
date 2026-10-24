@@ -485,6 +485,11 @@ uint32_t GlRenderer::Fbo(size_t width, size_t height) {
   uint32_t fbo = 0;
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    // A buffer the engine took and never presented (a frame it dropped) was
+    // never handed out.
+    if (current_ >= 0 && static_cast<size_t>(current_) < pool_.size()) {
+      pool_[current_].busy = false;
+    }
     current_ = -1;
     if (!pool_wanted_ && !pool_.empty()) DestroyPool();
     if (pool_wanted_ && can_export_) {

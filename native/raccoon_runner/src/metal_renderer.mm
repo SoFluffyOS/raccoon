@@ -305,11 +305,12 @@ bool MetalRenderer::EnablePool(size_t count, std::string* error) {
   return true;
 }
 
-void MetalRenderer::ShareByPort() {
+bool MetalRenderer::ShareByPort(bool by_port) {
   std::lock_guard<std::mutex> lock(impl_->mutex);
-  if (!impl_->global_surfaces) return;
-  impl_->global_surfaces = false;
+  if (impl_->global_surfaces != by_port) return false;
+  impl_->global_surfaces = !by_port;
   impl_->rebuild = !impl_->pool.empty();
+  return true;
 }
 
 bool MetalRenderer::SurfacePorts(uint32_t generation, std::vector<uint32_t>* ports) const {
@@ -401,6 +402,11 @@ bool MetalRenderer::NextDrawable(size_t width, size_t height, int64_t* texture_i
   }
   Impl& m = *impl_;
   std::lock_guard<std::mutex> lock(m.mutex);
+  // A drawable the engine took and never presented (a frame it dropped)
+  // was never handed out.
+  if (m.current >= 0 && static_cast<size_t>(m.current) < m.pool.size()) {
+    m.pool[m.current].busy = false;
+  }
   m.current = -1;
   if (!m.pool_wanted && !m.pool.empty()) m.DestroyPool();
   if (m.pool_wanted) {
