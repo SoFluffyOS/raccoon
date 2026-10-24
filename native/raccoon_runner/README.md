@@ -29,6 +29,8 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   - the window plugins (`desktop_window`, `window_manager`, `window_size`):
     the app's window is the client's pane, so sizes come from the view and
     requests to resize, move or go full screen are recorded, not applied;
+  - `screen_retriever`: the pane is the one display, at the view's logical
+    size and pixel ratio, on 0.2's channel and 0.1's (#156);
   - `shared_preferences_foundation`, which a Mac host's Dart VM picks (it
     reports macOS), kept in `--data-dir` when given (`tool/raccoon-device`
     passes one per app), in memory otherwise.
@@ -136,9 +138,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   loaded plugin's channels are answered before a client sees them, GLib's
   main context is pumped from the runner's loop, and a plugin's textures
   draw through the GL renderer. The registrar hands out no view: the
-  window plugins (`desktop_window`, `window_manager`, `window_size`) stay
-  the runner's own, above; `screen_retriever` is not built either, and its
-  calls get no answer. `example/plugins/echo`
+  window plugins (`desktop_window`, `window_manager`, `window_size`,
+  `screen_retriever` and its `_macos`, `_linux` and `_windows` halves)
+  stay the runner's own, above. `example/plugins/echo`
   is a plugin as the template makes one; `example/plugins_app` calls it.
 - Loads the project's native plugins on macOS too. A plugin framework links
   against `FlutterMacOS.framework` and uses its channel and codec classes;

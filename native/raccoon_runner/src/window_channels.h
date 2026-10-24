@@ -35,6 +35,10 @@ class WindowChannels {
   CodecValue DesktopWindow(const MethodCall& call);
   CodecValue WindowManager(const MethodCall& call);
   CodecValue WindowSize(const MethodCall& call);
+  CodecValue ScreenRetriever(const MethodCall& call);
+  // The pane as screen_retriever's Display: a map of id, name, size,
+  // visiblePosition, visibleSize and scaleFactor.
+  CodecValue Display() const;
 
   double logical_width() const;
   double logical_height() const;

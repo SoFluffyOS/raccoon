@@ -10,6 +10,12 @@ namespace {
 constexpr char kDesktopWindow[] = "desktop_window";
 constexpr char kWindowManager[] = "window_manager";
 constexpr char kWindowSize[] = "flutter/windowsize";
+// screen_retriever 0.2 and later, and 0.1's channel; the event channel's
+// listen and cancel come as method calls on its own name.
+constexpr char kScreenRetriever[] = "dev.leanflutter.plugins/screen_retriever";
+constexpr char kScreenRetrieverEvents[] =
+    "dev.leanflutter.plugins/screen_retriever_event";
+constexpr char kScreenRetrieverOld[] = "screen_retriever";
 
 bool BoolArgument(const CodecValue& arguments, const std::string& key,
                   bool fallback) {
@@ -38,8 +44,9 @@ void WindowChannels::SetViewSize(size_t width, size_t height,
 
 bool WindowChannels::Handle(const std::string& channel, const uint8_t* data,
                             size_t size, std::vector<uint8_t>* reply) {
+  const bool screens = channel == kScreenRetriever || channel == kScreenRetrieverOld;
   if (channel != kDesktopWindow && channel != kWindowManager &&
-      channel != kWindowSize) {
+      channel != kWindowSize && !screens && channel != kScreenRetrieverEvents) {
     return false;
   }
   MethodCall call;
@@ -57,9 +64,12 @@ bool WindowChannels::Handle(const std::string& channel, const uint8_t* data,
     result = DesktopWindow(call);
   } else if (channel == kWindowManager) {
     result = WindowManager(call);
-  } else {
+  } else if (channel == kWindowSize) {
     result = WindowSize(call);
+  } else if (screens) {
+    result = ScreenRetriever(call);
   }
+  // The event channel: listening succeeds, and no screen ever changes.
   *reply = EncodeSuccess(result);
   return true;
 }
@@ -95,6 +105,35 @@ CodecValue WindowChannels::DesktopWindow(const MethodCall& call) {
   // setWindowSize, focus and anything newer: the pane's size and focus belong
   // to the client.
   return CodecValue();
+}
+
+CodecValue WindowChannels::ScreenRetriever(const MethodCall& call) {
+  if (call.method == "getPrimaryDisplay") return Display();
+  if (call.method == "getAllDisplays") {
+    return CodecValue::Map({{"displays", CodecValue::List({Display()})}});
+  }
+  if (call.method == "getCursorScreenPoint") {
+    // The pointer is the client's; the runner knows it only inside the app.
+    return CodecValue::Map({{"dx", CodecValue::Double(0)}, {"dy", CodecValue::Double(0)}});
+  }
+  return CodecValue();
+}
+
+CodecValue WindowChannels::Display() const {
+  // Doubles throughout: the plugin hands them to Size and Offset as they come.
+  auto size = [this] {
+    return CodecValue::Map({{"width", CodecValue::Double(logical_width())},
+                            {"height", CodecValue::Double(logical_height())}});
+  };
+  return CodecValue::Map({
+      {"id", CodecValue::String("0")},
+      {"name", CodecValue::String("Raccoon")},
+      {"size", size()},
+      {"visiblePosition",
+       CodecValue::Map({{"dx", CodecValue::Double(0)}, {"dy", CodecValue::Double(0)}})},
+      {"visibleSize", size()},
+      {"scaleFactor", CodecValue::Double(pixel_ratio_)},
+  });
 }
 
 CodecValue WindowChannels::WindowManager(const MethodCall& call) {

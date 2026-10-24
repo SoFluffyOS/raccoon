@@ -196,8 +196,11 @@ if [ "${1:-}" = "--size" ]; then
 fi
 
 
-# The window plugins stay the runner's own: their window is the client's pane.
+# The window plugins stay the runner's own: their window is the client's pane,
+# which is also screen_retriever's one display (its native code is in the
+# _macos, _linux and _windows packages since 0.2).
 VIRTUAL_PLUGINS="desktop_window window_manager window_size screen_retriever"
+VIRTUAL_PLUGINS="$VIRTUAL_PLUGINS screen_retriever_macos screen_retriever_linux screen_retriever_windows"
 # On macOS so does shared_preferences_foundation: the runner keeps each app's
 # preferences in its data directory, where NSUserDefaults would share the
 # runner's one domain among every app.

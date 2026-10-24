@@ -5,7 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 /// Calls the channels the runner answers itself before the first frame, the
-/// way the plugins do: desktop_window, window_manager and window_size, and
+/// way the plugins do: desktop_window, window_manager, window_size and
+/// screen_retriever (0.2's channel and 0.1's), and
 /// shared_preferences_foundation's two Pigeon APIs (Wonderous awaits
 /// setMinWindowSize and loads its settings in its bootstrap). Shows a green
 /// box when every call was answered as expected and a red one otherwise. The
@@ -88,6 +89,51 @@ Future<void> main() async {
     await windowSize.invokeMethod('setWindowMinimumSize', [640.0, 480.0]);
     final size = await windowSize.invokeMethod('getWindowMinimumSize');
     return (size as List).cast<double>()[0] == 640.0;
+  });
+
+  // screen_retriever: the pane is the one display. Sizes come as doubles,
+  // which the plugin hands to Size and Offset as they are.
+  for (final name in [
+    'dev.leanflutter.plugins/screen_retriever',
+    'screen_retriever',
+  ]) {
+    final screens = MethodChannel(name);
+    const ratio = {'devicePixelRatio': 1.0};
+    await check('$name.getPrimaryDisplay', () async {
+      final Map<dynamic, dynamic> display = await screens.invokeMethod(
+        'getPrimaryDisplay',
+        ratio,
+      );
+      final size = display['size'] as Map;
+      return display['id'] is String &&
+          size['width'] == 800.0 &&
+          size['height'] == 600.0 &&
+          (display['visibleSize'] as Map)['width'] is double &&
+          (display['visiblePosition'] as Map)['dx'] == 0.0 &&
+          display['scaleFactor'] == 1.0;
+    });
+    await check('$name.getAllDisplays', () async {
+      final Map<dynamic, dynamic> all = await screens.invokeMethod(
+        'getAllDisplays',
+        ratio,
+      );
+      return (all['displays'] as List).length == 1;
+    });
+    await check('$name.getCursorScreenPoint', () async {
+      final Map<dynamic, dynamic> point = await screens.invokeMethod(
+        'getCursorScreenPoint',
+        ratio,
+      );
+      return point['dx'] is double && point['dy'] is double;
+    });
+  }
+  await check('screen_retriever events', () async {
+    const events = MethodChannel(
+      'dev.leanflutter.plugins/screen_retriever_event',
+    );
+    await events.invokeMethod('listen');
+    await events.invokeMethod('cancel');
+    return true;
   });
 
   // shared_preferences_foundation: one BasicMessageChannel per method, the
