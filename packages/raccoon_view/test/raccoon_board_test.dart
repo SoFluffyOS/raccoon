@@ -269,6 +269,24 @@ void main() {
       ));
     });
 
+    testWidgets('an app run again comes back with its size menu shut', (
+      tester,
+    ) async {
+      await pumpBoard(tester, ['counter']);
+      await tester.tap(find.byKey(RaccoonBoard.sizeKey('counter')));
+      await tester.pump();
+      expect(
+        find.byKey(RaccoonBoard.sizeOptionKey('counter', 'tablet')),
+        findsOneWidget,
+      );
+      await pumpBoard(tester, []);
+      await pumpBoard(tester, ['counter']);
+      expect(
+        find.byKey(RaccoonBoard.sizeOptionKey('counter', 'tablet')),
+        findsNothing,
+      );
+    });
+
     testWidgets('a resize by the handle is kept for next time', (tester) async {
       final temp = Directory.systemTemp.createTempSync('raccoon_board');
       addTearDown(() => temp.deleteSync(recursive: true));

@@ -327,6 +327,11 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
       old.layout.removeListener(_changed);
       widget.layout.addListener(_changed);
     }
+    // A menu goes with its app: one run again under the name opens shut.
+    if (_sizeMenu case final name?
+        when !widget.sessions.any((session) => session.name == name)) {
+      _sizeMenu = null;
+    }
   }
 
   @override
