@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <thread>
 #include <nlohmann/json.hpp>
 #if defined(_WIN32)
 #include <io.h>
@@ -689,18 +690,24 @@ bool EngineHost::LoadPlugins(const std::string& manifest, std::string* error) {
     PluginHost::Bridge bridge;
     bridge.send = [this](const std::string& channel, const uint8_t* data, size_t size,
                          std::function<void(const uint8_t*, size_t)> on_reply) {
-      SendPlatformMessage(channel, data, size, std::move(on_reply));
+      PluginCall([&] { SendPlatformMessage(channel, data, size, std::move(on_reply)); return true; });
     };
     bridge.respond = [this](const FlutterPlatformMessageResponseHandle* handle,
-                            const uint8_t* data, size_t size) { Respond(handle, data, size); };
+                            const uint8_t* data, size_t size) {
+      PluginCall([&] { Respond(handle, data, size); return true; });
+    };
     bridge.register_texture = [this](int64_t id) {
-      return loader_.procs().RegisterExternalTexture(engine_, id) == kSuccess;
+      return PluginCall(
+          [&] { return loader_.procs().RegisterExternalTexture(engine_, id) == kSuccess; });
     };
     bridge.mark_texture_frame_available = [this](int64_t id) {
-      return loader_.procs().MarkExternalTextureFrameAvailable(engine_, id) == kSuccess;
+      return PluginCall([&] {
+        return loader_.procs().MarkExternalTextureFrameAvailable(engine_, id) == kSuccess;
+      });
     };
     bridge.unregister_texture = [this](int64_t id) {
-      return loader_.procs().UnregisterExternalTexture(engine_, id) == kSuccess;
+      return PluginCall(
+          [&] { return loader_.procs().UnregisterExternalTexture(engine_, id) == kSuccess; });
     };
 #if RACCOON_HAS_METAL
     bridge.metal_device = metal_ != nullptr ? metal_->device() : nullptr;
@@ -786,9 +793,24 @@ bool EngineHost::GlExternalTexture(void* user_data, int64_t texture_id, size_t w
 }
 #endif
 
+#if RACCOON_HAS_PLUGINS
+template <typename Call>
+bool EngineHost::PluginCall(Call call) {
+  ++plugin_calls_;
+  const bool made = !stopping_ && engine_ != nullptr && call();
+  --plugin_calls_;
+  return made;
+}
+#endif
+
 void EngineHost::Shutdown() {
   if (engine_ == nullptr) return;
   platform_->RunDueTasks();
+#if RACCOON_HAS_PLUGINS
+  // From here a plugin's call does nothing; the ones under way finish first.
+  stopping_ = true;
+  while (plugin_calls_ > 0) std::this_thread::yield();
+#endif
   loader_.procs().Shutdown(engine_);
   engine_ = nullptr;
   if (gpu_) gpu_->Shutdown();

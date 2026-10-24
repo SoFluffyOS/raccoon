@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <memory>
@@ -217,6 +218,13 @@ class EngineHost {
   std::unordered_set<std::string> unanswered_;
 #if RACCOON_HAS_PLUGINS
   std::unique_ptr<PluginHost> plugins_;
+  // A plugin's call into the engine comes from any thread. Each is counted
+  // and made only while the engine isn't stopping; Shutdown says it is,
+  // then waits for the calls under way (#129).
+  template <typename Call>
+  bool PluginCall(Call call);
+  std::atomic<int> plugin_calls_{0};
+  std::atomic<bool> stopping_{false};
 #endif
   // The engine's external textures, on the raster thread: the camera's
   // previews, then the plugins' textures.
