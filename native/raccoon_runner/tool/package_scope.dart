@@ -6,7 +6,8 @@
 //
 // A workspace member (resolution: workspace) has no package config of its
 // own; the workspace root's names every member's packages. This finds the
-// nearest config above the project, keeps what the app reaches (its
+// root's config, by the member's .dart_tool/pub/workspace_ref.json or else
+// the nearest config above that names it, keeps what the app reaches (its
 // dependencies and dev dependencies, then theirs, as pub records them in
 // package_graph.json beside the config), and writes those to <out> with
 // absolute roots, for the plugin and native asset steps to read as the
@@ -25,25 +26,44 @@ void main(List<String> arguments) {
   final [projectPath, out] = arguments;
   final project = Directory(projectPath).absolute.resolveSymbolicLinksSync();
 
+  // Pub names the root in the member: a config left in a folder between,
+  // from before the move to a workspace, is not taken for it (#141).
+  final sep = Platform.pathSeparator;
+  final ref = File('$project$sep.dart_tool${sep}pub${sep}workspace_ref.json');
+  if (ref.existsSync()) {
+    try {
+      final root = (jsonDecode(ref.readAsStringSync()) as Map)['workspaceRoot'];
+      final rootDir = Uri.directory(ref.parent.path).resolve('$root/');
+      final config = File.fromUri(
+        rootDir.resolve('.dart_tool/package_config.json'),
+      );
+      if (config.existsSync() && _scope(config, project, out)) return;
+    } on Object {
+      // Not one pub wrote: the search below finds the root.
+    }
+  }
+  final passed = <String>[];
   for (var dir = Directory(project).parent; ; dir = dir.parent) {
-    final config = File(
-      '${dir.path}${Platform.pathSeparator}.dart_tool'
-      '${Platform.pathSeparator}package_config.json',
-    );
+    final config = File('${dir.path}$sep.dart_tool${sep}package_config.json');
     if (config.existsSync()) {
-      exitCode = _scope(config, project, out);
-      return;
+      if (_scope(config, project, out)) return;
+      passed.add(config.path);
     }
     if (dir.parent.path == dir.path) break;
   }
-  stderr.writeln(
-    'raccoon-device: no .dart_tool/package_config.json for $project; '
-    'run flutter pub get',
-  );
+  stderr.writeln(switch (passed) {
+    [] =>
+      'raccoon-device: no .dart_tool/package_config.json for $project; '
+          'run flutter pub get',
+    _ =>
+      'raccoon-device: no package config above names $project '
+          '(${passed.join(', ')}); run flutter pub get',
+  });
   exitCode = 1;
 }
 
-int _scope(File config, String project, String out) {
+/// Writes [out] from [config]; false when [config] does not name [project].
+bool _scope(File config, String project, String out) {
   final dartTool = Uri.directory(config.parent.path);
   final decoded = jsonDecode(config.readAsStringSync()) as Map;
   final packages = <String, Map<String, Object?>>{};
@@ -60,13 +80,7 @@ int _scope(File config, String project, String out) {
       app = name;
     }
   }
-  if (app == null) {
-    stderr.writeln(
-      'raccoon-device: ${config.path} does not name $project; '
-      'run flutter pub get',
-    );
-    return 1;
-  }
+  if (app == null) return false;
 
   final graph = File(
     '${config.parent.path}${Platform.pathSeparator}package_graph.json',
@@ -105,5 +119,5 @@ int _scope(File config, String project, String out) {
       }),
     );
   stdout.writeln(out);
-  return 0;
+  return true;
 }
