@@ -1,3 +1,7 @@
+## Unreleased
+
+- `PointerPhase` gains `CANCEL`: the host took a press away, and the app drops it with no tap. A runner that predates it already took an unknown phase as a cancel.
+
 ## 0.7.0
 
 - `PointerPhase` gains `PAN_ZOOM_START`, `PAN_ZOOM_UPDATE` and `PAN_ZOOM_END`, `PointerEvent` gains `pan_x`, `pan_y`, `scale` and `rotation`, and `PointerDevice` gains `TRACKPAD`: a trackpad gesture reaches the app as the pan-zoom events the framework delivers it as, so two-finger scrolling works.
