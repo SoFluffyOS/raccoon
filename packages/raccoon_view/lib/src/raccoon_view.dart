@@ -304,9 +304,17 @@ class _RaccoonViewState extends State<RaccoonView> {
       return;
     }
     final previous = _shown;
-    _shown = (frame.gpuGeneration, frame.bufferIndex);
+    final shown = (frame.gpuGeneration, frame.bufferIndex);
+    _shown = shown;
     await gpu.show(id, frame.gpuGeneration, frame.bufferIndex);
-    if (previous case (final generation, final index) when !_hostReleases) {
+    // The buffer shown before, unless it is this one again: a view made
+    // anew on a connection first shows the last frame, which the view
+    // before may have given back, and the runner may hand it out again.
+    // Given back twice, the buffer on screen could be drawn into (#133).
+    if (previous case (
+      final generation,
+      final index,
+    ) when !_hostReleases && previous != shown) {
       connection.releaseGpuBuffer(generation, index);
     }
     if (!mounted) return;

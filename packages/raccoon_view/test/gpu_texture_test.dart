@@ -384,4 +384,31 @@ void main() {
     expect(textures.calls.last, 'connect 3 /run/r.gpu');
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets('the buffer on screen, sent again, is not given back', (
+    tester,
+  ) async {
+    final connection = _GpuConnection();
+    final textures = _FakeTextures();
+    await tester.pumpWidget(
+      RaccoonView(connection: connection, gpuTextures: textures),
+    );
+    connection.sets.add(_set('/run/r.gpu'));
+    await tester.pump();
+    rc.Frame inBuffer(int sequence, int index) => rc.Frame(
+      sequence: Int64(sequence),
+      inGpuBuffer: true,
+      bufferIndex: index,
+      gpuGeneration: 1,
+    );
+    // The last frame, replayed to a view made anew, then the same buffer
+    // handed out again for the app's next frame.
+    for (final frame in [inBuffer(1, 0), inBuffer(2, 0), inBuffer(3, 1)]) {
+      connection.frameController.add(frame);
+      await tester.pump();
+      await tester.pump();
+    }
+    expect(connection.released, [(1, 0)]);
+    await tester.pumpWidget(const SizedBox());
+  });
 }
