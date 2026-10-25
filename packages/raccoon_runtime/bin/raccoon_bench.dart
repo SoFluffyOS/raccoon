@@ -2,10 +2,15 @@
 // bundle, resizes it, and counts frames, bytes and CPU for a few seconds.
 //
 //   dart run raccoon_runtime:raccoon_bench --runner B --engine-dir D --assets A --icu I
-//       [--width 1200] [--height 800] [--seconds 5]
+//       [--width 1200] [--height 800] [--pixel-ratio 1] [--seconds 5]
+//       [--gpu true] [--reuse-pixels true]
+//
+// --gpu takes frames as GPU buffers, given back as they come; --reuse-pixels
+// reads pixel frames into the client's kept buffers (RunnerClient).
 
 import 'dart:io';
 
+import 'package:raccoon/raccoon.dart';
 import 'package:raccoon_runtime/raccoon_runtime.dart';
 
 Future<void> main(List<String> arguments) async {
@@ -22,7 +27,9 @@ Future<void> main(List<String> arguments) async {
       assets == null ||
       icu == null) {
     stderr.writeln(
-      'usage: raccoon_bench --runner B --engine-dir D --assets A --icu I [--width N] [--height N] [--seconds N]',
+      'usage: raccoon_bench --runner B --engine-dir D --assets A --icu I '
+      '[--width N] [--height N] [--pixel-ratio R] [--seconds N] '
+      '[--gpu true] [--reuse-pixels true]',
     );
     exitCode = 2;
     return;
@@ -30,6 +37,9 @@ Future<void> main(List<String> arguments) async {
   final width = int.parse(options['width'] ?? '1200');
   final height = int.parse(options['height'] ?? '800');
   final seconds = int.parse(options['seconds'] ?? '5');
+  final pixelRatio = double.parse(options['pixel-ratio'] ?? '1');
+  final gpu = options['gpu'] == 'true';
+  final reusePixels = options['reuse-pixels'] == 'true';
 
   final temp = Directory.systemTemp.createTempSync('raccoon_bench');
   final endpoint = UnixSocketEndpoint('${temp.path}/runner.sock');
@@ -42,9 +52,14 @@ Future<void> main(List<String> arguments) async {
       endpoint: endpoint,
       width: width,
       height: height,
+      pixelRatio: pixelRatio,
     ),
   );
-  final client = await RunnerClient.connect(endpoint);
+  final client = await RunnerClient.connect(
+    endpoint,
+    gpuBuffers: gpu,
+    reusePixels: reusePixels,
+  );
   await client.frames.first.timeout(const Duration(seconds: 15));
 
   var frames = 0;
@@ -52,9 +67,15 @@ Future<void> main(List<String> arguments) async {
   final runnerCpuStart = _cpuTicks(runner.pid);
   final selfCpuStart = _cpuTicks(pid);
   final clock = Stopwatch()..start();
+  Frame? held;
   final subscription = client.frames.listen((frame) {
     frames++;
     bytes += frame.pixels.length;
+    // A GPU buffer goes back once the next comes, as a view's would.
+    if (held case final previous? when previous.inGpuBuffer) {
+      client.releaseGpuBuffer(previous.gpuGeneration, previous.bufferIndex);
+    }
+    held = frame;
   });
   await Future<void>.delayed(Duration(seconds: seconds));
   clock.stop();
@@ -69,7 +90,11 @@ Future<void> main(List<String> arguments) async {
       (_cpuTicks(pid) - selfCpuStart) / _ticksPerSecond / elapsed * 100;
 
   stdout
-    ..writeln('frame size: ${width}x$height, ${width * height * 4 ~/ 1024} KiB')
+    ..writeln(
+      'frame size: ${width}x$height @$pixelRatio, '
+      '${width * height * 4 ~/ 1024} KiB'
+      '${gpu ? ', GPU buffers' : ''}${reusePixels ? ', pixels reused' : ''}',
+    )
     ..writeln(
       'frames: $frames in ${elapsed.toStringAsFixed(1)} s = ${(frames / elapsed).toStringAsFixed(1)} fps',
     )
