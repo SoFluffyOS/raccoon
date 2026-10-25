@@ -149,6 +149,11 @@ Future<void> main(List<String> arguments) async {
         });
         continue;
       }
+      if (_keptFailure(cache, plugin, environment) case final why?) {
+        failed.add('${plugin.name} ($why)');
+        status.add({'name': plugin.name, 'state': 'failed', 'detail': why});
+        continue;
+      }
       final project = Directory('$out\\build\\${plugin.name}')
         ..createSync(recursive: true);
       File('${project.path}\\CMakeLists.txt').writeAsStringSync(
@@ -178,12 +183,15 @@ Future<void> main(List<String> arguments) async {
             'Release',
           ]);
       if (!ok) {
+        final why = _keepFailure(
+          cache,
+          plugin,
+          environment,
+          'did not build; see ${log.path}',
+          log,
+        );
         failed.add('${plugin.name} (see ${log.path})');
-        status.add({
-          'name': plugin.name,
-          'state': 'failed',
-          'detail': 'did not build; see ${log.path}',
-        });
+        status.add({'name': plugin.name, 'state': 'failed', 'detail': why});
         continue;
       }
       final made = [
@@ -242,6 +250,79 @@ Future<void> main(List<String> arguments) async {
     '${(watch.elapsedMilliseconds / 1000).toStringAsFixed(1)} s: '
     '${parts.isEmpty ? 'none to build' : parts.join('; ')}',
   );
+}
+
+// A plugin that failed to build is kept failed, as on the other hosts
+// (#136): by its key and Visual Studio's tools, for a day, its log beside
+// it; never with RACCOON_RETRY_PLUGINS=1, and never for a missing
+// toolchain.
+const _failureDays = 1;
+
+String _toolchainOf(Map<String, String> environment) =>
+    '${environment['VisualStudioVersion'] ?? ''} / '
+    '${environment['VCToolsVersion'] ?? ''}';
+
+File _failureFile(String cache, _Plugin plugin) =>
+    File('$cache\\failed\\${plugin.key}.json');
+
+/// Why [plugin] failed last time, when that still holds; else null.
+String? _keptFailure(
+  String cache,
+  _Plugin plugin,
+  Map<String, String> environment,
+) {
+  if (Platform.environment['RACCOON_RETRY_PLUGINS'] == '1') return null;
+  final Object? kept;
+  try {
+    kept = jsonDecode(_failureFile(cache, plugin).readAsStringSync());
+  } on Object {
+    return null;
+  }
+  if (kept is! Map ||
+      kept['toolchain'] != _toolchainOf(environment) ||
+      kept['at'] is! int ||
+      kept['why'] is! String) {
+    return null;
+  }
+  final at = DateTime.fromMillisecondsSinceEpoch(kept['at'] as int);
+  if (DateTime.now().difference(at) > const Duration(days: _failureDays)) {
+    return null;
+  }
+  final when = at.toIso8601String().substring(0, 16).replaceFirst('T', ' ');
+  return '${kept['why']} (kept from $when; '
+      'RACCOON_RETRY_PLUGINS=1 builds it again)';
+}
+
+/// Keeps [plugin]'s failure, [why], with a copy of [log] beside it, and
+/// returns [why] naming that copy: the install's own is written over by
+/// the next.
+String _keepFailure(
+  String cache,
+  _Plugin plugin,
+  Map<String, String> environment,
+  String why,
+  File log,
+) {
+  final record = _failureFile(cache, plugin);
+  record.parent.createSync(recursive: true);
+  var kept = why;
+  if (log.existsSync()) {
+    final copy = record.path.replaceFirst(RegExp(r'\.json$'), '.log');
+    log.copySync(copy);
+    kept = why.replaceFirst(log.path, copy);
+  }
+  final staging = File('${record.path}.partial-$pid');
+  staging.writeAsStringSync(
+    jsonEncode({
+      'why': kept,
+      'at': DateTime.now().millisecondsSinceEpoch,
+      'toolchain': _toolchainOf(environment),
+    }),
+  );
+  // Windows renames over nothing.
+  if (record.existsSync()) record.deleteSync();
+  staging.renameSync(record.path);
+  return kept;
 }
 
 final class _Plugin {
