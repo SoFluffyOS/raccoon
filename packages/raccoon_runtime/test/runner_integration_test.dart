@@ -17,6 +17,8 @@ const _blue = (r: 0x1E, g: 0x88, b: 0xE5);
 const _red = (r: 0xE5, g: 0x39, b: 0x35);
 const _green = (r: 0x43, g: 0xA0, b: 0x47);
 const _purple = (r: 0x8E, g: 0x24, b: 0xAA);
+const _orange = (r: 0xFB, g: 0x8C, b: 0x00);
+const _white = (r: 0xFF, g: 0xFF, b: 0xFF);
 
 /// example/camera's picture line: the verdict on the test pattern's bars,
 /// the colours seen where they are, and the picture's path.
@@ -1801,6 +1803,171 @@ void main() {
   // example/channels calls desktop_window, window_manager, window_size and
   // shared_preferences_foundation at startup and shows a green box only when
   // every answer was right.
+  final viewsAssets = p.join(
+    runnerDir,
+    'example',
+    'views',
+    'build',
+    'flutter_assets',
+  );
+  test(
+    'one run shows the app in a view per client, each its size and its taps',
+    () async {
+      // #182: example/views draws its root in every view, coloured by the
+      // view's id (0 blue, 1 green, 2 orange), a box in the middle that a
+      // tap turns from red to white.
+      final temp = Directory.systemTemp.createTempSync('raccoon_views');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: viewsAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          width: 390,
+          height: 300,
+          views: true,
+        ),
+      );
+      final first = await RunnerClient.connect(endpoint);
+      final others = <RunnerClient>[];
+      try {
+        await first.hello.timeout(const Duration(seconds: 10));
+        expect(first.takesViews, isTrue);
+        expect(first.viewId, 0);
+        final own = await first.frames.first.timeout(
+          const Duration(seconds: 15),
+        );
+        expect((own.width, own.height), (390, 300));
+        expect(_pixel(own, 5, 5), _blue);
+
+        final second = await RunnerClient.connect(endpoint.views);
+        others.add(second);
+        await second.hello.timeout(const Duration(seconds: 10));
+        expect(second.viewId, 1);
+        second.resize(300, 200, 2);
+        final frame = await second.frames
+            .firstWhere((f) => f.width == 300)
+            .timeout(const Duration(seconds: 15));
+        expect(frame.height, 200);
+        expect(_pixel(frame, 5, 5), _green);
+        expect(_pixel(frame, 150, 100), _red);
+
+        for (final (phase, buttons) in [
+          (PointerPhase.POINTER_PHASE_DOWN, 1),
+          (PointerPhase.POINTER_PHASE_UP, 0),
+        ]) {
+          second.sendPointer(
+            PointerEvent(
+              phase: phase,
+              x: 150,
+              y: 100,
+              buttons: Int64(buttons),
+              device: PointerDevice.POINTER_DEVICE_MOUSE,
+              pointerId: 1,
+            ),
+          );
+        }
+        await second.frames
+            .firstWhere((f) => _pixel(f, 150, 100) == _white)
+            .timeout(const Duration(seconds: 10));
+        // Each view has its own instance: the first's box stays red.
+        expect(_pixel(first.latestFrame!, 195, 150), _red);
+
+        // A view goes with its client; the next client has a new one.
+        await second.close();
+        final third = await RunnerClient.connect(endpoint.views);
+        others.add(third);
+        await third.hello.timeout(const Duration(seconds: 10));
+        expect(third.viewId, 2);
+        third.resize(200, 100, 1);
+        final last = await third.frames
+            .firstWhere((f) => f.width == 200)
+            .timeout(const Duration(seconds: 15));
+        expect(_pixel(last, 5, 5), _orange);
+      } finally {
+        for (final other in others) {
+          await other.close();
+        }
+        first.shutdown();
+        await first.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready && Directory(viewsAssets).existsSync()
+            ? false
+            : 'build the runner and example/views first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+  test(
+    'a view takes GPU buffers of its own, served on a GPU socket of its own',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_views');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: viewsAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          views: true,
+        ),
+      );
+      final first = await RunnerClient.connect(endpoint, gpuBuffers: true);
+      final view = await RunnerClient.connect(endpoint.views, gpuBuffers: true);
+      try {
+        await view.hello.timeout(const Duration(seconds: 10));
+        // A frame in a GPU buffer is not replayed: listened for first.
+        final gpuFrame = view.frames.firstWhere((f) => f.inGpuBuffer);
+        gpuFrame.ignore();
+        view.resize(320, 240, 2);
+        final GpuBuffers set;
+        try {
+          set = await view.gpuBufferSets.first.timeout(
+            const Duration(seconds: 5),
+          );
+        } on TimeoutException {
+          printOnFailure('no GPU buffers offered: ${view.latestGpuBuffers}');
+          return;
+        }
+        expect((set.width, set.height), (320, 240));
+        expect(set.socket, p.join(temp.path, 'runner.v1.gpu'));
+        expect(File(set.socket).existsSync() || Platform.isWindows, isTrue);
+        final frame = await gpuFrame.timeout(const Duration(seconds: 10));
+        expect(frame.gpuGeneration, set.generation);
+        view.releaseGpuBuffer(frame.gpuGeneration, frame.bufferIndex);
+
+        // The first view's ring is its own, at its own size.
+        final own = await first.gpuBufferSets.first.timeout(
+          const Duration(seconds: 10),
+        );
+        expect((own.width, own.height), (800, 600));
+        expect(own.socket, p.join(temp.path, 'runner.gpu'));
+
+        // A new size is a new ring.
+        view.resize(400, 300, 2);
+        final grown = await view.gpuBufferSets
+            .firstWhere((s) => s.width == 400)
+            .timeout(const Duration(seconds: 10));
+        expect(grown.generation, greaterThan(set.generation));
+      } finally {
+        await view.close();
+        first.shutdown();
+        await first.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready && Directory(viewsAssets).existsSync()
+            ? false
+            : 'build the runner and example/views first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
   final channelsAssets = p.join(
     runnerDir,
     'example',

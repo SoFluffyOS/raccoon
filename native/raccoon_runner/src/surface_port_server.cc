@@ -60,19 +60,24 @@ bool SurfacePortServer::Start(Lookup lookup, std::string* error) {
     *error = std::string("bootstrap_check_in ") + name_ + ": " + bootstrap_strerror(result);
     return false;
   }
-  arc4random_buf(token_, sizeof(token_));
   lookup_ = std::move(lookup);
   port_ = port;
   thread_ = std::thread([this] { Serve(); });
   return true;
 }
 
-std::array<uint8_t, SurfacePortServer::kTokenSize> SurfacePortServer::RenewToken() {
+std::array<uint8_t, SurfacePortServer::kTokenSize> SurfacePortServer::RenewToken(
+    uint64_t client) {
   std::array<uint8_t, kTokenSize> token;
   arc4random_buf(token.data(), token.size());
   std::lock_guard<std::mutex> lock(token_mutex_);
-  std::memcpy(token_, token.data(), token.size());
+  tokens_[client] = token;
   return token;
+}
+
+void SurfacePortServer::ForgetToken(uint64_t client) {
+  std::lock_guard<std::mutex> lock(token_mutex_);
+  tokens_.erase(client);
 }
 
 void SurfacePortServer::Serve() {
@@ -110,11 +115,13 @@ void SurfacePortServer::Answer(mach_msg_header_t* request) {
     // Held through the lookup, so a token renewed meanwhile can't let a
     // request through that no longer has the right.
     std::lock_guard<std::mutex> lock(token_mutex_);
-    if (std::memcmp(body->token, token_, kTokenSize) == 0) {
-      if (!lookup_(generation, &ports) || ports.size() > kMaxPorts) {
+    for (const auto& [client, token] : tokens_) {
+      if (std::memcmp(body->token, token.data(), kTokenSize) != 0) continue;
+      if (!lookup_(client, generation, &ports) || ports.size() > kMaxPorts) {
         for (uint32_t port : ports) mach_port_deallocate(mach_task_self(), port);
         ports.clear();
       }
+      break;
     }
   }
   Reply reply{};

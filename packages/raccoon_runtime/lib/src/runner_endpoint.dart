@@ -49,4 +49,11 @@ final class UnixSocketEndpoint extends RunnerEndpoint {
 
   @override
   String get uri => 'unix:$path';
+
+  /// Where a runner in views mode takes a client for each view beside its
+  /// first (#182): this socket with `.views` in place of `.sock`, so
+  /// discovery, which lists `.sock` files, does not take it for a runner.
+  UnixSocketEndpoint get views => UnixSocketEndpoint(
+    '${path.endsWith('.sock') ? path.substring(0, path.length - 5) : path}.views',
+  );
 }

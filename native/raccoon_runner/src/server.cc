@@ -199,7 +199,7 @@ bool RunnerServer::Listen(const std::string& socket_path, std::string* error) {
     *error = ErrorText("bind");
     return false;
   }
-  if (listen(listen_fd_, 1) < 0) {
+  if (listen(listen_fd_, handler_.on_accept ? 8 : 1) < 0) {
     *error = ErrorText("listen");
     return false;
   }
@@ -211,6 +211,10 @@ bool RunnerServer::Listen(const std::string& socket_path, std::string* error) {
 void RunnerServer::OnListenReadable() {
   const int fd = AcceptClient(listen_fd_);
   if (fd < 0) return;
+  if (handler_.on_accept) {
+    handler_.on_accept(fd);
+    return;
+  }
   if (client_fd_ >= 0) {
     // One client at a time: tell the newcomer who has the runner, then hang
     // up, so it can say so instead of showing a dead pane.
@@ -228,6 +232,12 @@ void RunnerServer::OnListenReadable() {
     Linger(fd);
     return;
   }
+  Adopt(fd);
+}
+
+void RunnerServer::Refuse(int fd) { CloseFd(fd); }
+
+void RunnerServer::Adopt(int fd) {
   client_fd_ = fd;
   inbox_.clear();
   watching_writable_ = false;

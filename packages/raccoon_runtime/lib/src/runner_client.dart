@@ -149,6 +149,8 @@ final class RunnerClient
   int? _heldBuffer;
   String? _vmServiceUri;
   int? _pid;
+  var _takesViews = false;
+  var _viewId = 0;
 
   /// Every message the runner sends, after the connection was made.
   Stream<RunnerMessage> get messages => _messages.stream;
@@ -183,6 +185,15 @@ final class RunnerClient
 
   /// The runner's process id once it said hello.
   int? get pid => _pid;
+
+  /// Whether the runner shows the app in views of its own beside this one,
+  /// each a connection to [UnixSocketEndpoint.views] (#182); false until
+  /// its hello.
+  bool get takesViews => _takesViews;
+
+  /// The view this connection shows: 0, the app's first, on the runner's
+  /// own socket.
+  int get viewId => _viewId;
 
   /// Frames that arrived through shared buffers rather than inline.
   int get sharedFrames => _sharedFrames;
@@ -302,6 +313,8 @@ final class RunnerClient
       }
       if (message.hasHello() && !_hello.isCompleted) {
         _pid = message.hello.pid;
+        _takesViews = message.hello.views;
+        _viewId = message.hello.viewId.toInt();
         _hello.complete(message.hello);
       }
       if (message.hasBusy() && !_hello.isCompleted) {

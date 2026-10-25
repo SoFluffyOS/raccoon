@@ -20,6 +20,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -29,9 +30,10 @@ namespace raccoon {
 
 class SurfacePortServer {
  public:
-  // Send rights to ring |generation|'s surfaces, for the server to pass on;
-  // false when that ring is gone. Called on the server's thread.
-  using Lookup = std::function<bool(uint32_t generation, std::vector<uint32_t>* ports)>;
+  // Send rights to |client|'s ring |generation|'s surfaces, for the server
+  // to pass on; false when that ring is gone. Called on the server's thread.
+  using Lookup =
+      std::function<bool(uint64_t client, uint32_t generation, std::vector<uint32_t>* ports)>;
 
   static constexpr mach_msg_id_t kRequestId = 0x52505254;  // 'RPRT'
   static constexpr mach_msg_id_t kReplyId = 0x52505259;    // 'RPRY'
@@ -49,10 +51,13 @@ class SurfacePortServer {
   bool started() const { return port_ != MACH_PORT_NULL; }
 
   const std::string& name() const { return name_; }
-  // A new token, which from now on is the only one that gets ports: each
-  // GPU socket client is given its own, so a request from one that has gone
-  // gets nothing.
-  std::array<uint8_t, kTokenSize> RenewToken();
+  // A new token for |client|, which from now on is the only one that gets
+  // its ports: each GPU socket client is given its own, so a request from
+  // one that has gone gets nothing. A runner showing several views has a
+  // client each (#182).
+  std::array<uint8_t, kTokenSize> RenewToken(uint64_t client);
+  // |client|'s token gets nothing from now on.
+  void ForgetToken(uint64_t client);
 
  private:
   void Serve();
@@ -62,7 +67,7 @@ class SurfacePortServer {
   Lookup lookup_;
   std::string name_;
   std::mutex token_mutex_;
-  uint8_t token_[kTokenSize] = {};
+  std::map<uint64_t, std::array<uint8_t, kTokenSize>> tokens_;
   mach_port_t port_ = MACH_PORT_NULL;
   std::atomic<bool> stop_{false};
   // The serving thread has left its loop: a wake message would go unread.

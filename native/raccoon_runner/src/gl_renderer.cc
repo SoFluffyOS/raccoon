@@ -149,8 +149,45 @@ bool GlRenderer::Init(std::string* error) {
   return true;
 }
 
+void GlRenderer::InitSibling(const GlRenderer& of) {
+  display_ = of.display_;
+  sibling_ = true;
+  config_ = of.config_;
+  context_ = of.context_;
+  reads_bgra_ = of.reads_bgra_;
+  description_ = of.description_;
+  can_export_ = of.can_export_;
+  create_image_ = of.create_image_;
+  destroy_image_ = of.destroy_image_;
+  export_query_ = of.export_query_;
+  export_image_ = of.export_image_;
+  has_fences_ = of.has_fences_;
+  has_wait_sync_ = of.has_wait_sync_;
+  create_sync_ = of.create_sync_;
+  destroy_sync_ = of.destroy_sync_;
+  client_wait_sync_ = of.client_wait_sync_;
+  wait_sync_ = of.wait_sync_;
+  dup_fence_ = of.dup_fence_;
+}
+
 void GlRenderer::Shutdown() {
   if (display_ == EGL_NO_DISPLAY) return;
+  if (sibling_) {
+    // On the raster thread the context is current already; elsewhere the
+    // engine has stopped, and nothing else holds it.
+    const bool current = eglGetCurrentContext() == context_;
+    if (current || MakeCurrent()) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      DestroyPool();
+      if (fbo_ != 0) glDeleteFramebuffers(1, &fbo_);
+      if (texture_ != 0) glDeleteTextures(1, &texture_);
+      fbo_ = texture_ = 0;
+      if (!current) ClearCurrent();
+    }
+    display_ = EGL_NO_DISPLAY;
+    context_ = EGL_NO_CONTEXT;
+    return;
+  }
   if (MakeCurrent()) {
     std::lock_guard<std::mutex> lock(mutex_);
     DestroyPool();
@@ -168,6 +205,10 @@ void GlRenderer::Shutdown() {
 bool GlRenderer::MakeCurrent() {
   return eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, context_) ==
          EGL_TRUE;
+}
+
+bool GlRenderer::EnsureCurrent() {
+  return eglGetCurrentContext() == context_ || MakeCurrent();
 }
 
 bool GlRenderer::ClearCurrent() {

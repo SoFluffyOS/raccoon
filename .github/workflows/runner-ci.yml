@@ -107,7 +107,7 @@ jobs:
 
       - name: Build the example bundles
         run: |
-          for example in hello spin channels camera text plugins_app plugins_modal no_plugin no_plugin_late; do
+          for example in hello spin channels camera text views plugins_app plugins_modal no_plugin no_plugin_late; do
             (cd "example/$example" && flutter build bundle --target-platform=${{ matrix.target }})
           done
 
@@ -134,6 +134,17 @@ jobs:
             --icu "$RACCOON_ICU" \
             --out build/frame.ppm
           test -s build/frame.ppm
+
+      # Views mode (#182): one engine, a view beside the first, each written.
+      - name: Render example/views in two views
+        run: |
+          build/raccoon_runner render \
+            --engine-dir "$RACCOON_ENGINE_DIR" \
+            --assets example/views/build/flutter_assets \
+            --icu "$RACCOON_ICU" \
+            --view 300x200@2 \
+            --out build/views.ppm
+          test -s build/views.ppm && test -s build/views.view1.ppm
 
       - name: Resolve the runtime
         working-directory: packages/raccoon_runtime

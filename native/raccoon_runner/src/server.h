@@ -32,6 +32,10 @@ class RunnerServer {
     // next message).
     std::function<void(const uint8_t* payload, size_t size, std::vector<int>& fds)>
         on_raw;
+    // Set for a listener whose every connection is a client of its own
+    // (the views socket, #182): each accepted socket comes here, for a
+    // server of its own to Adopt, and this one never has a client.
+    std::function<void(int fd)> on_accept;
   };
 
   RunnerServer(EventLoop& loop, Handler handler);
@@ -40,6 +44,10 @@ class RunnerServer {
   RunnerServer& operator=(const RunnerServer&) = delete;
 
   bool Listen(const std::string& socket_path, std::string* error);
+  // Takes |fd|, a connection accepted elsewhere, as this server's client.
+  void Adopt(int fd);
+  // Closes |fd|, a connection no server took.
+  static void Refuse(int fd);
 
   bool has_client() const { return client_fd_ >= 0; }
   // Bytes queued for the client and not yet written: frames wait while

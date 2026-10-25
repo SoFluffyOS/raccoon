@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -52,6 +53,10 @@ struct EngineOptions {
   // A PNG or JPEG the camera shows in place of its test pattern; empty
   // takes RACCOON_CAMERA_SOURCE, and without that the pattern.
   std::string camera_source;
+  // Views mode: the engine draws through a compositor, and AddView gives
+  // the app more views than its own (#182). Off, the engine draws its one
+  // view as it always did.
+  bool views = false;
 };
 
 // One engine: start, metrics, input, shutdown. Rasterizes on the GPU where
@@ -102,12 +107,23 @@ class EngineHost {
   const std::vector<PluginStatus>& plugin_statuses() const;
 #endif
 
-  void Resize(size_t width, size_t height, double pixel_ratio);
+  // Views mode. A view of the app's beyond its own, numbered from 1: the
+  // engine takes it at its first Resize, and RemoveView lets it go. 0 when
+  // the host is not in views mode.
+  FlutterViewId AddView();
+  void RemoveView(FlutterViewId view);
+  bool views() const { return views_mode_; }
+
+  // The calls below name a view: 0 is the app's own, which every host has.
+  // A view not (or no longer) there is let be.
+  void Resize(FlutterViewId view, size_t width, size_t height, double pixel_ratio);
   // Draws the app again at the size it has: a client that arrives at an
   // idle app gets a frame of its own, whatever the one before took them
   // as (#138). Nothing before the first Resize.
-  void Redraw();
-  void SendPointer(const FlutterPointerEvent& event);
+  void Redraw(FlutterViewId view);
+  void SendPointer(FlutterViewId view, const FlutterPointerEvent& event);
+  // Tells the app |view| has the focus now: the keyboard's keys go there.
+  void FocusView(FlutterViewId view);
   // Sends the key to the framework, then the legacy flutter/keyevent message
   // the framework waits for before dispatching it. A key down it does not
   // handle goes to the text field, when one is active.
@@ -141,14 +157,15 @@ class EngineHost {
   // GPU buffers: the engine draws into a ring of exported buffers and frames
   // are buffer indices (see GpuRenderer). False, with why, without a GPU
   // renderer that exports.
-  bool EnableGpuBuffers(size_t count, std::string* error);
-  void DisableGpuBuffers();
-  bool GpuBufferSetNow(GpuBufferSet* out) const;
+  bool EnableGpuBuffers(FlutterViewId view, size_t count, std::string* error);
+  void DisableGpuBuffers(FlutterViewId view);
+  bool GpuBufferSetNow(FlutterViewId view, GpuBufferSet* out) const;
   // |fence_fd|, when not -1, is signalled once the client's last use of the
   // buffer is done; owned from here.
-  void ReleaseGpuBuffer(uint32_t generation, int index, int fence_fd = -1);
+  void ReleaseGpuBuffer(FlutterViewId view, uint32_t generation, int index,
+                        int fence_fd = -1);
   // Every buffer is the runner's again: the client holding them is gone.
-  void ReleaseAllGpuBuffers();
+  void ReleaseAllGpuBuffers(FlutterViewId view);
   // A frame went by readback that a client taking the ring never saw, and
   // a buffer is free now: asks for another. From the loop, every turn.
   void RedrawIfMissed();
@@ -156,13 +173,21 @@ class EngineHost {
   // Whether the host takes the ring's surfaces by Mach port, the ring then
   // not global; on a change a frame is asked for, so the new ring comes at
   // once. False without the Metal renderer.
-  bool ShareGpuBuffersByPort(bool by_port);
+  bool ShareGpuBuffersByPort(FlutterViewId view, bool by_port);
   bool can_share_gpu_buffers_by_port() const { return metal_ != nullptr; }
   // Send rights to ring |generation|'s surfaces, for the caller to pass on.
-  bool GpuBufferPorts(uint32_t generation, std::vector<uint32_t>* ports) const;
+  bool GpuBufferPorts(FlutterViewId view, uint32_t generation,
+                      std::vector<uint32_t>* ports) const;
 #endif
 
-  SoftwareFrame& frame() { return frame_; }
+  // Takes what views mode has to do on the loop: metrics for a view the
+  // engine took since. From the loop thread, every iteration.
+  void ServiceViews();
+
+  // View 0's frames.
+  SoftwareFrame& frame() { return *frame(0); }
+  // |view|'s frames; null for a view not there.
+  SoftwareFrame* frame(FlutterViewId view);
   TextInput& text_input() { return text_input_; }
   PlatformTaskRunner& platform() { return *platform_; }
   std::chrono::steady_clock::time_point started() const { return started_; }
@@ -206,6 +231,80 @@ class EngineHost {
   double input_scale_ = 1.0;
   // The metrics Resize last sent, for Redraw. Loop thread.
   FlutterWindowMetricsEvent metrics_{};
+
+  // Views mode (#182). Each view is drawn into a target of its own: a
+  // sibling of the renderer, sharing its device or context, with a ring and
+  // a readback of its own, or a buffer for the software renderer. View 0's
+  // is the renderer itself, and frame_.
+  struct View {
+    explicit View(FlutterViewId id) : id(id) {}
+    const FlutterViewId id;
+    SoftwareFrame frame;
+    std::unique_ptr<GpuRenderer> gpu;
+#if RACCOON_HAS_GL
+    GlRenderer* gl = nullptr;
+#endif
+#if RACCOON_HAS_METAL
+    MetalRenderer* metal = nullptr;
+#endif
+    // The software renderer's backing store, kept from frame to frame.
+    std::vector<uint8_t> pixels;
+    bool removing = false;
+    // Loop thread: the metrics last asked for, and the scale they fit by.
+    FlutterWindowMetricsEvent metrics{};
+    double input_scale = 1.0;
+    // The engine was asked to take it, and has; metrics that came between
+    // are sent once it has.
+    bool asked = false;
+    std::atomic<bool> added{false};
+    std::atomic<bool> metrics_owed{false};
+  };
+  // What a view is drawn into, view 0's or another's.
+  struct Target {
+    SoftwareFrame* frame = nullptr;
+    GpuRenderer* gpu = nullptr;
+#if RACCOON_HAS_GL
+    GlRenderer* gl = nullptr;
+#endif
+#if RACCOON_HAS_METAL
+    MetalRenderer* metal = nullptr;
+#endif
+    std::vector<uint8_t>* pixels = nullptr;
+    // Holds another view's target while it is used.
+    std::shared_ptr<View> view;
+  };
+  // False for a view not there. Any thread.
+  bool TargetOf(FlutterViewId view, Target* out);
+  std::shared_ptr<View> ViewOf(FlutterViewId view) const;
+  // Makes a target for a view beside the renderer's; false, with why, when
+  // this renderer cannot.
+  bool MakeTarget(View& view, std::string* error);
+  // Whether every view's ring has a buffer for the next frame.
+  bool HasFreeBuffers() const;
+  // |view|'s GPU target, null on the software renderer or for a view not
+  // there. Loop thread.
+  GpuRenderer* GpuOf(FlutterViewId view) const;
+  // Calls |each| with every view's GPU target.
+  void ForEachGpu(const std::function<void(GpuRenderer&)>& each) const;
+  // Lets go the targets of views removed; |gl_current| says the GL context
+  // is current, as on the raster thread, which GL targets wait for.
+  void DropRetired(bool gl_current);
+  static bool CreateBackingStore(const FlutterBackingStoreConfig* config,
+                                 FlutterBackingStore* out, void* user_data);
+  static bool CollectBackingStore(const FlutterBackingStore* store, void* user_data);
+  static bool PresentView(const FlutterPresentViewInfo* info);
+  static void OnViewAdded(const FlutterAddViewResult* result);
+  static void OnViewRemoved(const FlutterRemoveViewResult* result);
+  bool views_mode_ = false;
+  FlutterCompositor compositor_{};
+  // The views beyond view 0, and the ones removed, kept until the raster
+  // thread lets their targets go (a GL target needs the context current).
+  mutable std::mutex views_mutex_;
+  std::map<FlutterViewId, std::shared_ptr<View>> views_;
+  std::vector<std::shared_ptr<View>> retired_;
+  FlutterViewId next_view_ = 1;
+  // Which view has the focus, as the app was last told.
+  FlutterViewId focused_ = 0;
   static void OnLog(const char* tag, const char* message, void* user_data);
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* user_data);

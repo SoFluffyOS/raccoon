@@ -1,6 +1,6 @@
 // raccoon_runner: hosts a Flutter app on the C embedder API.
 //
-//   raccoon_runner render --engine-dir DIR --assets DIR --icu FILE [--renderer auto|gl|metal|vulkan|software] [--out F]
+//   raccoon_runner render --engine-dir DIR --assets DIR --icu FILE [--renderer auto|gl|metal|vulkan|software] [--out F] [--view WxH@DPR...]
 //   raccoon_runner serve  --engine-dir DIR --assets DIR --icu FILE --socket P
 //   raccoon_runner --version
 
@@ -66,6 +66,14 @@ struct Options {
   bool bgra = raccoon::kSoftwareFrameIsBgra;
   // A manifest of native plugins to load (see plugins.h), or empty.
   std::string plugins;
+  // render: views beside the app's own, each written beside --out as
+  // NAME.view<N>.ppm (#182).
+  struct ViewSize {
+    size_t width = 0;
+    size_t height = 0;
+    double pixel_ratio = 1.0;
+  };
+  std::vector<ViewSize> views;
 };
 
 // How long the client may take to answer a platform message before the app
@@ -90,7 +98,9 @@ void Usage() {
                "       raccoon_runner serve --engine-dir DIR --assets DIR"
                " --icu FILE --socket PATH\n"
                "       raccoon_runner --version\n"
+               "       render takes [--view WxH@DPR] for each view beside the first\n"
                "common: [--width N] [--height N] [--dpr X] [--data-dir DIR] [--renderer auto|gl|metal|vulkan|software]"
+               " [--views]"
                " [--plugins MANIFEST] [--camera-source PNG|JPEG]"
                " [-- engine switches...]\n");
 }
@@ -106,6 +116,10 @@ bool ParseOptions(int argc, char** argv, Options* options) {
     }
     if (arg == "--rgba") {
       options->bgra = false;
+      continue;
+    }
+    if (arg == "--views") {
+      options->engine.views = true;
       continue;
     }
     if (i + 1 >= argc) return false;
@@ -124,6 +138,19 @@ bool ParseOptions(int argc, char** argv, Options* options) {
     else if (arg == "--socket") options->socket = v;
     else if (arg == "--frames") options->frames = std::strtoul(v, nullptr, 10);
     else if (arg == "--timeout-ms") options->timeout_ms = std::atoi(v);
+    else if (arg == "--view") {
+      Options::ViewSize view;
+      char* end = nullptr;
+      view.width = std::strtoul(v, &end, 10);
+      if (*end != 'x') return false;
+      view.height = std::strtoul(end + 1, &end, 10);
+      if (*end == '@') view.pixel_ratio = std::strtod(end + 1, &end);
+      if (*end != '\0' || view.width == 0 || view.height == 0 || view.pixel_ratio <= 0) {
+        return false;
+      }
+      options->views.push_back(view);
+      options->engine.views = true;
+    }
     else return false;
   }
   const bool engine_ok = !options->engine.engine_dir.empty() &&
@@ -291,16 +318,41 @@ std::string ValidUtf8(const std::string& text) {
   return out;
 }
 
-// Where the GPU buffers' descriptors are served: the runner's socket path
-// with .gpu in place of .sock, so discovery, which lists .sock files, does
-// not take it for a runner.
-std::string GpuSocketPath(const std::string& socket) {
+// The runner's socket path without its .sock.
+std::string SocketStem(const std::string& socket) {
   const std::string suffix = ".sock";
   if (socket.size() > suffix.size() &&
       socket.compare(socket.size() - suffix.size(), suffix.size(), suffix) == 0) {
-    return socket.substr(0, socket.size() - suffix.size()) + ".gpu";
+    return socket.substr(0, socket.size() - suffix.size());
   }
-  return socket + ".gpu";
+  return socket;
+}
+
+// Where the GPU buffers' descriptors are served: the runner's socket path
+// with .gpu in place of .sock, so discovery, which lists .sock files, does
+// not take it for a runner.
+std::string GpuSocketPath(const std::string& socket) { return SocketStem(socket) + ".gpu"; }
+
+// Views mode (#182): where clients connect for a view of their own, and
+// where view N's GPU buffers are served. Neither ends in .sock.
+std::string ViewsSocketPath(const std::string& socket) { return SocketStem(socket) + ".views"; }
+
+std::string ViewGpuSocketPath(const std::string& socket, FlutterViewId view) {
+  return SocketStem(socket) + ".v" + std::to_string(view) + ".gpu";
+}
+
+// The engine's options with what the environment adds: RACCOON_RENDERER=
+// gl|metal|software|auto stands in for --renderer, and RACCOON_VIEWS=1 for
+// --views, so a run through the Flutter tool can ask for them.
+raccoon::EngineOptions EngineOptionsFromEnvironment(raccoon::EngineOptions engine) {
+  if (const char* env = std::getenv("RACCOON_RENDERER");
+      env != nullptr && engine.renderer == "auto") {
+    engine.renderer = env;
+  }
+  if (const char* env = std::getenv("RACCOON_VIEWS"); env != nullptr && std::strcmp(env, "1") == 0) {
+    engine.views = true;
+  }
+  return engine;
 }
 
 // How long the loop may sleep: until the next platform task or frame, at
@@ -483,24 +535,34 @@ int Render(const Options& options) {
   raccoon::EventLoop loop;
   raccoon::EngineHost host;
   std::string error;
-  // RACCOON_RENDERER=gl|metal|software|auto stands in for --renderer.
-  raccoon::EngineOptions engine = options.engine;
-  if (const char* env = std::getenv("RACCOON_RENDERER");
-      env != nullptr && engine.renderer == "auto") {
-    engine.renderer = env;
-  }
+  const raccoon::EngineOptions engine = EngineOptionsFromEnvironment(options.engine);
   if (!host.Start(engine, PrintEngineLog, [&loop] { loop.Wake(); },
                   &error)) {
     std::fprintf(stderr, "🦝 %s\n", error.c_str());
     return 1;
   }
   const auto plugins = LoadPlugins(host, loop, options.plugins);
+  std::vector<FlutterViewId> views;
+  for (const Options::ViewSize& size : options.views) {
+    const FlutterViewId view = host.AddView();
+    if (view == 0) break;
+    host.Resize(view, size.width, size.height, size.pixel_ratio);
+    views.push_back(view);
+  }
+  // Every view has its frames.
+  auto Done = [&]() {
+    if (host.frame().FrameCount() < options.frames) return false;
+    for (const FlutterViewId view : views) {
+      if (host.frame(view)->FrameCount() < options.frames) return false;
+    }
+    return true;
+  };
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::milliseconds(options.timeout_ms);
   bool reported_first = false;
-  while (host.frame().FrameCount() < options.frames &&
-         std::chrono::steady_clock::now() < deadline) {
+  while (!Done() && std::chrono::steady_clock::now() < deadline) {
     host.platform().RunDueTasks();
+    host.ServiceViews();
     host.ServiceVsync();
     host.ServiceCamera();
     if (!reported_first && host.frame().FrameCount() > 0) {
@@ -523,9 +585,53 @@ int Render(const Options& options) {
     std::fprintf(stderr, "🦝 no frame written\n");
     exit_code = 1;
   }
+  // Each view beside --out: frame.ppm, frame.view1.ppm, ...
+  const size_t dot = options.out.rfind('.');
+  const std::string stem = dot == std::string::npos ? options.out : options.out.substr(0, dot);
+  const std::string extension = dot == std::string::npos ? "" : options.out.substr(dot);
+  for (const FlutterViewId view : views) {
+    raccoon::SoftwareFrame& frame = *host.frame(view);
+    const std::string out = stem + ".view" + std::to_string(view) + extension;
+    std::fprintf(stderr, "🦝 view %lld: %zu frames presented, %zux%zu\n",
+                 static_cast<long long>(view), frame.FrameCount(), frame.width(),
+                 frame.height());
+    if (frame.WritePpm(out, options.bgra)) {
+      std::fprintf(stderr, "🦝 wrote %s\n", out.c_str());
+    } else {
+      std::fprintf(stderr, "🦝 no frame written for view %lld\n", static_cast<long long>(view));
+      exit_code = 1;
+    }
+  }
   host.Shutdown();
   return exit_code;
 }
+
+// What a client of the runner is: the first, on its socket, showing the
+// app's first view, or one on the views socket, showing a view of its own
+// (#182). How it takes frames, and how far it has.
+struct Client {
+  FlutterViewId view = 0;
+  std::unique_ptr<raccoon::RunnerServer> server;
+  // Where it takes GPU buffers' descriptors; empty when there is none.
+  std::unique_ptr<raccoon::RunnerServer> gpu_server;
+  std::string gpu_socket;
+  size_t last_sent = 0;
+  bool vm_sent = false;
+  bool shared = false;
+  std::unique_ptr<raccoon::SharedBufferPool> pool;
+  // Which set pool is, as the client was told (#135).
+  uint32_t shared_generation = 0;
+  // GPU buffers: the client asked for them in its hello, the set it was
+  // told about on its socket, and the set whose descriptors went out on the
+  // GPU socket.
+  bool gpu = false;
+  uint32_t gpu_told = 0;
+  uint32_t gpu_fds_sent = 0;
+  // It has an input method (ClientHello.composes).
+  bool composes = false;
+  // A view's client that hung up, let go after the turn.
+  bool gone = false;
+};
 
 int Serve(const Options& options) {
   raccoon::EventLoop loop;
@@ -556,12 +662,7 @@ int Serve(const Options& options) {
 
   raccoon::EngineHost host;
   std::string error;
-  // RACCOON_RENDERER=gl|metal|software|auto stands in for --renderer.
-  raccoon::EngineOptions engine = options.engine;
-  if (const char* env = std::getenv("RACCOON_RENDERER");
-      env != nullptr && engine.renderer == "auto") {
-    engine.renderer = env;
-  }
+  raccoon::EngineOptions engine = EngineOptionsFromEnvironment(options.engine);
   auto on_log = [&logs](const std::string& tag, const std::string& message) {
     PrintEngineLog(tag, message);
     logs.Push(tag, message);
@@ -573,27 +674,15 @@ int Serve(const Options& options) {
   const auto plugins = LoadPlugins(host, loop, options.plugins);
 
   bool stop = false;
-  size_t last_sent = 0;
-  bool frames_held = false;
-  bool vm_sent = false;
-  bool client_shared = false;
-  std::unique_ptr<raccoon::SharedBufferPool> pool;
-  // Which set pool is, as the client was told (#135).
-  uint32_t shared_generation = 0;
-  // GPU buffers: the client asked for them in its hello, the set it was told
-  // about on this socket, and the set whose descriptors went out on the GPU
-  // socket.
-  bool client_gpu = false;
-  uint32_t gpu_told = 0;
-  uint32_t gpu_fds_sent = 0;
-  raccoon::RunnerServer* server_ptr = nullptr;
-  // The GPU socket's server, set once it exists below.
-  raccoon::RunnerServer* gpu_server_ptr = nullptr;
-  // The active text field, to the client; a client with an input method
-  // mirrors it there.
+  // The first client, and the views' clients.
+  Client first;
+  std::vector<std::unique_ptr<Client>> views;
+  // Where text goes: the client the user last pressed in. Its input method
+  // takes the active field.
+  Client* focus = &first;
   // What became of the plugins, for a client that just arrived.
-  auto SendPlugins = [&server_ptr, &host]() {
-    if (server_ptr == nullptr || !server_ptr->has_client()) return;
+  auto SendPlugins = [&first, &host]() {
+    if (!first.server->has_client()) return;
 #if RACCOON_HAS_PLUGINS
     raccoon::v1::RunnerMessage message;
     auto* plugins = message.mutable_plugins();
@@ -609,11 +698,13 @@ int Serve(const Options& options) {
           : status.state == "built_in"      ? raccoon::v1::PLUGIN_STATE_BUILT_IN
                                             : raccoon::v1::PLUGIN_STATE_UNSPECIFIED);
     }
-    if (plugins->plugins_size() > 0) server_ptr->Send(message);
+    if (plugins->plugins_size() > 0) first.server->Send(message);
 #endif
   };
-  auto SendTextField = [&server_ptr](const raccoon::TextFieldState& state) {
-    if (server_ptr == nullptr || !server_ptr->has_client()) return;
+  // The active text field, to the client in focus; a client with an input
+  // method mirrors it there.
+  auto SendTextField = [&focus](const raccoon::TextFieldState& state) {
+    if (!focus->server->has_client()) return;
     raccoon::v1::RunnerMessage message;
     auto* field = message.mutable_text_field();
     field->set_active(state.active);
@@ -625,7 +716,16 @@ int Serve(const Options& options) {
     field->set_multiline(state.multiline);
     field->set_input_action(state.input_action);
     field->set_obscure(state.obscure);
-    server_ptr->Send(message);
+    focus->server->Send(message);
+  };
+  // The user pressed in |client|'s view: the app's focus and the text field
+  // go there.
+  auto Focus = [&](Client& client) {
+    if (focus == &client) return;
+    focus = &client;
+    host.FocusView(client.view);
+    host.text_input().SetComposer(client.composes);
+    SendTextField(host.text_input().state());
   };
   // Platform messages waiting for the client's answer, by response id,
   // with when the app gets "no plugin" instead.
@@ -637,10 +737,12 @@ int Serve(const Options& options) {
   std::unordered_map<uint64_t, Pending> pending;
   uint64_t next_response_id = 1;
 
+  // The app's platform messages go to the first client, which serves them
+  // for every view.
   host.SetPlatformMessageCallback(
       [&](const std::string& channel, const uint8_t* data, size_t size,
           const FlutterPlatformMessageResponseHandle* handle) {
-        if (server_ptr == nullptr || !server_ptr->has_client()) {
+        if (!first.server->has_client()) {
           host.RespondNoPlugin(channel, handle, "no client");
           return;
         }
@@ -656,7 +758,7 @@ int Serve(const Options& options) {
         // A send that fails closes the client, and closing answers what is
         // pending, this one included: answered twice, the engine's handle
         // would be used after it freed it (#138).
-        if (!server_ptr->Send(message) && handle != nullptr &&
+        if (!first.server->Send(message) && handle != nullptr &&
             pending.erase(out->response_id()) == 1) {
           host.RespondNoPlugin(channel, handle, "no client");
         }
@@ -687,7 +789,7 @@ int Serve(const Options& options) {
       raccoon::v1::RunnerMessage message;
       message.mutable_log()->set_tag(ValidUtf8(tag));
       message.mutable_log()->set_message(ValidUtf8(text));
-      if (server_ptr != nullptr && server_ptr->has_client()) server_ptr->Send(message);
+      if (first.server->has_client()) first.server->Send(message);
       if (startup_over) continue;
       startup_lines.push_back(std::move(message));
       if (startup_lines.size() > kStartupLines) startup_lines.pop_front();
@@ -700,35 +802,8 @@ int Serve(const Options& options) {
     }
   };
 
-  raccoon::RunnerServer::Handler handler;
-  handler.on_resize = [&host](const raccoon::v1::Resize& resize) {
-    if (std::getenv("RACCOON_TRACE") != nullptr) {
-      std::fprintf(stderr, "🦝 resize %ux%u @%.2f\n", resize.width(),
-                   resize.height(), resize.pixel_ratio());
-    }
-    host.Resize(resize.width(), resize.height(),
-                resize.pixel_ratio() > 0 ? resize.pixel_ratio() : 1.0);
-  };
   // RACCOON_TRACE=1 prints what the client sends, for debugging a client.
   const bool trace = std::getenv("RACCOON_TRACE") != nullptr;
-  handler.on_pointer = [&host, trace](const raccoon::v1::PointerEvent& pointer) {
-    if (trace) {
-      std::fprintf(stderr, "🦝 pointer phase=%d x=%.1f y=%.1f buttons=%lld device=%d\n",
-                   static_cast<int>(pointer.phase()), pointer.x(), pointer.y(),
-                   static_cast<long long>(pointer.buttons()), pointer.pointer_id());
-    }
-    host.SendPointer(ToFlutterPointer(pointer, host.NowMicros()));
-  };
-  handler.on_key = [&host, trace](const raccoon::v1::KeyEvent& key) {
-    if (trace) {
-      std::fprintf(stderr, "🦝 key kind=%d logical=%llx character=%s\n",
-                   static_cast<int>(key.kind()),
-                   static_cast<unsigned long long>(key.logical()),
-                   key.character().c_str());
-    }
-    host.SendKey(ToFlutterKey(key, host.NowMicros()));
-  };
-  handler.on_shutdown = [&stop] { stop = true; };
   // The Flutter tool started this runner; when it is gone, so is the run.
   // Through the device helper, the helper is the parent and
   // RACCOON_PARENT_PID names the tool. On Windows the runner watches its
@@ -758,54 +833,214 @@ int Serve(const Options& options) {
     return tool > 1 && kill(tool, 0) != 0 && errno == ESRCH ? static_cast<int>(tool) : 0;
   };
 #endif
-  handler.on_hello = [&](const raccoon::v1::ClientHello& hello) {
-    client_shared = hello.shared_buffers();
-    // A client that says hello again without shared buffers, one whose set
-    // came short of its descriptors, takes frames inline from here (#145).
-    if (!client_shared && pool) {
-      host.frame().SetSharedPool(nullptr);
-      pool.reset();
-    }
-    client_gpu = false;
-    if (hello.gpu_buffers()) {
-      std::string gpu_error;
-      if (host.EnableGpuBuffers(kGpuRing, &gpu_error)) {
-        client_gpu = true;
-      } else {
-        std::fprintf(stderr, "🦝 no GPU buffers: %s; frames by readback\n",
-                     gpu_error.c_str());
-      }
-    }
-    // A client that says hello again without GPU buffers takes pixels.
-    if (!client_gpu) host.DisableGpuBuffers();
-    gpu_told = 0;
-    host.text_input().SetComposer(hello.composes());
-    // A client that arrives mid-run learns which field is active.
-    SendTextField(host.text_input().state());
-    SendPlugins();
-    // Its own first frame: after a client that took frames as GPU buffers,
-    // the latest is in one, and an idle app sends no other.
-    host.Redraw();
-  };
-  handler.on_text_editing = [&host](const raccoon::v1::TextEditing& editing) {
-    host.text_input().ApplyEditing(editing.text(), editing.selection_base(),
-                                   editing.selection_extent(),
-                                   editing.composing_base(),
-                                   editing.composing_extent());
-  };
-  host.text_input().SetStateListener(
-      [&](const raccoon::TextFieldState& state) { SendTextField(state); });
-  handler.on_release_buffer = [&](const raccoon::v1::ReleaseBuffer& release) {
-    if (release.generation() != 0) {
-      host.ReleaseGpuBuffer(release.generation(), static_cast<int>(release.index()));
+
+#if RACCOON_HAS_METAL
+  // Surfaces by Mach port, for a client that asks: the service starts at the
+  // first ask and stays; each client's ask gets the name and a token of its
+  // own. A request with a client's token reached the service: that client
+  // can take surfaces by port, so its ring stops being global. Until then a
+  // client whose lookup fails still sees global surfaces by ID.
+  raccoon::SurfacePortServer ports;
+  std::mutex ports_mutex;
+  std::vector<FlutterViewId> ports_asked;
+  auto SharePorts = [&](Client* client) {
+    std::string why;
+    const bool started = ports.Start(
+        [&host, &loop, &ports_mutex, &ports_asked](uint64_t view, uint32_t generation,
+                                                   std::vector<uint32_t>* out) {
+          {
+            std::lock_guard<std::mutex> lock(ports_mutex);
+            ports_asked.push_back(static_cast<FlutterViewId>(view));
+          }
+          loop.Wake();
+          return host.GpuBufferPorts(static_cast<FlutterViewId>(view), generation, out);
+        },
+        &why);
+    if (!started || !host.can_share_gpu_buffers_by_port()) {
+      std::fprintf(stderr, "🦝 no surfaces by port (%s); by ID as before\n",
+                   started ? "no Metal renderer" : why.c_str());
       return;
     }
-    // A release meant for a set since replaced would free the same index
-    // in this one while its frame is read; 0 is a client that predates it.
-    const uint32_t meant_for = release.shared_generation();
-    if (meant_for != 0 && meant_for != shared_generation) return;
-    if (pool) pool->Release(static_cast<int>(release.index()));
+    std::vector<uint8_t> answer = {'R', 'S', 'V', 'C'};
+    const uint32_t length = static_cast<uint32_t>(ports.name().size());
+    for (int i = 0; i < 4; ++i) answer.push_back(static_cast<uint8_t>(length >> (8 * i)));
+    answer.insert(answer.end(), ports.name().begin(), ports.name().end());
+    const auto token = ports.RenewToken(static_cast<uint64_t>(client->view));
+    answer.insert(answer.end(), token.begin(), token.end());
+    client->gpu_server->SendBytesWithFds(answer, {});
+    // The ring in use again, global still: the client asks the service for
+    // it, and that ask turns the next ring's surfaces private.
+    client->gpu_fds_sent = 0;
   };
+#endif
+
+  // What every client's socket does with what it is sent; the first
+  // client's adds the app's own channels below.
+  auto ClientHandler = [&](Client* client) {
+    raccoon::RunnerServer::Handler handler;
+    handler.on_resize = [&host, client](const raccoon::v1::Resize& resize) {
+      if (std::getenv("RACCOON_TRACE") != nullptr) {
+        std::fprintf(stderr, "🦝 resize view %lld %ux%u @%.2f\n",
+                     static_cast<long long>(client->view), resize.width(), resize.height(),
+                     resize.pixel_ratio());
+      }
+      host.Resize(client->view, resize.width(), resize.height(),
+                  resize.pixel_ratio() > 0 ? resize.pixel_ratio() : 1.0);
+    };
+    handler.on_pointer = [&host, client, &Focus, trace](const raccoon::v1::PointerEvent& pointer) {
+      if (trace) {
+        std::fprintf(stderr, "🦝 pointer view=%lld phase=%d x=%.1f y=%.1f buttons=%lld device=%d\n",
+                     static_cast<long long>(client->view), static_cast<int>(pointer.phase()),
+                     pointer.x(), pointer.y(), static_cast<long long>(pointer.buttons()),
+                     pointer.pointer_id());
+      }
+      if (pointer.phase() == raccoon::v1::POINTER_PHASE_DOWN) Focus(*client);
+      host.SendPointer(client->view, ToFlutterPointer(pointer, host.NowMicros()));
+    };
+    handler.on_key = [&host, trace](const raccoon::v1::KeyEvent& key) {
+      if (trace) {
+        std::fprintf(stderr, "🦝 key kind=%d logical=%llx character=%s\n",
+                     static_cast<int>(key.kind()),
+                     static_cast<unsigned long long>(key.logical()),
+                     key.character().c_str());
+      }
+      host.SendKey(ToFlutterKey(key, host.NowMicros()));
+    };
+    handler.on_text_editing = [&host](const raccoon::v1::TextEditing& editing) {
+      host.text_input().ApplyEditing(editing.text(), editing.selection_base(),
+                                     editing.selection_extent(),
+                                     editing.composing_base(),
+                                     editing.composing_extent());
+    };
+    handler.on_hello = [&, client](const raccoon::v1::ClientHello& hello) {
+      raccoon::SoftwareFrame* frame = host.frame(client->view);
+      client->shared = hello.shared_buffers();
+      // A client that says hello again without shared buffers, one whose
+      // set came short of its descriptors, takes frames inline from here
+      // (#145).
+      if (!client->shared && client->pool) {
+        if (frame != nullptr) frame->SetSharedPool(nullptr);
+        client->pool.reset();
+      }
+      client->gpu = false;
+      if (hello.gpu_buffers()) {
+        std::string gpu_error = "no GPU socket";
+        if (!client->gpu_socket.empty() &&
+            host.EnableGpuBuffers(client->view, kGpuRing, &gpu_error)) {
+          client->gpu = true;
+        } else {
+          std::fprintf(stderr, "🦝 no GPU buffers: %s; frames by readback\n",
+                       gpu_error.c_str());
+        }
+      }
+      // A client that says hello again without GPU buffers takes pixels.
+      if (!client->gpu) host.DisableGpuBuffers(client->view);
+      client->gpu_told = 0;
+      client->composes = hello.composes();
+      if (focus == client) {
+        host.text_input().SetComposer(client->composes);
+        // A client that arrives mid-run learns which field is active.
+        SendTextField(host.text_input().state());
+      }
+      if (client == &first) SendPlugins();
+      // Its own first frame: after a client that took frames as GPU
+      // buffers, the latest is in one, and an idle app sends no other.
+      host.Redraw(client->view);
+    };
+    handler.on_release_buffer = [&host, client](const raccoon::v1::ReleaseBuffer& release) {
+      if (release.generation() != 0) {
+        host.ReleaseGpuBuffer(client->view, release.generation(),
+                              static_cast<int>(release.index()));
+        return;
+      }
+      // A release meant for a set since replaced would free the same index
+      // in this one while its frame is read; 0 is a client that predates it.
+      const uint32_t meant_for = release.shared_generation();
+      if (meant_for != 0 && meant_for != client->shared_generation) return;
+      if (client->pool) client->pool->Release(static_cast<int>(release.index()));
+    };
+    handler.on_client_connected = [&host, client]() {
+      raccoon::v1::RunnerMessage hello;
+      hello.mutable_hello()->set_protocol_version(kProtocolVersion);
+      hello.mutable_hello()->set_pid(ThisProcessId());
+      hello.mutable_hello()->set_views(host.views());
+      hello.mutable_hello()->set_view_id(client->view);
+      client->server->Send(hello);
+      client->last_sent = 0;
+      client->vm_sent = false;
+    };
+    // What both sockets' clients leave behind when they go.
+    handler.on_client_disconnected = [&, client]() {
+      if (focus == client) {
+        focus = &first;
+        host.text_input().SetComposer(first.composes);
+      }
+      if (raccoon::SoftwareFrame* frame = host.frame(client->view)) {
+        frame->SetSharedPool(nullptr);
+      }
+      client->pool.reset();
+      client->shared = false;
+      host.DisableGpuBuffers(client->view);
+      client->gpu = false;
+      client->gpu_told = 0;
+      // Its GPU socket goes with it: kept, it would refuse the next
+      // client's and take that client's buffers and fences (#144).
+      if (client->gpu_server) client->gpu_server->Disconnect();
+    };
+    return handler;
+  };
+  // A client's GPU socket.
+  auto GpuHandler = [&](Client* client) {
+    raccoon::RunnerServer::Handler handler;
+    handler.on_client_connected = [&host, client] {
+      client->gpu_fds_sent = 0;
+      // A new view holds none of the ring. Frames named while none was
+      // there (a tab hidden, its view gone) kept their buffers, and with the
+      // ring full every frame went by readback, at the hold's 10 a second.
+      host.ReleaseAllGpuBuffers(client->view);
+    };
+    handler.on_client_disconnected = [&, client] {
+      client->gpu_fds_sent = 0;
+      // Whatever it held, nothing samples now.
+      host.ReleaseAllGpuBuffers(client->view);
+#if RACCOON_HAS_METAL
+      // The next client may not ask for ports, and a request the one gone
+      // left queued must not count as its ask.
+      ports.ForgetToken(static_cast<uint64_t>(client->view));
+      {
+        std::lock_guard<std::mutex> lock(ports_mutex);
+        ports_asked.erase(std::remove(ports_asked.begin(), ports_asked.end(), client->view),
+                          ports_asked.end());
+      }
+      host.ShareGpuBuffersByPort(client->view, false);
+#endif
+    };
+    handler.on_raw = [&, client](const uint8_t* payload, size_t size, std::vector<int>& fds) {
+#if RACCOON_HAS_METAL
+      if (size >= 4 && std::memcmp(payload, "RPRT", 4) == 0) {
+        SharePorts(client);
+        return;
+      }
+#endif
+      if (size >= 16 && std::memcmp(payload, "RREL", 4) == 0) {
+        int fence = -1;
+        if (Read32(payload + 12) != 0 && !fds.empty()) {
+          fence = fds.front();
+          fds.erase(fds.begin());
+        }
+        host.ReleaseGpuBuffer(client->view, Read32(payload + 4),
+                              static_cast<int>(Read32(payload + 8)), fence);
+        return;
+      }
+      // Not a message this runner knows: whatever it brought is let go.
+      for (int fd : fds) close(fd);
+      fds.clear();
+    };
+    return handler;
+  };
+
+  raccoon::RunnerServer::Handler handler = ClientHandler(&first);
+  handler.on_shutdown = [&stop] { stop = true; };
   handler.on_platform_response = [&](const raccoon::v1::PlatformResponse& response) {
     const auto found = pending.find(response.response_id());
     if (found == pending.end()) return;
@@ -819,39 +1054,27 @@ int Serve(const Options& options) {
       host.RespondNoPlugin(waiting.channel, waiting.handle, "the client has no handler");
     }
   };
-  handler.on_client_connected = [&] {
-    raccoon::v1::RunnerMessage hello;
-    hello.mutable_hello()->set_protocol_version(kProtocolVersion);
-    hello.mutable_hello()->set_pid(ThisProcessId());
-    server_ptr->Send(hello);
+  handler.on_client_connected = [&, connected = handler.on_client_connected] {
+    connected();
     // What the app said before it drew anything, why it stopped if it did.
-    for (const auto& line : startup_lines) server_ptr->Send(line);
-    last_sent = 0;
-    vm_sent = false;
+    for (const auto& line : startup_lines) first.server->Send(line);
     std::fprintf(stderr, "🦝 client connected\n");
   };
-  handler.on_client_disconnected = [&] {
-    host.text_input().SetComposer(false);
+  handler.on_client_disconnected = [&, disconnected = handler.on_client_disconnected] {
     // Nobody will answer these now; let the app see "no plugin".
     for (const auto& [id, waiting] : pending) {
       host.RespondNoPlugin(waiting.channel, waiting.handle, "the client went away");
     }
     pending.clear();
-    host.frame().SetSharedPool(nullptr);
-    pool.reset();
-    client_shared = false;
-    host.DisableGpuBuffers();
-    client_gpu = false;
-    gpu_told = 0;
-    // Its GPU socket goes with it: kept, it would refuse the next client's
-    // and take that client's buffers and fences (#144).
-    if (gpu_server_ptr != nullptr) gpu_server_ptr->Disconnect();
+    disconnected();
+    if (focus == &first) host.text_input().SetComposer(false);
     std::fprintf(stderr, "🦝 client disconnected\n");
   };
+  host.text_input().SetStateListener(
+      [&](const raccoon::TextFieldState& state) { SendTextField(state); });
 
-  raccoon::RunnerServer server(loop, handler);
-  server_ptr = &server;
-  if (!server.Listen(options.socket, &error)) {
+  first.server = std::make_unique<raccoon::RunnerServer>(loop, handler);
+  if (!first.server->Listen(options.socket, &error)) {
     std::fprintf(stderr, "🦝 %s\n", error.c_str());
     // The engine runs already: its threads post to objects about to go.
     host.Shutdown();
@@ -859,113 +1082,68 @@ int Serve(const Options& options) {
   }
   // The GPU socket: a native client takes the buffers' descriptors here,
   // which Dart cannot. Named without .sock, so discovery does not list it.
-  const std::string gpu_socket = GpuSocketPath(options.socket);
-#if RACCOON_HAS_METAL
-  // Set once the GPU socket's server exists, below.
-  std::function<void()> SharePorts;
-  std::function<void()> ForgetPortToken;
-  // A request with the token reached the service: the client can take
-  // surfaces by port, so the ring stops being global. Until then a client
-  // whose lookup fails still sees global surfaces by ID.
-  std::atomic<bool> ports_asked{false};
-#endif
-  raccoon::RunnerServer::Handler gpu_handler;
-  gpu_handler.on_client_connected = [&] {
-    gpu_fds_sent = 0;
-    // A new view holds none of the ring. Frames named while none was there
-    // (a tab hidden, its view gone) kept their buffers, and with the ring
-    // full every frame went by readback, at the hold's 10 a second.
-    host.ReleaseAllGpuBuffers();
-  };
-  gpu_handler.on_client_disconnected = [&] {
-    gpu_fds_sent = 0;
-    // Whatever it held, nothing samples now.
-    host.ReleaseAllGpuBuffers();
-#if RACCOON_HAS_METAL
-    // The next client may not ask for ports, and a request the one gone
-    // left queued must not count as its ask.
-    if (ForgetPortToken) ForgetPortToken();
-    ports_asked = false;
-    host.ShareGpuBuffersByPort(false);
-#endif
-  };
-  gpu_handler.on_raw = [&](const uint8_t* payload, size_t size, std::vector<int>& fds) {
-#if RACCOON_HAS_METAL
-    if (size >= 4 && std::memcmp(payload, "RPRT", 4) == 0) {
-      SharePorts();
-      return;
-    }
-#endif
-    if (size >= 16 && std::memcmp(payload, "RREL", 4) == 0) {
-      int fence = -1;
-      if (Read32(payload + 12) != 0 && !fds.empty()) {
-        fence = fds.front();
-        fds.erase(fds.begin());
-      }
-      host.ReleaseGpuBuffer(Read32(payload + 4), static_cast<int>(Read32(payload + 8)),
-                            fence);
-      return;
-    }
-    // Not a message this runner knows: whatever it brought is let go.
-    for (int fd : fds) close(fd);
-    fds.clear();
-  };
-  raccoon::RunnerServer gpu_server(loop, gpu_handler);
-  gpu_server_ptr = &gpu_server;
-#if RACCOON_HAS_METAL
-  // Surfaces by Mach port, for a client that asks: the service starts at the
-  // first ask and stays; each ask gets its name and a token of its own.
-  raccoon::SurfacePortServer ports;
-  ForgetPortToken = [&ports] { ports.RenewToken(); };
-  SharePorts = [&] {
-    std::string why;
-    const bool started = ports.Start(
-        [&host, &loop, &ports_asked](uint32_t generation, std::vector<uint32_t>* out) {
-          ports_asked = true;
-          loop.Wake();
-          return host.GpuBufferPorts(generation, out);
-        },
-        &why);
-    if (!started || !host.can_share_gpu_buffers_by_port()) {
-      std::fprintf(stderr, "🦝 no surfaces by port (%s); by ID as before\n",
-                   started ? "no Metal renderer" : why.c_str());
-      return;
-    }
-    std::vector<uint8_t> answer = {'R', 'S', 'V', 'C'};
-    const uint32_t length = static_cast<uint32_t>(ports.name().size());
-    for (int i = 0; i < 4; ++i) answer.push_back(static_cast<uint8_t>(length >> (8 * i)));
-    answer.insert(answer.end(), ports.name().begin(), ports.name().end());
-    const auto token = ports.RenewToken();
-    answer.insert(answer.end(), token.begin(), token.end());
-    gpu_server.SendBytesWithFds(answer, {});
-    // The ring in use again, global still: the client asks the service for
-    // it, and that ask turns the next ring's surfaces private.
-    gpu_fds_sent = 0;
-  };
-#endif
-  if (!gpu_server.Listen(gpu_socket, &error)) {
+  first.gpu_socket = GpuSocketPath(options.socket);
+  first.gpu_server = std::make_unique<raccoon::RunnerServer>(loop, GpuHandler(&first));
+  if (!first.gpu_server->Listen(first.gpu_socket, &error)) {
     std::fprintf(stderr, "🦝 %s\n", error.c_str());
     // The engine runs already: its threads post to objects about to go.
     host.Shutdown();
     return 1;
   }
+  // The views socket: each connection is a view of its own (#182).
+  std::unique_ptr<raccoon::RunnerServer> views_server;
+  if (host.views()) {
+    raccoon::RunnerServer::Handler views_handler;
+    views_handler.on_accept = [&](int fd) {
+      const FlutterViewId view = host.AddView();
+      if (view == 0) {
+        raccoon::RunnerServer::Refuse(fd);
+        return;
+      }
+      auto client = std::make_unique<Client>();
+      client->view = view;
+      raccoon::RunnerServer::Handler view_handler = ClientHandler(client.get());
+      Client* added = client.get();
+      // A view's client that asks to stop stops only its view.
+      view_handler.on_shutdown = [added] { added->server->Disconnect(); };
+      view_handler.on_client_disconnected = [&, added,
+                                             disconnected = view_handler.on_client_disconnected] {
+        disconnected();
+        host.RemoveView(added->view);
+        added->gone = true;
+        std::fprintf(stderr, "🦝 view %lld closed\n", static_cast<long long>(added->view));
+      };
+      client->server = std::make_unique<raccoon::RunnerServer>(loop, view_handler);
+      client->gpu_server = std::make_unique<raccoon::RunnerServer>(loop, GpuHandler(client.get()));
+      std::string gpu_error;
+      const std::string gpu_socket = ViewGpuSocketPath(options.socket, view);
+      if (client->gpu_server->Listen(gpu_socket, &gpu_error)) {
+        client->gpu_socket = gpu_socket;
+      } else {
+        std::fprintf(stderr, "🦝 view %lld takes no GPU buffers: %s\n",
+                     static_cast<long long>(view), gpu_error.c_str());
+      }
+      views.push_back(std::move(client));
+      added->server->Adopt(fd);
+      std::fprintf(stderr, "🦝 view %lld opened\n", static_cast<long long>(view));
+    };
+    views_server = std::make_unique<raccoon::RunnerServer>(loop, views_handler);
+    if (!views_server->Listen(ViewsSocketPath(options.socket), &error)) {
+      std::fprintf(stderr, "🦝 no views: %s\n", error.c_str());
+      views_server.reset();
+    }
+  }
   std::fprintf(stdout, "🦝 listening on unix:%s\n",
                options.socket.c_str());
   std::fflush(stdout);
 
-  // One turn of the loop's work: platform tasks, vsync, and what goes to
-  // the client. The loop below takes one between waits; a plugin's modal
-  // dialog takes them while its own loop holds ours (MessagePump on
-  // Windows, RunLoopPump on macOS, GlibPump on Linux).
-  auto Turn = [&]() {
-#if RACCOON_HAS_METAL
-    if (ports_asked.exchange(false)) host.ShareGpuBuffersByPort(true);
-#endif
-    host.platform().RunDueTasks();
-    host.RedrawIfMissed();
-    host.ServiceVsync();
-    host.ServiceCamera();
-    SendLogs();
+  // Sends |client| what is new for its view: the VM service, its GPU
+  // buffers, and the latest frame.
+  auto SendFrames = [&](Client& client) {
+    raccoon::RunnerServer& server = *client.server;
+    raccoon::RunnerServer& gpu_server = *client.gpu_server;
+    raccoon::SoftwareFrame* frame = host.frame(client.view);
+    if (frame == nullptr) return;
     // Nothing the client is sent blocks the loop, the app's platform
     // thread: messages queue while its socket is full (#144), and frames
     // wait in the renderer until the queue is empty, the newest replacing
@@ -973,122 +1151,166 @@ int Serve(const Options& options) {
     // leaves too much unread is let go by the server.
     // The GPU socket's too: a frame must not reach the client before the
     // fence it waits on (#146).
-    frames_held = server.backlog() > 0 || gpu_server.backlog() > 0;
-    if (server.has_client()) {
-      if (!vm_sent) {
-        const std::string uri = host.vm_service_uri();
-        if (!uri.empty()) {
-          raccoon::v1::RunnerMessage message;
-          message.mutable_vm_service()->set_uri(uri);
-          server.Send(message);
-          vm_sent = true;
-        }
-      }
-      if (client_gpu) {
-        raccoon::GpuBufferSet set;
-        if (host.GpuBufferSetNow(&set)) {
-          if (set.generation != gpu_told) {
-            raccoon::v1::RunnerMessage message;
-            FillGpuBuffers(set, gpu_socket, message.mutable_gpu_buffers());
-            if (server.Send(message)) gpu_told = set.generation;
-          }
-          if (gpu_server.has_client() && set.generation != gpu_fds_sent) {
-            if (gpu_server.SendBytesWithFds(GpuSocketPayload(set), set.fds)) {
-              gpu_fds_sent = set.generation;
-            }
-          }
-        }
-        raccoon::SoftwareFrame::Gpu gpu;
-        if (!frames_held && host.frame().TakeGpu(&gpu)) {
-          // The fence goes first, to a client holding this set's buffers.
-          if (gpu.fence_fd >= 0) {
-            if (gpu_server.has_client() && gpu_fds_sent == gpu.generation) {
-              gpu_server.SendBytesWithFds(FencePayload(gpu), {gpu.fence_fd});
-            }
-            close(gpu.fence_fd);
-          }
-          raccoon::v1::RunnerMessage message;
-          auto* frame = message.mutable_frame();
-          frame->set_sequence(gpu.sequence);
-          frame->set_width(static_cast<uint32_t>(gpu.width));
-          frame->set_height(static_cast<uint32_t>(gpu.height));
-          frame->set_row_bytes(static_cast<uint32_t>(gpu.width * 4));
-          frame->set_format(raccoon::v1::PIXEL_FORMAT_UNSPECIFIED);
-          frame->set_in_gpu_buffer(true);
-          frame->set_buffer_index(static_cast<uint32_t>(gpu.index));
-          frame->set_gpu_generation(gpu.generation);
-          frame->set_timestamp_micros(host.NowMicros());
-          if (!server.Send(message)) host.ReleaseGpuBuffer(gpu.generation, gpu.index);
-          last_sent = gpu.sequence;
-        }
-      }
-      raccoon::SoftwareFrame::Shared shared;
-      // A frame that waited for a buffer goes in the one given back.
-      host.frame().PromoteInline();
-      if (!frames_held && host.frame().TakeShared(&shared)) {
+    const bool frames_held = server.backlog() > 0 || gpu_server.backlog() > 0;
+    if (!client.vm_sent) {
+      const std::string uri = host.vm_service_uri();
+      if (!uri.empty()) {
         raccoon::v1::RunnerMessage message;
-        raccoon::v1::Frame* frame = message.mutable_frame();
-        frame->set_sequence(shared.sequence);
-        frame->set_width(static_cast<uint32_t>(shared.width));
-        frame->set_height(static_cast<uint32_t>(shared.height));
-        frame->set_row_bytes(static_cast<uint32_t>(shared.row_bytes));
-        frame->set_format(kPixelFormat);
-        frame->set_in_shared_buffer(true);
-        frame->set_buffer_index(static_cast<uint32_t>(shared.index));
-        frame->set_timestamp_micros(host.NowMicros());
-        if (!server.Send(message) && pool) pool->Release(shared.index);
-        last_sent = shared.sequence;
-      }
-      raccoon::SoftwareFrame::Copy copy;
-      if (!frames_held && host.frame().CopyLatest(&copy, last_sent)) {
-        raccoon::v1::RunnerMessage message;
-        raccoon::v1::Frame* frame = message.mutable_frame();
-        frame->set_sequence(copy.sequence);
-        frame->set_width(static_cast<uint32_t>(copy.width));
-        frame->set_height(static_cast<uint32_t>(copy.height));
-        frame->set_row_bytes(static_cast<uint32_t>(copy.row_bytes));
-        frame->set_format(kPixelFormat);
-        frame->set_pixels(std::move(copy.pixels));
-        frame->set_timestamp_micros(host.NowMicros());
+        message.mutable_vm_service()->set_uri(uri);
         server.Send(message);
-        last_sent = copy.sequence;
+        client.vm_sent = true;
       }
-      // Resize the shared buffers only after the pending frame went out:
-      // replacing the pool releases it, and that frame would be lost.
-      // Shared buffers with room to grow: a frame that fits goes through
-      // them. Sized to the frame exactly, every frame of a pane being
-      // dragged larger missed them and went inline, a copy of its pixels
-      // through the socket, while the buffers were made anew each time.
-      // They grow by a quarter when a frame no longer fits, and shrink when
-      // more than twice what a frame needs.
-      const size_t need = host.frame().LatestSizeBytes();
-      if (client_shared && !client_gpu && need > 0 && !frames_held &&
-          (!pool || pool->size() < need || pool->size() / 2 > need)) {
-        host.frame().SetSharedPool(nullptr);
-        auto fresh = std::make_unique<raccoon::SharedBufferPool>();
-        std::string pool_error;
-        const size_t room = (need + need / 4 + 4095) / 4096 * 4096;
-        if (fresh->Allocate(2, room, &pool_error)) {
+    }
+    if (client.gpu) {
+      raccoon::GpuBufferSet set;
+      if (host.GpuBufferSetNow(client.view, &set)) {
+        if (set.generation != client.gpu_told) {
           raccoon::v1::RunnerMessage message;
-          message.mutable_shared_buffers()->set_count(2);
-          message.mutable_shared_buffers()->set_size(room);
-          message.mutable_shared_buffers()->set_generation(shared_generation + 1);
-          if (server.SendWithFds(message, fresh->fds())) {
-            ++shared_generation;
-            pool = std::move(fresh);
-            host.frame().SetSharedPool(pool.get());
+          FillGpuBuffers(set, client.gpu_socket, message.mutable_gpu_buffers());
+          if (server.Send(message)) client.gpu_told = set.generation;
+        }
+        if (gpu_server.has_client() && set.generation != client.gpu_fds_sent) {
+          if (gpu_server.SendBytesWithFds(GpuSocketPayload(set), set.fds)) {
+            client.gpu_fds_sent = set.generation;
           }
-        } else {
-          std::fprintf(stderr, "🦝 %s; frames stay inline\n",
-                       pool_error.c_str());
-          client_shared = false;
         }
       }
+      raccoon::SoftwareFrame::Gpu gpu;
+      if (!frames_held && frame->TakeGpu(&gpu)) {
+        // The fence goes first, to a client holding this set's buffers.
+        if (gpu.fence_fd >= 0) {
+          if (gpu_server.has_client() && client.gpu_fds_sent == gpu.generation) {
+            gpu_server.SendBytesWithFds(FencePayload(gpu), {gpu.fence_fd});
+          }
+          close(gpu.fence_fd);
+        }
+        raccoon::v1::RunnerMessage message;
+        auto* out = message.mutable_frame();
+        out->set_sequence(gpu.sequence);
+        out->set_width(static_cast<uint32_t>(gpu.width));
+        out->set_height(static_cast<uint32_t>(gpu.height));
+        out->set_row_bytes(static_cast<uint32_t>(gpu.width * 4));
+        out->set_format(raccoon::v1::PIXEL_FORMAT_UNSPECIFIED);
+        out->set_in_gpu_buffer(true);
+        out->set_buffer_index(static_cast<uint32_t>(gpu.index));
+        out->set_gpu_generation(gpu.generation);
+        out->set_timestamp_micros(host.NowMicros());
+        if (!server.Send(message)) {
+          host.ReleaseGpuBuffer(client.view, gpu.generation, gpu.index);
+        }
+        client.last_sent = gpu.sequence;
+      }
+    }
+    raccoon::SoftwareFrame::Shared shared;
+    // A frame that waited for a buffer goes in the one given back.
+    frame->PromoteInline();
+    if (!frames_held && frame->TakeShared(&shared)) {
+      raccoon::v1::RunnerMessage message;
+      raccoon::v1::Frame* out = message.mutable_frame();
+      out->set_sequence(shared.sequence);
+      out->set_width(static_cast<uint32_t>(shared.width));
+      out->set_height(static_cast<uint32_t>(shared.height));
+      out->set_row_bytes(static_cast<uint32_t>(shared.row_bytes));
+      out->set_format(kPixelFormat);
+      out->set_in_shared_buffer(true);
+      out->set_buffer_index(static_cast<uint32_t>(shared.index));
+      out->set_timestamp_micros(host.NowMicros());
+      if (!server.Send(message) && client.pool) client.pool->Release(shared.index);
+      client.last_sent = shared.sequence;
+    }
+    raccoon::SoftwareFrame::Copy copy;
+    if (!frames_held && frame->CopyLatest(&copy, client.last_sent)) {
+      raccoon::v1::RunnerMessage message;
+      raccoon::v1::Frame* out = message.mutable_frame();
+      out->set_sequence(copy.sequence);
+      out->set_width(static_cast<uint32_t>(copy.width));
+      out->set_height(static_cast<uint32_t>(copy.height));
+      out->set_row_bytes(static_cast<uint32_t>(copy.row_bytes));
+      out->set_format(kPixelFormat);
+      out->set_pixels(std::move(copy.pixels));
+      out->set_timestamp_micros(host.NowMicros());
+      server.Send(message);
+      client.last_sent = copy.sequence;
+    }
+    // Resize the shared buffers only after the pending frame went out:
+    // replacing the pool releases it, and that frame would be lost.
+    // Shared buffers with room to grow: a frame that fits goes through
+    // them. Sized to the frame exactly, every frame of a pane being
+    // dragged larger missed them and went inline, a copy of its pixels
+    // through the socket, while the buffers were made anew each time.
+    // They grow by a quarter when a frame no longer fits, and shrink when
+    // more than twice what a frame needs.
+    const size_t need = frame->LatestSizeBytes();
+    if (client.shared && !client.gpu && need > 0 && !frames_held && server.has_client() &&
+        (!client.pool || client.pool->size() < need || client.pool->size() / 2 > need)) {
+      frame->SetSharedPool(nullptr);
+      auto fresh = std::make_unique<raccoon::SharedBufferPool>();
+      std::string pool_error;
+      const size_t room = (need + need / 4 + 4095) / 4096 * 4096;
+      if (fresh->Allocate(2, room, &pool_error)) {
+        raccoon::v1::RunnerMessage message;
+        message.mutable_shared_buffers()->set_count(2);
+        message.mutable_shared_buffers()->set_size(room);
+        message.mutable_shared_buffers()->set_generation(client.shared_generation + 1);
+        if (server.SendWithFds(message, fresh->fds())) {
+          ++client.shared_generation;
+          client.pool = std::move(fresh);
+          frame->SetSharedPool(client.pool.get());
+        }
+      } else {
+        std::fprintf(stderr, "🦝 %s; frames stay inline\n",
+                     pool_error.c_str());
+        client.shared = false;
+      }
+    }
+  };
+
+  // One turn of the loop's work: platform tasks, vsync, and what goes to
+  // the clients. The loop below takes one between waits; a plugin's modal
+  // dialog takes them while its own loop holds ours (MessagePump on
+  // Windows, RunLoopPump on macOS, GlibPump on Linux).
+  auto Turn = [&]() {
+#if RACCOON_HAS_METAL
+    {
+      std::vector<FlutterViewId> asked;
+      {
+        std::lock_guard<std::mutex> lock(ports_mutex);
+        asked.swap(ports_asked);
+      }
+      for (const FlutterViewId view : asked) host.ShareGpuBuffersByPort(view, true);
+    }
+#endif
+    host.platform().RunDueTasks();
+    host.ServiceViews();
+    host.RedrawIfMissed();
+    host.ServiceVsync();
+    host.ServiceCamera();
+    SendLogs();
+    // A view's client that went is let go here, outside its socket's calls.
+    views.erase(std::remove_if(views.begin(), views.end(),
+                               [](const std::unique_ptr<Client>& client) {
+                                 return client->gone;
+                               }),
+                views.end());
+    if (first.server->has_client()) SendFrames(first);
+    for (const auto& client : views) {
+      if (client->server->has_client()) SendFrames(*client);
     }
     if (const int gone = GonePid(); gone != 0) {
       std::fprintf(stderr, "🦝 parent %d is gone; stopping\n", gone);
       stop = true;
     }
+  };
+  // How long the loop may sleep: until the next platform task, frame or
+  // reply due, at most a second.
+  auto Wait = [&]() {
+    int wait = NextWait(host, ExpireReplies(1000));
+    for (const auto& client : views) {
+      raccoon::SoftwareFrame* frame = host.frame(client->view);
+      const int next = frame == nullptr ? -1 : frame->MillisUntilInline();
+      if (next >= 0 && next < wait) wait = next;
+    }
+    return wait;
   };
 #if RACCOON_HAS_PLUGINS
   if (plugins) plugins->SetModalTurn([&] {
@@ -1100,14 +1322,21 @@ int Serve(const Options& options) {
     Turn();
     // Frames held for the queue go once it drains: the socket's readiness
     // wakes the loop.
-    loop.RunOnce(NextWait(host, ExpireReplies(1000)));
+    loop.RunOnce(Wait());
   }
 
-  if (server.has_client()) {
+  if (first.server->has_client()) {
     raccoon::v1::RunnerMessage exited;
     exited.mutable_exited()->set_code(0);
-    server.Send(exited);
-    server.Drain(2000);
+    first.server->Send(exited);
+    first.server->Drain(2000);
+  }
+  for (const auto& client : views) {
+    if (!client->server->has_client()) continue;
+    raccoon::v1::RunnerMessage exited;
+    exited.mutable_exited()->set_code(0);
+    client->server->Send(exited);
+    client->server->Drain(500);
   }
   host.Shutdown();
   capture.Stop();

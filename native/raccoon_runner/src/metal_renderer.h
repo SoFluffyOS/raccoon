@@ -32,6 +32,9 @@ class MetalRenderer : public GpuRenderer {
   ~MetalRenderer() override;
 
   bool Init(std::string* error);
+  // A target beside |of|, for another view (#182): the same device and
+  // queue, with a ring and readback of its own. |of| outlives it.
+  void InitSibling(const MetalRenderer& of);
   void Shutdown() override;
 
   // id<MTLDevice> and id<MTLCommandQueue>, for FlutterMetalRendererConfig.

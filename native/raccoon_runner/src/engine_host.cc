@@ -83,10 +83,29 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   platform_->SetWakeCallback(on_wake_);
   frame_.SetPresentedCallback(on_wake_);
 
+  // An engine before multi-view embedding has no AddView: one view it is.
+  views_mode_ = options.views && procs.AddView != nullptr && procs.RemoveView != nullptr;
+  if (options.views && !views_mode_) {
+    std::fprintf(stderr, "🦝 this engine adds no views; the app has its one\n");
+  }
   FlutterRendererConfig renderer{};
   if (!ConfigureRenderer(options.renderer, &renderer, error)) return false;
   GiveCameraTextures();
-  if (gpu_) {
+  if (views_mode_) {
+    // Every view, the app's own too, draws into a target of its own; the
+    // renderer's callbacks serve only the engine's root surface.
+    auto own = std::make_shared<View>(0);
+    if (!MakeTarget(*own, error)) return false;
+    own->added = true;
+    views_[0] = std::move(own);
+    compositor_.struct_size = sizeof(FlutterCompositor);
+    compositor_.user_data = this;
+    compositor_.create_backing_store_callback = CreateBackingStore;
+    compositor_.collect_backing_store_callback = CollectBackingStore;
+    compositor_.present_view_callback = PresentView;
+    // A target a frame: a ring hands out a different buffer each time.
+    compositor_.avoid_backing_store_cache = true;
+  } else if (gpu_) {
     gpu_->SetGpuFrameCallback([this](uint32_t generation, int index, size_t width,
                                      size_t height, int fence_fd) {
       frame_.PresentGpu(generation, index, width, height, fence_fd);
@@ -115,6 +134,7 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   args.custom_task_runners = &runners_;
   args.platform_message_callback = OnPlatformMessage;
   args.vsync_callback = OnVsync;
+  if (views_mode_) args.compositor = &compositor_;
 
   started_ = std::chrono::steady_clock::now();
   const FlutterEngineResult result =
@@ -141,7 +161,7 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   display.device_pixel_ratio = options.pixel_ratio;
   procs.NotifyDisplayUpdate(engine_, kFlutterEngineDisplaysUpdateTypeStartup,
                             &display, 1);
-  Resize(options.width, options.height, options.pixel_ratio);
+  Resize(0, options.width, options.height, options.pixel_ratio);
   SendHostSettings();
   // The app is shown, as far as the runner knows: desktop embeddings say
   // so once the engine runs, and without it the app's lifecycle stays null.
@@ -179,21 +199,24 @@ void EngineHost::SendHostSettings() {
                       json.size());
 }
 
-void EngineHost::Resize(size_t width, size_t height, double pixel_ratio) {
-  // A frame too large for the GPU (Metal aborts past 16,384 pixels a side,
-  // GL drivers stop sooner) is scaled down to fit, its pixel ratio with it:
-  // the app keeps its logical size at a lower resolution, and the host shows
-  // the frame stretched as it does any (#117). 8,192 is wider than any
-  // display.
+namespace {
+
+// The metrics for a frame of |width| x |height| at |pixel_ratio|. A frame too
+// large for the GPU (Metal aborts past 16,384 pixels a side, GL drivers stop
+// sooner) is scaled down to fit, its pixel ratio with it: the app keeps its
+// logical size at a lower resolution, and the host shows the frame stretched
+// as it does any (#117). 8,192 is wider than any display. |scale| is what
+// it was scaled by.
+FlutterWindowMetricsEvent FitMetrics(size_t width, size_t height, double pixel_ratio,
+                                     double* scale) {
   constexpr size_t kMaxSide = 8192;
   const size_t longest = std::max(width, height);
-  input_scale_ = 1.0;
+  *scale = 1.0;
   if (longest > kMaxSide) {
-    const double scale = static_cast<double>(kMaxSide) / static_cast<double>(longest);
-    width = std::max<size_t>(1, static_cast<size_t>(std::lround(width * scale)));
-    height = std::max<size_t>(1, static_cast<size_t>(std::lround(height * scale)));
-    pixel_ratio *= scale;
-    input_scale_ = scale;
+    *scale = static_cast<double>(kMaxSide) / static_cast<double>(longest);
+    width = std::max<size_t>(1, static_cast<size_t>(std::lround(width * *scale)));
+    height = std::max<size_t>(1, static_cast<size_t>(std::lround(height * *scale)));
+    pixel_ratio *= *scale;
   }
   FlutterWindowMetricsEvent metrics{};
   metrics.struct_size = sizeof(FlutterWindowMetricsEvent);
@@ -201,15 +224,364 @@ void EngineHost::Resize(size_t width, size_t height, double pixel_ratio) {
   metrics.height = height;
   metrics.pixel_ratio = pixel_ratio;
   metrics.display_id = kDisplayId;
-  metrics_ = metrics;
-  loader_.procs().SendWindowMetricsEvent(engine_, &metrics);
-  windows_.SetViewSize(width, height, pixel_ratio);
+  return metrics;
 }
 
-void EngineHost::Redraw() {
+// What the engine's add and remove callbacks get back.
+struct ViewBaton {
+  EngineHost* host;
+  FlutterViewId view;
+};
+
+}  // namespace
+
+void EngineHost::Resize(FlutterViewId view, size_t width, size_t height,
+                        double pixel_ratio) {
+  double scale = 1.0;
+  FlutterWindowMetricsEvent metrics = FitMetrics(width, height, pixel_ratio, &scale);
+  if (view == 0) {
+    input_scale_ = scale;
+    metrics_ = metrics;
+    loader_.procs().SendWindowMetricsEvent(engine_, &metrics);
+    windows_.SetViewSize(metrics.width, metrics.height, metrics.pixel_ratio);
+    return;
+  }
+  const std::shared_ptr<View> found = ViewOf(view);
+  if (!found || found->removing || engine_ == nullptr) return;
+  metrics.view_id = view;
+  found->metrics = metrics;
+  found->input_scale = scale;
+  if (found->added) {
+    loader_.procs().SendWindowMetricsEvent(engine_, &metrics);
+    return;
+  }
+  // Taken at its first size; sizes until the engine has it wait.
+  if (found->asked) {
+    found->metrics_owed = true;
+    return;
+  }
+  FlutterAddViewInfo info{};
+  info.struct_size = sizeof(FlutterAddViewInfo);
+  info.view_id = view;
+  info.view_metrics = &found->metrics;
+  info.user_data = new ViewBaton{this, view};
+  info.add_view_callback = OnViewAdded;
+  found->asked = loader_.procs().AddView(engine_, &info) == kSuccess;
+  if (!found->asked) {
+    delete static_cast<ViewBaton*>(info.user_data);
+    std::fprintf(stderr, "🦝 the engine did not take view %lld\n",
+                 static_cast<long long>(view));
+  }
+}
+
+void EngineHost::Redraw(FlutterViewId view) {
   // The framework draws a frame for metrics it is sent, the same or not.
-  if (engine_ == nullptr || metrics_.width == 0) return;
-  loader_.procs().SendWindowMetricsEvent(engine_, &metrics_);
+  if (engine_ == nullptr) return;
+  if (view == 0) {
+    if (metrics_.width == 0) return;
+    loader_.procs().SendWindowMetricsEvent(engine_, &metrics_);
+    return;
+  }
+  const std::shared_ptr<View> found = ViewOf(view);
+  if (!found || !found->added || found->removing) return;
+  loader_.procs().SendWindowMetricsEvent(engine_, &found->metrics);
+}
+
+FlutterViewId EngineHost::AddView() {
+  if (!views_mode_) return 0;
+  auto view = std::make_shared<View>(next_view_);
+  std::string error;
+  if (!MakeTarget(*view, &error)) {
+    std::fprintf(stderr, "🦝 no view: %s\n", error.c_str());
+    return 0;
+  }
+  std::lock_guard<std::mutex> lock(views_mutex_);
+  views_[next_view_] = std::move(view);
+  return next_view_++;
+}
+
+void EngineHost::RemoveView(FlutterViewId view) {
+  if (view == 0) return;
+  std::shared_ptr<View> found = ViewOf(view);
+  if (!found || found->removing) return;
+  found->removing = true;
+  if (focused_ == view) focused_ = 0;
+  if (found->asked && engine_ != nullptr) {
+    FlutterRemoveViewInfo info{};
+    info.struct_size = sizeof(FlutterRemoveViewInfo);
+    info.view_id = view;
+    info.user_data = new ViewBaton{this, view};
+    info.remove_view_callback = OnViewRemoved;
+    if (loader_.procs().RemoveView(engine_, &info) == kSuccess) return;
+    delete static_cast<ViewBaton*>(info.user_data);
+  }
+  // Never drawn, or the engine would not let it go: nothing draws it now.
+  std::lock_guard<std::mutex> lock(views_mutex_);
+  views_.erase(view);
+  retired_.push_back(std::move(found));
+}
+
+void EngineHost::OnViewAdded(const FlutterAddViewResult* result) {
+  auto* baton = static_cast<ViewBaton*>(result->user_data);
+  EngineHost* host = baton->host;
+  if (const std::shared_ptr<View> view = host->ViewOf(baton->view)) {
+    if (result->added) {
+      view->added = true;
+      // Sizes asked for while it was on its way.
+      view->metrics_owed = true;
+    } else {
+      std::fprintf(stderr, "🦝 the engine did not add view %lld\n",
+                   static_cast<long long>(baton->view));
+    }
+  }
+  delete baton;
+  if (host->on_wake_) host->on_wake_();
+}
+
+void EngineHost::OnViewRemoved(const FlutterRemoveViewResult* result) {
+  auto* baton = static_cast<ViewBaton*>(result->user_data);
+  EngineHost* host = baton->host;
+  {
+    std::lock_guard<std::mutex> lock(host->views_mutex_);
+    const auto found = host->views_.find(baton->view);
+    if (found != host->views_.end()) {
+      host->retired_.push_back(std::move(found->second));
+      host->views_.erase(found);
+    }
+  }
+  delete baton;
+  if (host->on_wake_) host->on_wake_();
+}
+
+void EngineHost::ServiceViews() {
+  if (!views_mode_ || engine_ == nullptr) return;
+  std::vector<std::shared_ptr<View>> views;
+  {
+    std::lock_guard<std::mutex> lock(views_mutex_);
+    for (const auto& [id, view] : views_) views.push_back(view);
+  }
+  for (const auto& view : views) {
+    if (view->id == 0 || !view->added || view->removing) continue;
+    if (view->metrics_owed.exchange(false)) {
+      loader_.procs().SendWindowMetricsEvent(engine_, &view->metrics);
+    }
+  }
+  DropRetired(false);
+}
+
+void EngineHost::DropRetired(bool gl_current) {
+  (void)gl_current;
+  std::vector<std::shared_ptr<View>> gone;
+  {
+    std::lock_guard<std::mutex> lock(views_mutex_);
+    if (retired_.empty()) return;
+#if RACCOON_HAS_GL
+    // A GL target goes with the context current: on the raster thread, or
+    // once the engine is gone.
+    if (gl_ != nullptr && !gl_current && engine_ != nullptr) return;
+#endif
+    gone.swap(retired_);
+  }
+  for (const auto& view : gone) {
+    if (view->gpu) view->gpu->Shutdown();
+  }
+}
+
+std::shared_ptr<EngineHost::View> EngineHost::ViewOf(FlutterViewId view) const {
+  std::lock_guard<std::mutex> lock(views_mutex_);
+  const auto found = views_.find(view);
+  return found == views_.end() ? nullptr : found->second;
+}
+
+bool EngineHost::TargetOf(FlutterViewId view, Target* out) {
+  if (!views_mode_) {
+    if (view != 0) return false;
+    out->frame = &frame_;
+    out->gpu = gpu_.get();
+#if RACCOON_HAS_GL
+    out->gl = gl_;
+#endif
+#if RACCOON_HAS_METAL
+    out->metal = metal_;
+#endif
+    out->pixels = nullptr;
+    return true;
+  }
+  std::shared_ptr<View> found = ViewOf(view);
+  if (!found) return false;
+  out->frame = &found->frame;
+  out->gpu = found->gpu.get();
+#if RACCOON_HAS_GL
+  out->gl = found->gl;
+#endif
+#if RACCOON_HAS_METAL
+  out->metal = found->metal;
+#endif
+  out->pixels = &found->pixels;
+  out->view = std::move(found);
+  return true;
+}
+
+SoftwareFrame* EngineHost::frame(FlutterViewId view) {
+  Target target;
+  return TargetOf(view, &target) ? target.frame : nullptr;
+}
+
+GpuRenderer* EngineHost::GpuOf(FlutterViewId view) const {
+  if (!views_mode_) return view == 0 ? gpu_.get() : nullptr;
+  const std::shared_ptr<View> found = ViewOf(view);
+  return found ? found->gpu.get() : nullptr;
+}
+
+void EngineHost::ForEachGpu(const std::function<void(GpuRenderer&)>& each) const {
+  if (!views_mode_) {
+    if (gpu_) each(*gpu_);
+    return;
+  }
+  std::vector<std::shared_ptr<View>> views;
+  {
+    std::lock_guard<std::mutex> lock(views_mutex_);
+    for (const auto& [id, view] : views_) views.push_back(view);
+  }
+  for (const auto& view : views) {
+    if (view->gpu) each(*view->gpu);
+  }
+}
+
+bool EngineHost::HasFreeBuffers() const {
+  bool free = true;
+  ForEachGpu([&free](GpuRenderer& gpu) { free = free && gpu.HasFreeBuffer(); });
+  return free;
+}
+
+bool EngineHost::MakeTarget(View& view, std::string* error) {
+#if RACCOON_HAS_GL
+  if (gl_ != nullptr) {
+    auto gl = std::make_unique<GlRenderer>();
+    gl->InitSibling(*gl_);
+    view.gl = gl.get();
+    view.gpu = std::move(gl);
+  }
+#endif
+#if RACCOON_HAS_METAL
+  if (metal_ != nullptr) {
+    auto metal = std::make_unique<MetalRenderer>();
+    metal->InitSibling(*metal_);
+    view.metal = metal.get();
+    view.gpu = std::move(metal);
+  }
+#endif
+  if (gpu_ && !view.gpu) {
+    *error = "the " + renderer_ + " renderer draws one view";
+    return false;
+  }
+  view.frame.SetPresentedCallback(on_wake_);
+  if (view.gpu) {
+    View* target = &view;
+    view.gpu->SetGpuFrameCallback([target](uint32_t generation, int index, size_t width,
+                                           size_t height, int fence_fd) {
+      target->frame.PresentGpu(generation, index, width, height, fence_fd);
+    });
+    view.frame.SetGpuReleaseCallback([target](uint32_t generation, int index) {
+      target->gpu->Release(generation, index, -1);
+    });
+  }
+  return true;
+}
+
+namespace {
+void Unused(void* /*user_data*/) {}
+}  // namespace
+
+bool EngineHost::CreateBackingStore(const FlutterBackingStoreConfig* config,
+                                    FlutterBackingStore* out, void* user_data) {
+  auto* host = static_cast<EngineHost*>(user_data);
+  // On the raster thread, the GL context current.
+  host->DropRetired(true);
+  Target target;
+  if (!host->TargetOf(config->view_id, &target)) return false;
+  const auto width = static_cast<size_t>(std::lround(config->size.width));
+  const auto height = static_cast<size_t>(std::lround(config->size.height));
+  if (width == 0 || height == 0) return false;
+  out->user_data = nullptr;
+#if RACCOON_HAS_GL
+  if (target.gl != nullptr) {
+    target.gl->EnsureCurrent();
+    const uint32_t fbo = target.gl->Fbo(width, height);
+    if (fbo == 0) return false;
+    out->type = kFlutterBackingStoreTypeOpenGL;
+    out->open_gl.type = kFlutterOpenGLTargetTypeFramebuffer;
+    out->open_gl.framebuffer.target = GL_RGBA8_OES;
+    out->open_gl.framebuffer.name = fbo;
+    out->open_gl.framebuffer.user_data = nullptr;
+    out->open_gl.framebuffer.destruction_callback = Unused;
+    return true;
+  }
+#endif
+#if RACCOON_HAS_METAL
+  if (target.metal != nullptr) {
+    FlutterMetalTexture texture{};
+    texture.struct_size = sizeof(FlutterMetalTexture);
+    if (!target.metal->NextDrawable(width, height, &texture.texture_id, &texture.texture)) {
+      return false;
+    }
+    texture.destruction_callback = Unused;
+    out->type = kFlutterBackingStoreTypeMetal;
+    out->metal.struct_size = sizeof(FlutterMetalBackingStore);
+    out->metal.texture = texture;
+    return true;
+  }
+#endif
+  target.pixels->resize(width * height * 4);
+  out->type = kFlutterBackingStoreTypeSoftware2;
+  out->software2.struct_size = sizeof(FlutterSoftwareBackingStore2);
+  out->software2.allocation = target.pixels->data();
+  out->software2.row_bytes = width * 4;
+  out->software2.height = height;
+  out->software2.user_data = nullptr;
+  out->software2.destruction_callback = Unused;
+  out->software2.pixel_format = kFlutterSoftwarePixelFormatNative32;
+  return true;
+}
+
+bool EngineHost::CollectBackingStore(const FlutterBackingStore* /*store*/,
+                                     void* /*user_data*/) {
+  // Every target is the view's, kept from frame to frame.
+  return true;
+}
+
+bool EngineHost::PresentView(const FlutterPresentViewInfo* info) {
+  auto* host = static_cast<EngineHost*>(info->user_data);
+  Target target;
+  if (!host->TargetOf(info->view_id, &target)) return false;
+  // Without platform views, the one layer is the app's.
+  const FlutterBackingStore* store = nullptr;
+  for (size_t i = 0; i < info->layers_count; ++i) {
+    if (info->layers[i]->type == kFlutterLayerContentTypeBackingStore) {
+      store = info->layers[i]->backing_store;
+      break;
+    }
+  }
+  if (store == nullptr) return true;
+  SoftwareFrame* frame = target.frame;
+  const auto readback = [frame](const void* pixels, size_t row_bytes, size_t height) {
+    frame->Present(pixels, row_bytes, height);
+  };
+#if RACCOON_HAS_GL
+  if (target.gl != nullptr) {
+    target.gl->EnsureCurrent();
+    return target.gl->Present(readback);
+  }
+#endif
+#if RACCOON_HAS_METAL
+  if (target.metal != nullptr) {
+    return target.metal->Present(store->metal.texture.texture_id, readback);
+  }
+#endif
+  if (store->type != kFlutterBackingStoreTypeSoftware2) return false;
+  frame->Present(store->software2.allocation, store->software2.row_bytes,
+                 store->software2.height);
+  return true;
 }
 
 bool EngineHost::ConfigureRenderer(const std::string& wanted,
@@ -222,7 +594,13 @@ bool EngineHost::ConfigureRenderer(const std::string& wanted,
   std::string gpu_error;
   const char* kind = "GPU";
 #if RACCOON_HAS_VULKAN
-  if (wanted == "auto" || wanted == "vulkan") {
+  // Views mode needs a target per view, which the Vulkan renderer does not
+  // make yet: views rasterize in software there.
+  if (views_mode_ && wanted == "vulkan") {
+    *error = "the vulkan renderer draws one view; views mode takes software";
+    return false;
+  }
+  if (!views_mode_ && (wanted == "auto" || wanted == "vulkan")) {
     kind = "Vulkan";
     auto vulkan = std::make_unique<VulkanRenderer>();
     if (vulkan->Init(&gpu_error)) {
@@ -385,37 +763,43 @@ bool EngineHost::VulkanPresent(void* user_data, const FlutterVulkanImage* image)
 }
 #endif
 
-bool EngineHost::EnableGpuBuffers(size_t count, std::string* error) {
-  if (gpu_) return gpu_->EnablePool(count, error);
+bool EngineHost::EnableGpuBuffers(FlutterViewId view, size_t count, std::string* error) {
+  if (GpuRenderer* gpu = GpuOf(view)) return gpu->EnablePool(count, error);
   *error = "the software renderer has no GPU buffers";
   return false;
 }
 
 #if RACCOON_HAS_METAL
-bool EngineHost::ShareGpuBuffersByPort(bool by_port) {
-  if (metal_ == nullptr) return false;
-  if (metal_->ShareByPort(by_port) && engine_ != nullptr) {
+bool EngineHost::ShareGpuBuffersByPort(FlutterViewId view, bool by_port) {
+  // The Metal renderer's targets are all MetalRenderers.
+  auto* metal = static_cast<MetalRenderer*>(metal_ == nullptr ? nullptr : GpuOf(view));
+  if (metal == nullptr) return false;
+  if (metal->ShareByPort(by_port) && engine_ != nullptr) {
     loader_.procs().ScheduleFrame(engine_);
   }
   return true;
 }
 
-bool EngineHost::GpuBufferPorts(uint32_t generation, std::vector<uint32_t>* ports) const {
-  return metal_ != nullptr && metal_->SurfacePorts(generation, ports);
+bool EngineHost::GpuBufferPorts(FlutterViewId view, uint32_t generation,
+                                std::vector<uint32_t>* ports) const {
+  auto* metal = static_cast<MetalRenderer*>(metal_ == nullptr ? nullptr : GpuOf(view));
+  return metal != nullptr && metal->SurfacePorts(generation, ports);
 }
 #endif
 
-void EngineHost::DisableGpuBuffers() {
-  if (gpu_) gpu_->DisablePool();
+void EngineHost::DisableGpuBuffers(FlutterViewId view) {
+  if (GpuRenderer* gpu = GpuOf(view)) gpu->DisablePool();
 }
 
-bool EngineHost::GpuBufferSetNow(GpuBufferSet* out) const {
-  return gpu_ && gpu_->pool_set(out);
+bool EngineHost::GpuBufferSetNow(FlutterViewId view, GpuBufferSet* out) const {
+  GpuRenderer* gpu = GpuOf(view);
+  return gpu != nullptr && gpu->pool_set(out);
 }
 
-void EngineHost::ReleaseGpuBuffer(uint32_t generation, int index, int fence_fd) {
-  if (gpu_) {
-    gpu_->Release(generation, index, fence_fd);
+void EngineHost::ReleaseGpuBuffer(FlutterViewId view, uint32_t generation, int index,
+                                  int fence_fd) {
+  if (GpuRenderer* gpu = GpuOf(view)) {
+    gpu->Release(generation, index, fence_fd);
     bool owed = false;
     {
       std::lock_guard<std::mutex> lock(vsync_mutex_);
@@ -423,7 +807,7 @@ void EngineHost::ReleaseGpuBuffer(uint32_t generation, int index, int fence_fd) 
     }
     // The renderer knows where the frame went: on GL the buffer is taken
     // at the frame before, so the vsync's guess can miss it.
-    if (gpu_->TakeMissedFrame()) owed = true;
+    if (gpu->TakeMissedFrame()) owed = true;
     // An app gone idle since would leave the client on an older frame.
     if (owed && engine_ != nullptr) loader_.procs().ScheduleFrame(engine_);
     return;
@@ -456,8 +840,7 @@ void EngineHost::ServiceVsync() {
     if (!vsync_pending_ || engine_ == nullptr) return;
     const uint64_t now = loader_.procs().GetCurrentTime();
     if (now < next_frame_nanos_) return;
-    bool free = true;
-    if (gpu_) free = gpu_->HasFreeBuffer();
+    const bool free = HasFreeBuffers();
     if (!free && now - vsync_asked_nanos_ < kRingHoldNanos) return;
     if (!free) gpu_frame_owed_ = true;
     vsync_pending_ = false;
@@ -478,8 +861,7 @@ int EngineHost::MillisUntilVsync() const {
   if (!vsync_pending_ || engine_ == nullptr) return -1;
   const uint64_t now = loader_.procs().GetCurrentTime();
   uint64_t due = next_frame_nanos_;
-  bool free = true;
-  if (gpu_) free = gpu_->HasFreeBuffer();
+  const bool free = HasFreeBuffers();
   // A release wakes the loop sooner; this is only the cap.
   if (!free) due = std::max(due, vsync_asked_nanos_ + kRingHoldNanos);
   if (due <= now) return 0;
@@ -497,29 +879,54 @@ int EngineHost::MillisUntilCamera() const {
 }
 
 void EngineHost::RedrawIfMissed() {
-  if (!gpu_ || engine_ == nullptr || !gpu_->HasFreeBuffer()) return;
-  if (gpu_->TakeMissedFrame()) loader_.procs().ScheduleFrame(engine_);
+  if (engine_ == nullptr || !HasFreeBuffers()) return;
+  bool missed = false;
+  ForEachGpu([&missed](GpuRenderer& gpu) { missed = gpu.TakeMissedFrame() || missed; });
+  if (missed) loader_.procs().ScheduleFrame(engine_);
 }
 
-void EngineHost::ReleaseAllGpuBuffers() {
-  if (gpu_) gpu_->ReleaseAll();
+void EngineHost::ReleaseAllGpuBuffers(FlutterViewId view) {
+  if (GpuRenderer* gpu = GpuOf(view)) gpu->ReleaseAll();
 }
 
-void EngineHost::SendPointer(const FlutterPointerEvent& event) {
-  if (input_scale_ == 1.0) {
-    loader_.procs().SendPointerEvent(engine_, &event, 1);
-    return;
+void EngineHost::SendPointer(FlutterViewId view, const FlutterPointerEvent& event) {
+  double scale = input_scale_;
+  if (view != 0) {
+    const std::shared_ptr<View> found = ViewOf(view);
+    if (!found || !found->added || found->removing) return;
+    scale = found->input_scale;
   }
+  FlutterPointerEvent sent = event;
+  sent.view_id = view;
   // A frame scaled down to fit (#117): the host points in the size it asked
   // for, so its positions and distances scale the same way (#130).
-  FlutterPointerEvent scaled = event;
-  scaled.x *= input_scale_;
-  scaled.y *= input_scale_;
-  scaled.scroll_delta_x *= input_scale_;
-  scaled.scroll_delta_y *= input_scale_;
-  scaled.pan_x *= input_scale_;
-  scaled.pan_y *= input_scale_;
-  loader_.procs().SendPointerEvent(engine_, &scaled, 1);
+  if (scale != 1.0) {
+    sent.x *= scale;
+    sent.y *= scale;
+    sent.scroll_delta_x *= scale;
+    sent.scroll_delta_y *= scale;
+    sent.pan_x *= scale;
+    sent.pan_y *= scale;
+  }
+  loader_.procs().SendPointerEvent(engine_, &sent, 1);
+}
+
+void EngineHost::FocusView(FlutterViewId view) {
+  if (!views_mode_ || engine_ == nullptr || view == focused_ ||
+      loader_.procs().SendViewFocusEvent == nullptr) {
+    return;
+  }
+  if (view != 0) {
+    const std::shared_ptr<View> found = ViewOf(view);
+    if (!found || !found->added || found->removing) return;
+  }
+  focused_ = view;
+  FlutterViewFocusEvent event{};
+  event.struct_size = sizeof(FlutterViewFocusEvent);
+  event.view_id = view;
+  event.state = kFocused;
+  event.direction = kUndefined;
+  loader_.procs().SendViewFocusEvent(engine_, &event);
 }
 
 namespace {
@@ -887,6 +1294,12 @@ void EngineHost::Shutdown() {
   engine_ = nullptr;
   // A task still queued must not run on the engine now gone.
   platform_->SetEngine(nullptr);
+  {
+    std::lock_guard<std::mutex> lock(views_mutex_);
+    for (auto& [id, view] : views_) retired_.push_back(std::move(view));
+    views_.clear();
+  }
+  DropRetired(false);
   if (gpu_) gpu_->Shutdown();
 }
 
@@ -897,8 +1310,10 @@ std::string EngineHost::vm_service_uri() const {
 
 bool EngineHost::OnPresent(void* user_data, const void* allocation,
                            size_t row_bytes, size_t height) {
-  static_cast<EngineHost*>(user_data)->frame_.Present(allocation, row_bytes,
-                                                      height);
+  auto* host = static_cast<EngineHost*>(user_data);
+  // In views mode frames come by PresentView, each to its view.
+  if (host->views_mode_) return true;
+  host->frame_.Present(allocation, row_bytes, height);
   return true;
 }
 

@@ -219,6 +219,12 @@ bool MetalRenderer::Init(std::string* error) {
   return true;
 }
 
+void MetalRenderer::InitSibling(const MetalRenderer& of) {
+  impl_->device = of.impl_->device;
+  impl_->queue = of.impl_->queue;
+  impl_->description = of.impl_->description;
+}
+
 void MetalRenderer::Shutdown() {
   Impl& m = *impl_;
   if (m.device == nil) return;

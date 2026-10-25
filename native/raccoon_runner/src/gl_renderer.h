@@ -36,10 +36,17 @@ namespace raccoon {
 class GlRenderer : public GpuRenderer {
  public:
   bool Init(std::string* error);
+  // A target beside |of|, for another view (#182): drawn in |of|'s context,
+  // with a framebuffer, ring and readback of its own. |of| outlives it.
+  void InitSibling(const GlRenderer& of);
+  // A sibling's goes with the context current, made so if it is not.
   void Shutdown() override;
 
   // The engine's callbacks, on its raster thread.
   bool MakeCurrent();
+  // Makes the context current on this thread unless it is: the compositor's
+  // callbacks may come without the engine having made it so.
+  bool EnsureCurrent();
   bool ClearCurrent();
   bool MakeResourceCurrent();
   // The framebuffer for a frame of this size, made or resized as needed;
@@ -103,6 +110,8 @@ class GlRenderer : public GpuRenderer {
   void DestroyPool();
 
   EGLDisplay display_ = EGL_NO_DISPLAY;
+  // A sibling's context is its renderer's: it never makes or ends one.
+  bool sibling_ = false;
   EGLConfig config_ = nullptr;
   EGLContext context_ = EGL_NO_CONTEXT;
   EGLContext resource_context_ = EGL_NO_CONTEXT;

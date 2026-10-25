@@ -22,6 +22,7 @@ final class RunnerLaunch {
     this.dataDir,
     this.plugins,
     this.cameraSource,
+    this.views = false,
   });
 
   /// The runner executable.
@@ -61,6 +62,10 @@ final class RunnerLaunch {
   /// pattern; on Windows a video too, played in a loop.
   final String? cameraSource;
 
+  /// Views mode: the runner takes a client for each view beside its first
+  /// on [UnixSocketEndpoint.views] (#182).
+  final bool views;
+
   /// The runner's command line after [runnerBinary]: `serve` and its
   /// options.
   List<String> get arguments => [
@@ -76,6 +81,7 @@ final class RunnerLaunch {
     if (dataDir case final dir?) ...['--data-dir', dir],
     if (plugins case final manifest?) ...['--plugins', manifest],
     if (cameraSource case final source?) ...['--camera-source', source],
+    if (views) '--views',
     '--width',
     '$width',
     '--height',

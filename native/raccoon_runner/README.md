@@ -23,6 +23,29 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   its pixel ratio with it: the app keeps its logical size (#117).
   The app sees `RACCOON_ENDPOINT=unix:<socket>`, which `package:raccoon`'s
   `Raccoon().isPresent` reads (#150).
+- Views mode (`--views`, or `RACCOON_VIEWS=1` through the Flutter tool)
+  shows one app in several views, each with its own size and pixel ratio,
+  all from one engine, so one hot reload updates them all (#182).
+  - The engine draws through a compositor. Each view has a target of its
+    own beside the renderer: a Metal or GL ring and readback, or a buffer
+    in software. Vulkan has no such target yet, so views mode on Windows
+    rasterizes in software.
+  - Clients:
+    - The first client keeps the runner's socket and shows view 0.
+    - Each connection to `<socket>.views` (`.views` in place of `.sock`) is a
+      view of its own. It is added at the client's first resize and removed
+      when the client hangs up.
+    - A view's client speaks the same protocol. It gets frames inline, through
+      shared buffers, or as GPU buffers served on `<socket>.v<N>.gpu`, and its
+      pointer events go to its view.
+    - Keys and text go to the app. The text field follows the client the user
+      last pressed in. Platform messages, logs and plugins stay with the
+      first client.
+    - `RunnerHello.views` says whether a runner takes views.
+  - `runApp` draws into the first view only. The app needs a binding that lays
+    its root out in every view; `example/views` has one.
+  - `render --view WxH@DPR` adds views and writes each beside `--out` as
+    `NAME.view<N>.ppm`.
 - Answers some plugins' channels itself, in both commands and with or
   without a client, because apps call them at startup (Wonderous before its
   first frame) and an unanswered call throws:

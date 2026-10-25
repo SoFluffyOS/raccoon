@@ -1091,11 +1091,15 @@ class RunnerHello extends $pb.GeneratedMessage {
     $core.int? protocolVersion,
     $core.String? engineRevision,
     $core.int? pid,
+    $core.bool? views,
+    $fixnum.Int64? viewId,
   }) {
     final result = RunnerHello._();
     if (protocolVersion != null) result.protocolVersion = protocolVersion;
     if (engineRevision != null) result.engineRevision = engineRevision;
     if (pid != null) result.pid = pid;
+    if (views != null) result.views = views;
+    if (viewId != null) result.viewId = viewId;
     return result;
   }
 
@@ -1116,6 +1120,8 @@ class RunnerHello extends $pb.GeneratedMessage {
         fieldType: $pb.PbFieldType.OU3)
     ..aOS(2, _omitFieldNames ? '' : 'engineRevision')
     ..aI(3, _omitFieldNames ? '' : 'pid', fieldType: $pb.PbFieldType.OU3)
+    ..aOB(4, _omitFieldNames ? '' : 'views')
+    ..aInt64(5, _omitFieldNames ? '' : 'viewId')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1167,6 +1173,30 @@ class RunnerHello extends $pb.GeneratedMessage {
   $core.bool hasPid() => $_has(2);
   @$pb.TagNumber(3)
   void clearPid() => $_clearField(3);
+
+  /// The runner shows the app in views of its own beside this one: each
+  /// connection to its views socket (the socket's path with .views in place
+  /// of .sock) is a view, added at its first Resize and removed when it
+  /// hangs up, and speaks this protocol as this client does (#182).
+  @$pb.TagNumber(4)
+  $core.bool get views => $_getBF(3);
+  @$pb.TagNumber(4)
+  set views($core.bool value) => $_setBool(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasViews() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearViews() => $_clearField(4);
+
+  /// On the views socket, the view this connection shows; 0 on the runner's
+  /// own socket, which shows the app's first view.
+  @$pb.TagNumber(5)
+  $fixnum.Int64 get viewId => $_getI64(4);
+  @$pb.TagNumber(5)
+  set viewId($fixnum.Int64 value) => $_setInt64(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasViewId() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearViewId() => $_clearField(5);
 }
 
 /// A frame carries its pixels inline, or names the shared buffer that holds

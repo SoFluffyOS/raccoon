@@ -154,6 +154,14 @@ message RunnerHello {
   string engine_revision = 2;
   // The runner's process id, so the client can watch its memory.
   uint32 pid = 3;
+  // The runner shows the app in views of its own beside this one: each
+  // connection to its views socket (the socket's path with .views in place
+  // of .sock) is a view, added at its first Resize and removed when it
+  // hangs up, and speaks this protocol as this client does (#182).
+  bool views = 4;
+  // On the views socket, the view this connection shows; 0 on the runner's
+  // own socket, which shows the app's first view.
+  int64 view_id = 5;
 }
 
 enum PixelFormat {
