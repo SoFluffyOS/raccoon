@@ -3236,6 +3236,79 @@ void main() {
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
+  test(
+    'a view that comes back to a running app gets GPU frames again',
+    () async {
+      // A tab hidden: its view goes with its GPU socket, and the frames the
+      // app draws meanwhile fill the ring with no one to give them back.
+      // The view that comes back must not find the ring full, every frame
+      // then going by readback at ten a second.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final spinAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'spin',
+        'build',
+        'flutter_assets',
+      );
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: spinAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint, gpuBuffers: true);
+      try {
+        final first = await client.frames
+            .firstWhere((frame) => frame.inGpuBuffer)
+            .then<Frame?>((frame) => frame)
+            .timeout(const Duration(seconds: 15), onTimeout: () => null);
+        // Without a GPU (a CI machine) there is no ring to fill.
+        if (first == null) return;
+        final set = await client.gpuBufferSets.first;
+        var releasing = true;
+        var gpuFrames = 0;
+        Frame? previous;
+        final frames = client.frames.listen((frame) {
+          if (!frame.inGpuBuffer) return;
+          gpuFrames++;
+          final last = previous;
+          if (releasing && last != null) {
+            client.releaseGpuBuffer(last.gpuGeneration, last.bufferIndex);
+          }
+          previous = frame;
+        });
+        Future<Socket> view() => Socket.connect(
+          InternetAddress(set.socket, type: InternetAddressType.unix),
+          0,
+        );
+        var socket = await view();
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        releasing = false;
+        previous = null;
+        socket.destroy();
+        await Future<void>.delayed(const Duration(seconds: 1));
+        releasing = true;
+        gpuFrames = 0;
+        socket = await view();
+        await Future<void>.delayed(const Duration(seconds: 2));
+        socket.destroy();
+        await frames.cancel();
+        expect(gpuFrames, greaterThan(30));
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   // #144: a client let go kept its GPU socket, which refused the next
   // client's and took its buffers.
   test(

@@ -870,7 +870,13 @@ int Serve(const Options& options) {
   std::atomic<bool> ports_asked{false};
 #endif
   raccoon::RunnerServer::Handler gpu_handler;
-  gpu_handler.on_client_connected = [&] { gpu_fds_sent = 0; };
+  gpu_handler.on_client_connected = [&] {
+    gpu_fds_sent = 0;
+    // A new view holds none of the ring. Frames named while none was there
+    // (a tab hidden, its view gone) kept their buffers, and with the ring
+    // full every frame went by readback, at the hold's 10 a second.
+    host.ReleaseAllGpuBuffers();
+  };
   gpu_handler.on_client_disconnected = [&] {
     gpu_fds_sent = 0;
     // Whatever it held, nothing samples now.
