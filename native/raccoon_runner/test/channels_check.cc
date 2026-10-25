@@ -160,6 +160,57 @@ int CheckWindowChannels() {
   return 0;
 }
 
+// flutter_secure_storage's calls, rewritten: the method and every argument
+// but the options as they were, every option it keeps as it was, the ones it
+// drops gone, and the keychain and sync ones set to "false".
+int CheckSecureStorage() {
+  static const char* option_keys[] = {"accessibility", "accountName", "groupId",
+                                      "synchronizable", "usesDataProtectionKeychain",
+                                      "useDataProtectionKeyChain", "label", "description"};
+  const auto bytes = [](const CodecValue& value) { return raccoon::EncodeValue(value); };
+  for (int i = 0; i < 20000; ++i) {
+    std::vector<std::pair<std::string, CodecValue>> options;
+    for (const char* key : option_keys) {
+      if (rng() % 2 == 0) options.emplace_back(key, RandomValue(2));
+    }
+    const CodecValue key = CodecValue::String(std::string(rng() % 6, 'k'));
+    const CodecValue value = RandomValue(1);
+    const CodecValue call_options = CodecValue::Map(options);
+    const std::vector<uint8_t> data = raccoon::EncodeMethodCall(
+        "write", CodecValue::Map({{"key", key}, {"value", value}, {"options", call_options}}));
+    std::vector<uint8_t> out;
+    if (!raccoon::RewriteSecureStorageCall("plugins.it_nomads.com/flutter_secure_storage",
+                                           data.data(), data.size(), &out)) {
+      return Fail("a secure storage call was not rewritten");
+    }
+    raccoon::MethodCall rewritten;
+    if (!raccoon::DecodeMethodCall(out.data(), out.size(), &rewritten)) {
+      return Fail("a rewritten secure storage call does not decode");
+    }
+    const CodecValue& args = rewritten.arguments;
+    if (rewritten.method != "write" || bytes(args.Get("key")) != bytes(key) ||
+        bytes(args.Get("value")) != bytes(value)) {
+      return Fail("a secure storage call lost an argument");
+    }
+    const CodecValue& kept = args.Get("options");
+    for (const auto& [name, option] : options) {
+      const bool forced = name == "synchronizable" || name == "usesDataProtectionKeychain" ||
+                          name == "useDataProtectionKeyChain";
+      if (name == "groupId" || forced) continue;
+      if (bytes(kept.Get(name)) != bytes(option)) return Fail("an option changed: " + name);
+    }
+    if (!kept.Get("groupId").is_null()) return Fail("groupId was kept");
+    for (const char* name : {"synchronizable", "usesDataProtectionKeychain",
+                             "useDataProtectionKeyChain"}) {
+      const CodecValue& forced = kept.Get(name);
+      if (forced.type() != CodecValue::Type::kString || forced.string_value() != "false") {
+        return Fail(std::string("an option not set to false: ") + name);
+      }
+    }
+  }
+  return 0;
+}
+
 // shared_preferences' two Pigeon APIs, in memory, then a store written by
 // one instance and read by the next.
 int CheckUserDefaults() {
@@ -293,8 +344,8 @@ int CheckTextInput() {
 
 int main() {
   try {
-    if (CheckCodec() != 0 || CheckWindowChannels() != 0 || CheckUserDefaults() != 0 ||
-        CheckTextInput() != 0) {
+    if (CheckCodec() != 0 || CheckWindowChannels() != 0 || CheckSecureStorage() != 0 ||
+        CheckUserDefaults() != 0 || CheckTextInput() != 0) {
       return 1;
     }
   } catch (const std::exception& error) {
