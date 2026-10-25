@@ -1,15 +1,24 @@
+import 'dart:math' as math;
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
 import 'package:raccoon_view/src/dot_grid.dart';
+import 'package:raccoon_view/src/zoom_control.dart';
 
 /// A hosted app at a fixed logical size, on a canvas: a quiet dot grid
 /// behind it, a one-pixel edge around it, and its size in a corner, so the
 /// space around a phone-sized app reads as a drawing board rather than
 /// nothing. The app is scaled down to fit when the canvas is smaller.
 ///
+/// It zooms too: pinch the canvas around the app, or hold Ctrl (or Cmd) and
+/// scroll or drag; the zoom control in the bottom left steps it, and its
+/// percent goes back to fitting. Zoomed past the canvas, dragging or
+/// scrolling the canvas around the app pans it.
+///
 /// Only for fixed sizes; an app that fills its box needs no canvas. Hosts
 /// pass their own ink colour and label style; the defaults are a grey that
 /// sits on dark and light backgrounds alike.
-class RaccoonCanvas extends StatelessWidget {
+class RaccoonCanvas extends StatefulWidget {
   const RaccoonCanvas({
     super.key,
     required this.size,
@@ -60,44 +69,181 @@ class RaccoonCanvas extends StatelessWidget {
   };
 
   @override
-  Widget build(BuildContext context) {
-    final style = (labelStyle ?? const TextStyle(fontSize: 11)).copyWith(
-      color: labelStyle?.color ?? ink.withValues(alpha: 0.7),
+  State<RaccoonCanvas> createState() => _RaccoonCanvasState();
+}
+
+class _RaccoonCanvasState extends State<RaccoonCanvas> {
+  /// The zoom picked, or null to fit the app to the canvas.
+  double? _zoom;
+
+  /// Where the app's top left sits in the area inside the padding, once it
+  /// is larger than that area; it is centred while it fits.
+  Offset _origin = Offset.zero;
+
+  double _zoomAtStart = 1;
+
+  /// The area inside the padding and the zoom that fits the app to it, as
+  /// last laid out.
+  Size _area = Size.zero;
+  double _fit = 1;
+
+  double get _scale => _zoom ?? _fit;
+
+  /// Where the app sits in [area] at [scale] with [origin] asked for:
+  /// centred along an axis it fits, kept covering the area along one it
+  /// overflows.
+  Offset _placed(Size area, double scale, Offset origin) {
+    double along(double room, double length, double asked) => switch (length <=
+        room) {
+      true => (room - length) / 2,
+      false => asked.clamp(room - length, 0.0),
+    };
+    return Offset(
+      along(area.width, widget.size.width * scale, origin.dx),
+      along(area.height, widget.size.height * scale, origin.dy),
     );
-    return CustomPaint(
-      painter: _DotGridPainter(
-        ink: ink.withValues(alpha: 0.28),
-        spacing: spacing,
-      ),
-      child: Stack(
-        alignment: Alignment.topLeft,
-        fit: StackFit.expand,
-        children: [
-          Padding(
-            padding: padding,
-            child: Center(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: DecoratedBox(
-                  position: DecorationPosition.foreground,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: ink.withValues(alpha: 0.55)),
-                  ),
-                  child: SizedBox(
-                    width: size.width,
-                    height: size.height,
-                    child: child,
+  }
+
+  /// Zooms to [next] about [focus], a point in the canvas, so what is under
+  /// it stays put.
+  void _zoomTo(double next, Offset focus) {
+    final scale = _scale;
+    final zoom = next.clamp(minZoom, maxZoom);
+    final inArea = focus - widget.padding.topLeft;
+    final placed = _placed(_area, scale, _origin);
+    setState(() {
+      _origin = _placed(_area, zoom, zoomAbout(placed, scale, zoom, inArea));
+      _zoom = zoom;
+    });
+  }
+
+  void _panBy(Offset delta) {
+    setState(() => _origin = _placed(_area, _scale, _origin) + delta);
+  }
+
+  void _onScroll(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return;
+    if (zoomModifierHeld()) {
+      _zoomTo(
+        _scale * zoomFactorForScroll(event.scrollDelta.dy),
+        event.localPosition,
+      );
+      return;
+    }
+    // Over the app the scroll is the app's; around it, it pans.
+    if (_appRect().contains(event.localPosition)) return;
+    _panBy(-event.scrollDelta);
+  }
+
+  Rect _appRect() =>
+      (widget.padding.topLeft + _placed(_area, _scale, _origin)) &
+      (widget.size * _scale);
+
+  void _onScaleStart(ScaleStartDetails details) => _zoomAtStart = _scale;
+
+  void _onScaleUpdate(ScaleUpdateDetails details) {
+    if (details.scale != 1) {
+      _zoomTo(_zoomAtStart * details.scale, details.localFocalPoint);
+      return;
+    }
+    if (zoomModifierHeld()) {
+      _zoomTo(
+        _scale * zoomFactorForScroll(-details.focalPointDelta.dy),
+        details.localFocalPoint,
+      );
+      return;
+    }
+    _panBy(details.focalPointDelta);
+  }
+
+  void _step(double factor) {
+    _zoomTo(
+      _scale * factor,
+      widget.padding.topLeft + _area.center(Offset.zero),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final widget = this.widget;
+    final style = (widget.labelStyle ?? const TextStyle(fontSize: 11)).copyWith(
+      color: widget.labelStyle?.color ?? widget.ink.withValues(alpha: 0.7),
+    );
+    return Listener(
+      onPointerSignal: _onScroll,
+      child: CustomPaint(
+        painter: _DotGridPainter(
+          ink: widget.ink.withValues(alpha: 0.28),
+          spacing: widget.spacing,
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            _area = widget.padding.deflateSize(constraints.biggest);
+            _fit = math.min(
+              1,
+              math.min(
+                _area.width / widget.size.width,
+                _area.height / widget.size.height,
+              ),
+            );
+            final scale = _scale;
+            final placed = _placed(_area, scale, _origin);
+            return Stack(
+              alignment: Alignment.topLeft,
+              children: [
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onScaleStart: _onScaleStart,
+                    onScaleUpdate: _onScaleUpdate,
                   ),
                 ),
-              ),
-            ),
-          ),
-          Positioned(
-            right: padding.right,
-            bottom: padding.bottom / 2,
-            child: Text(label, style: style, textDirection: TextDirection.ltr),
-          ),
-        ],
+                Positioned(
+                  left: widget.padding.left + placed.dx,
+                  top: widget.padding.top + placed.dy,
+                  width: widget.size.width * scale,
+                  height: widget.size.height * scale,
+                  child: FittedBox(
+                    fit: BoxFit.fill,
+                    child: DecoratedBox(
+                      position: DecorationPosition.foreground,
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: widget.ink.withValues(alpha: 0.55),
+                        ),
+                      ),
+                      child: SizedBox(
+                        width: widget.size.width,
+                        height: widget.size.height,
+                        child: widget.child,
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: widget.padding.left,
+                  bottom: widget.padding.bottom / 2 - 2,
+                  child: ZoomControl(
+                    zoom: scale,
+                    style: style,
+                    onZoomOut: () => _step(1 / zoomStep),
+                    onZoomIn: () => _step(zoomStep),
+                    onReset: () => setState(() => _zoom = null),
+                  ),
+                ),
+                Positioned(
+                  right: widget.padding.right,
+                  bottom: widget.padding.bottom / 2,
+                  child: Text(
+                    widget.label,
+                    style: style,
+                    textDirection: TextDirection.ltr,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }

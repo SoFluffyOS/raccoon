@@ -7,6 +7,7 @@ import 'package:flutter/widgets.dart';
 import 'package:raccoon_runtime/raccoon_runtime.dart';
 import 'package:raccoon_view/src/dot_grid.dart';
 import 'package:raccoon_view/src/raccoon_view.dart';
+import 'package:raccoon_view/src/zoom_control.dart';
 
 /// One device on the board: where its frame sits, how big it is in logical
 /// pixels, and at what pixel ratio the app draws.
@@ -255,8 +256,10 @@ final class RaccoonBoardSession {
 /// frame per session with the device's name and size on it. Drag a frame
 /// by its title, or hold Alt (Option on macOS) and grab it anywhere; pull
 /// the corner handle to resize, and the app relayouts as it goes. Scroll
-/// pans, Ctrl (or Cmd) and scroll zooms about the pointer, dragging the
-/// empty board pans.
+/// pans, and so does dragging the empty board. Pinching the empty board
+/// zooms about the fingers; with Ctrl (or Cmd) held, a scroll or a drag
+/// zooms about the pointer. The zoom control in the corner steps the zoom,
+/// and its percent goes back to 100%.
 ///
 /// Each frame's title carries its size; tap it for the devices' sizes. The
 /// app resizes as it is picked, and starts at it next time.
@@ -338,6 +341,8 @@ class RaccoonBoard extends StatefulWidget {
 class _RaccoonBoardState extends State<RaccoonBoard> {
   Offset _pan = Offset.zero;
   double _zoom = 1;
+  double _zoomAtStart = 1;
+  Size _viewport = Size.zero;
   bool _altHeld = false;
 
   /// The session whose size menu is open, if any.
@@ -387,33 +392,66 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
 
   void _onScroll(PointerSignalEvent event) {
     if (event is! PointerScrollEvent) return;
+    if (zoomModifierHeld()) {
+      _zoomTo(
+        _zoom * zoomFactorForScroll(event.scrollDelta.dy),
+        event.localPosition,
+      );
+      return;
+    }
+    setState(() => _pan -= event.scrollDelta);
+  }
+
+  /// Zooms to [next] about [focus], so what is under it stays put.
+  void _zoomTo(double next, Offset focus) {
+    final zoom = next.clamp(minZoom, maxZoom);
     setState(() {
-      if (HardwareKeyboard.instance.isControlPressed ||
-          HardwareKeyboard.instance.isMetaPressed) {
-        // Zoom about the pointer, so what is under it stays put.
-        final factor = event.scrollDelta.dy > 0 ? 1 / 1.1 : 1.1;
-        final next = (_zoom * factor).clamp(0.25, 3.0);
-        final local = event.localPosition;
-        _pan = local - (local - _pan) * (next / _zoom);
-        _zoom = next;
-      } else {
-        _pan -= event.scrollDelta;
-      }
+      _pan = zoomAbout(_pan, _zoom, zoom, focus);
+      _zoom = zoom;
     });
+  }
+
+  void _onScaleStart(ScaleStartDetails details) => _zoomAtStart = _zoom;
+
+  /// A drag pans, a pinch zooms about the fingers; with the modifier held,
+  /// a drag or a trackpad's two-finger scroll zooms.
+  void _onScaleUpdate(ScaleUpdateDetails details) {
+    if (details.scale != 1) {
+      setState(() => _pan += details.focalPointDelta);
+      _zoomTo(_zoomAtStart * details.scale, details.localFocalPoint);
+      return;
+    }
+    if (zoomModifierHeld()) {
+      _zoomTo(
+        _zoom * zoomFactorForScroll(-details.focalPointDelta.dy),
+        details.localFocalPoint,
+      );
+      return;
+    }
+    setState(() => _pan += details.focalPointDelta);
   }
 
   @override
   Widget build(BuildContext context) {
+    final controlStyle = (widget.titleStyle ?? const TextStyle(fontSize: 11))
+        .copyWith(color: widget.titleStyle?.color ?? widget.ink);
     return Listener(
       onPointerSignal: _onScroll,
       child: ClipRect(
         child: Stack(
           fit: StackFit.expand,
           children: [
+            LayoutBuilder(
+              builder: (context, constraints) {
+                _viewport = constraints.biggest;
+                return const SizedBox.expand();
+              },
+            ),
             GestureDetector(
               behavior: HitTestBehavior.opaque,
               dragStartBehavior: DragStartBehavior.down,
-              onPanUpdate: (details) => setState(() => _pan += details.delta),
+              onScaleStart: _onScaleStart,
+              onScaleUpdate: _onScaleUpdate,
               child: CustomPaint(
                 painter: _GridPainter(
                   ink: widget.ink.withValues(alpha: 0.35),
@@ -450,6 +488,25 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
             ),
             if (widget.sessions.isEmpty && widget.empty != null)
               Center(child: widget.empty),
+            Positioned(
+              right: 12,
+              bottom: 8,
+              child: ZoomControl(
+                zoom: _zoom,
+                style: controlStyle,
+                onZoomOut:
+                    () => _zoomTo(
+                      _zoom / zoomStep,
+                      _viewport.center(Offset.zero),
+                    ),
+                onZoomIn:
+                    () => _zoomTo(
+                      _zoom * zoomStep,
+                      _viewport.center(Offset.zero),
+                    ),
+                onReset: () => _zoomTo(1, _viewport.center(Offset.zero)),
+              ),
+            ),
           ],
         ),
       ),

@@ -439,6 +439,59 @@ void main() {
       expect(layout.frameFor('counter').size, const Size(420, 884));
     });
 
+    testWidgets('a pinch on the empty board zooms about the fingers', (
+      tester,
+    ) async {
+      await pumpBoard(tester, ['counter']);
+      final before = tester.getRect(find.byType(RaccoonView));
+      final trackpad = TestPointer(1, PointerDeviceKind.trackpad);
+      const fingers = Offset(1200, 800);
+      await tester.sendEventToBinding(trackpad.panZoomStart(fingers));
+      await tester.sendEventToBinding(
+        trackpad.panZoomUpdate(fingers, scale: 2),
+      );
+      await tester.sendEventToBinding(trackpad.panZoomEnd());
+      await tester.pump();
+      final after = tester.getRect(find.byType(RaccoonView));
+      expect(after.width, closeTo(before.width * 2, 0.5));
+      // What was under the fingers stays there.
+      expect(after.topLeft, fingers + (before.topLeft - fingers) * 2);
+      expect(find.text('200%'), findsOneWidget);
+    });
+
+    testWidgets('the zoom control steps the zoom and goes back to 100%', (
+      tester,
+    ) async {
+      await pumpBoard(tester, ['counter']);
+      final before = tester.getRect(find.byType(RaccoonView));
+      expect(find.text('100%'), findsOneWidget);
+      await tester.tap(find.text('−'));
+      await tester.pump();
+      expect(
+        tester.getRect(find.byType(RaccoonView)).width,
+        closeTo(before.width / 1.25, 0.5),
+      );
+      expect(find.text('80%'), findsOneWidget);
+      await tester.tap(find.text('80%'));
+      await tester.pump();
+      expect(tester.getRect(find.byType(RaccoonView)), before);
+    });
+
+    testWidgets('with Ctrl held, dragging the empty board zooms', (
+      tester,
+    ) async {
+      await pumpBoard(tester, ['counter']);
+      final before = tester.getRect(find.byType(RaccoonView));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.dragFrom(const Offset(1600, 1200), const Offset(0, 200));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+      expect(
+        tester.getRect(find.byType(RaccoonView)).width,
+        greaterThan(before.width * 1.1),
+      );
+    });
+
     testWidgets('scrolling pans the board', (tester) async {
       await pumpBoard(tester, ['counter']);
       final before = tester.getTopLeft(find.byType(RaccoonView));
