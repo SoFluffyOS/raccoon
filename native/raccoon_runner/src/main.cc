@@ -308,7 +308,7 @@ std::string GpuSocketPath(const std::string& socket) {
 int NextWait(raccoon::EngineHost& host, int cap) {
   int wait = cap;
   for (int next : {host.platform().MillisUntilNextTask(), host.MillisUntilVsync(),
-                   host.MillisUntilCamera()}) {
+                   host.MillisUntilCamera(), host.frame().MillisUntilInline()}) {
     if (next >= 0 && next < wait) wait = next;
   }
   return wait;
@@ -1023,6 +1023,8 @@ int Serve(const Options& options) {
         }
       }
       raccoon::SoftwareFrame::Shared shared;
+      // A frame that waited for a buffer goes in the one given back.
+      host.frame().PromoteInline();
       if (!frames_held && host.frame().TakeShared(&shared)) {
         raccoon::v1::RunnerMessage message;
         raccoon::v1::Frame* frame = message.mutable_frame();

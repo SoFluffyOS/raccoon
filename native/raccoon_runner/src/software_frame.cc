@@ -10,6 +10,14 @@
 
 namespace raccoon {
 
+namespace {
+
+// How long a frame waits for a shared buffer before it goes inline: as long
+// as a GPU frame waits for the ring.
+constexpr auto kInlineHold = std::chrono::milliseconds(100);
+
+}  // namespace
+
 void SoftwareFrame::Present(const void* allocation, size_t row_bytes,
                             size_t height) {
   {
@@ -19,14 +27,22 @@ void SoftwareFrame::Present(const void* allocation, size_t row_bytes,
     height_ = height;
     ++frame_count_;
     const size_t bytes = row_bytes * height;
-    const int index = (pool_ != nullptr && bytes <= pool_->size())
-                          ? pool_->AcquireFree()
-                          : -1;
+    int index = -1;
+    if (pool_ != nullptr && bytes <= pool_->size()) {
+      index = pool_->AcquireFree();
+      // A frame nobody sent yet is superseded: with every other buffer at
+      // the client, this one takes its buffer rather than going inline.
+      if (index < 0 && pending_shared_.index >= 0) {
+        index = pending_shared_.index;
+        pending_shared_ = Shared{};
+      }
+    }
     if (index >= 0) {
       // A frame nobody sent yet is superseded; free its buffer.
       if (pending_shared_.index >= 0) pool_->Release(pending_shared_.index);
       std::memcpy(pool_->Data(index), allocation, bytes);
       pending_shared_ = {index, width_, height_, row_bytes_, frame_count_};
+      inline_waits_ = false;
     } else {
       // No pool, a frame too big for it, or every buffer still with the
       // client: send this frame inline rather than lose it. A shared frame
@@ -38,6 +54,8 @@ void SoftwareFrame::Present(const void* allocation, size_t row_bytes,
       pixels_.resize(bytes);
       std::memcpy(pixels_.data(), allocation, bytes);
       inline_sequence_ = frame_count_;
+      inline_waits_ = pool_ != nullptr && bytes <= pool_->size();
+      inline_at_ = std::chrono::steady_clock::now();
     }
   }
   if (presented_) presented_();
@@ -54,6 +72,7 @@ void SoftwareFrame::SetSharedPool(SharedBufferPool* pool) {
     pool_->Release(pending_shared_.index);
   }
   pending_shared_ = Shared{};
+  inline_waits_ = false;
   pool_ = pool;
 }
 
@@ -70,7 +89,7 @@ size_t SoftwareFrame::LatestSizeBytes() const {
   return row_bytes_ * height_;
 }
 
-bool SoftwareFrame::CopyLatest(Copy* out, size_t after_sequence) const {
+bool SoftwareFrame::CopyLatest(Copy* out, size_t after_sequence) {
   std::lock_guard<std::mutex> lock(mutex_);
   // Only the frame these pixels belong to, and only while it is the latest:
   // pixels_ is not updated for frames that went into shared buffers.
@@ -78,12 +97,39 @@ bool SoftwareFrame::CopyLatest(Copy* out, size_t after_sequence) const {
       inline_sequence_ <= after_sequence) {
     return false;
   }
+  if (inline_waits_ && std::chrono::steady_clock::now() - inline_at_ < kInlineHold) {
+    return false;
+  }
+  inline_waits_ = false;
   out->pixels.assign(reinterpret_cast<const char*>(pixels_.data()), pixels_.size());
   out->width = width_;
   out->height = height_;
   out->row_bytes = row_bytes_;
   out->sequence = frame_count_;
   return true;
+}
+
+bool SoftwareFrame::PromoteInline() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!inline_waits_ || inline_sequence_ != frame_count_ || pool_ == nullptr ||
+      pixels_.size() > pool_->size()) {
+    return false;
+  }
+  const int index = pool_->AcquireFree();
+  if (index < 0) return false;
+  std::memcpy(pool_->Data(index), pixels_.data(), pixels_.size());
+  pending_shared_ = {index, width_, height_, row_bytes_, inline_sequence_};
+  inline_sequence_ = 0;
+  inline_waits_ = false;
+  return true;
+}
+
+int SoftwareFrame::MillisUntilInline() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!inline_waits_ || inline_sequence_ != frame_count_) return -1;
+  const auto left = kInlineHold - (std::chrono::steady_clock::now() - inline_at_);
+  if (left <= std::chrono::milliseconds(0)) return 0;
+  return static_cast<int>(std::chrono::ceil<std::chrono::milliseconds>(left).count());
 }
 
 size_t SoftwareFrame::FrameCount() const {

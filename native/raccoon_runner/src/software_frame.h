@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -81,8 +82,20 @@ class SoftwareFrame {
   void Present(const void* allocation, size_t row_bytes, size_t height);
 
   // Copies the latest frame into |out| when its sequence is newer than
-  // |after_sequence|. Returns false otherwise.
-  bool CopyLatest(Copy* out, size_t after_sequence) const;
+  // |after_sequence|. Returns false otherwise, and while a frame that fits
+  // the shared buffers waits for one to come back (PromoteInline).
+  bool CopyLatest(Copy* out, size_t after_sequence);
+
+  // A frame that found every shared buffer with the client waits for one,
+  // for up to kInlineHold: a client that has not read the frames before it
+  // reads an inline one no sooner, and twelve megabytes through the socket
+  // would only slow it further. Moves it into a buffer given back since;
+  // true when it did, and TakeShared then has it.
+  bool PromoteInline();
+
+  // Milliseconds until a waiting frame goes inline after all; -1 when none
+  // waits.
+  int MillisUntilInline() const;
 
   size_t FrameCount() const;
 
@@ -104,6 +117,9 @@ class SoftwareFrame {
   size_t frame_count_ = 0;
   // The frame whose pixels are in pixels_, 0 when none.
   size_t inline_sequence_ = 0;
+  // That frame fits the shared buffers and waits for one, since inline_at_.
+  bool inline_waits_ = false;
+  std::chrono::steady_clock::time_point inline_at_;
   SharedBufferPool* pool_ = nullptr;
   Shared pending_shared_;
   Gpu pending_gpu_;

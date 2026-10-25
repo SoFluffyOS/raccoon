@@ -2929,6 +2929,66 @@ void main() {
   );
 
   test(
+    'a client behind the frames still gets them through the shared buffers',
+    () async {
+      // Busy for two frames' time with each, the client has both buffers
+      // unread when the next frame comes. That frame went inline, its
+      // pixels through the socket to a client already behind; it waits for
+      // a buffer now.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final spinAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'spin',
+        'build',
+        'flutter_assets',
+      );
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: spinAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.frames
+            .firstWhere((_) => client.sharedFrames > 0)
+            .timeout(const Duration(seconds: 15));
+        final sharedBefore = client.sharedFrames;
+        var frames = 0;
+        final busy = client.frames.listen((_) {
+          frames++;
+          final spent = Stopwatch()..start();
+          while (spent.elapsedMilliseconds < 35) {}
+        });
+        await Future<void>.delayed(const Duration(seconds: 3));
+        await busy.cancel();
+        expect(frames, greaterThan(20));
+        // The count is taken as a frame is read and the listener hears of
+        // it later, so a frame at either end may fall on the other side.
+        expect(
+          client.sharedFrames - sharedBefore,
+          greaterThanOrEqualTo(frames - 2),
+        );
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((ready, Platform.isWindows)) {
+      (false, _) => 'build the runner and example first',
+      (_, true) => 'shared buffers are Unix sockets',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
+  test(
     'frames of a pane being dragged larger keep to the shared buffers',
     () async {
       // The buffers were sized to each frame exactly: every frame of a
