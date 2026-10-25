@@ -19,7 +19,10 @@ descriptors (Linux and macOS), and the client reads each into a new buffer.
 With `reusePixels: true` it reads them into three buffers it keeps instead:
 about a quarter of a core less at a phone's size and 60 fps, but a frame's
 pixels then hold only until the third frame after it, so a consumer that
-keeps them longer copies them. `raccoon_view` copies what it shows.
+keeps them longer copies them. `raccoon_view` copies what it shows. With
+nobody listening to the frames (a host that disposed a hidden view), the
+latest stays unread in its shared buffer until `latestFrame` asks for it,
+so a hidden app costs the client next to nothing.
 
 An app that stops before its first frame, such as one whose `main()` awaits
 a plugin with no implementation on this host, shows up as
