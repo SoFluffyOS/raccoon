@@ -142,6 +142,11 @@ final class RunnerClient
   final _channels = <String, PlatformChannelHandler>{};
   late final StreamSubscription<Inbound> _subscription;
   Frame? _latestFrame;
+  // The shared buffer the latest frame is still in, unread: with nobody
+  // listening to the frames (a view gone with its tab), reading every one
+  // would be for nothing. Read when [latestFrame] is asked for; given back
+  // when the next frame comes.
+  int? _heldBuffer;
   String? _vmServiceUri;
   int? _pid;
 
@@ -163,12 +168,15 @@ final class RunnerClient
   /// sends its size as it lays out, which draws a fresh frame.
   @override
   Stream<Frame> get frames async* {
-    if (_latestFrame case final frame? when !frame.inGpuBuffer) yield frame;
+    if (latestFrame case final frame? when !frame.inGpuBuffer) yield frame;
     yield* messages.where((m) => m.hasFrame()).map((m) => m.frame);
   }
 
   /// The latest frame the runner sent, if any.
-  Frame? get latestFrame => _latestFrame;
+  Frame? get latestFrame {
+    _readHeld();
+    return _latestFrame;
+  }
 
   /// The Dart VM service URI once the runner reported it.
   String? get vmServiceUri => _vmServiceUri;
@@ -302,6 +310,18 @@ final class RunnerClient
       if (message.hasSharedBuffers()) _takeBuffers(message.sharedBuffers);
       if (message.hasGpuBuffers()) _latestGpuBuffers = message.gpuBuffers;
       if (message.hasFrame()) {
+        // A newer frame: the one held back is the runner's again.
+        if (_heldBuffer case final held?) {
+          _heldBuffer = null;
+          _releaseShared(held);
+        }
+        if (_holds(message.frame)) {
+          _heldBuffer = message.frame.bufferIndex;
+          _sharedFrames++;
+          if (_latestFrame == null) _startupOver();
+          _latestFrame = message.frame;
+          continue;
+        }
         final frame = _resolveFrame(message.frame);
         if (frame == null) continue;
         message.frame = frame;
@@ -391,6 +411,8 @@ final class RunnerClient
 
   /// Adopts the descriptors that travelled with [buffers], in index order.
   void _takeBuffers(SharedBuffers buffers) {
+    // The held frame is in the set going away: read while it can be.
+    _readHeld();
     for (final old in _buffers) {
       old.closeSync();
     }
@@ -422,6 +444,24 @@ final class RunnerClient
     _handles.clear();
   }
 
+  /// Whether [frame] stays in its shared buffer, unread: nobody listens to
+  /// the frames to see it.
+  bool _holds(Frame frame) =>
+      !_messages.hasListener &&
+      frame.inSharedBuffer &&
+      !frame.inGpuBuffer &&
+      frame.bufferIndex < _buffers.length;
+
+  /// Reads the held frame's pixels into it and gives its buffer back.
+  void _readHeld() {
+    final held = _heldBuffer;
+    final frame = _latestFrame;
+    if (held == null || frame == null) return;
+    _heldBuffer = null;
+    _fill(frame, held);
+    _releaseShared(held);
+  }
+
   /// Reads a shared-buffer frame's pixels and gives the buffer back; an
   /// inline frame is returned as is.
   Frame? _resolveFrame(Frame frame) {
@@ -436,6 +476,16 @@ final class RunnerClient
       _releaseShared(index);
       return null;
     }
+    _fill(frame, index);
+    _releaseShared(index);
+    _sharedFrames++;
+    return frame;
+  }
+
+  /// Reads shared buffer [index] into [frame]'s pixels. The frame of a
+  /// message parsed here, nobody's but this client's: filled in place, not
+  /// copied first.
+  void _fill(Frame frame, int index) {
     final file = _buffers[index]..setPositionSync(0);
     final length = frame.rowBytes * frame.height;
     final Uint8List pixels;
@@ -445,11 +495,7 @@ final class RunnerClient
     } else {
       pixels = file.readSync(length);
     }
-    _releaseShared(index);
-    _sharedFrames++;
-    // The frame of a message parsed just now, nobody's but this one's:
-    // filled in place, not copied first.
-    return frame
+    frame
       ..pixels = pixels
       ..inSharedBuffer = false;
   }
@@ -496,6 +542,9 @@ final class RunnerClient
       );
     }
     _startupTimer?.cancel();
+    // The latest frame keeps its pixels past the end, as it did when every
+    // frame was read.
+    _readHeld();
     for (final buffer in _buffers) {
       buffer.closeSync();
     }

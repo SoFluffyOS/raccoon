@@ -2881,6 +2881,61 @@ void main() {
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
+  test(
+    'a client nobody watches reads its frames only when asked',
+    () async {
+      // With no listener (a view gone with its tab), shared frames stay
+      // unread in their buffer; latestFrame reads the latest when asked,
+      // and a listener that comes later gets frames with pixels.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final spinAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'spin',
+        'build',
+        'flutter_assets',
+      );
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: spinAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        final deadline = DateTime.now().add(const Duration(seconds: 15));
+        while (client.sharedFrames < 20 && DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        // Still turning: the runner gets its buffers back unread.
+        expect(client.sharedFrames, greaterThanOrEqualTo(20));
+        final latest = client.latestFrame;
+        expect(latest?.inSharedBuffer, isFalse);
+        expect(latest?.pixels.length, latest!.rowBytes * latest.height);
+        expect(latest.pixels.any((byte) => byte != 0), isTrue);
+        final watched = await client.frames
+            .skip(1)
+            .first
+            .timeout(const Duration(seconds: 5));
+        expect(watched.pixels.any((byte) => byte != 0), isTrue);
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((ready, Platform.isWindows)) {
+      (false, _) => 'build the runner and example first',
+      (_, true) => 'shared buffers are Unix sockets',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   // #146: a single message past the unread limit, a 4K frame inline, let
   // a client go that was reading.
   test(
