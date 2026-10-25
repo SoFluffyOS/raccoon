@@ -2,23 +2,37 @@
 
 #include <cctype>
 #include <cstdlib>
-#include <sstream>
 
 namespace raccoon {
+
+namespace {
+
+// |text| cut at each |separator|, empty pieces kept: no string stream in
+// the binary for it.
+std::vector<std::string> Split(const std::string& text, char separator) {
+  std::vector<std::string> pieces;
+  size_t start = 0;
+  for (size_t end; (end = text.find(separator, start)) != std::string::npos;
+       start = end + 1) {
+    pieces.push_back(text.substr(start, end - start));
+  }
+  pieces.push_back(text.substr(start));
+  return pieces;
+}
+
+}  // namespace
 
 HostLocale ParseLocale(const std::string& tag) {
   // The encoding and modifier of a POSIX locale say nothing about language.
   std::string name = tag.substr(0, tag.find_first_of(".@"));
   HostLocale locale;
   if (name.empty() || name == "C" || name == "POSIX") return locale;
-  std::vector<std::string> parts;
-  std::stringstream stream(name);
-  std::string part;
-  while (std::getline(stream, part, name.find('-') != std::string::npos ? '-' : '_')) {
-    parts.push_back(part);
-  }
-  for (char& c : parts[0]) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  const std::vector<std::string> parts =
+      Split(name, name.find('-') != std::string::npos ? '-' : '_');
   locale.language = parts[0];
+  for (char& c : locale.language) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
   for (size_t i = 1; i < parts.size(); ++i) {
     std::string piece = parts[i];
     if (piece.size() == 4 && locale.script.empty() && locale.country.empty()) {
@@ -40,9 +54,7 @@ HostSettings ReadHostSettings() {
   // LANGUAGE is a preference list; the others name one locale, in the order
   // the C library would pick it.
   if (const char* list = std::getenv("LANGUAGE"); list != nullptr && *list != '\0') {
-    std::stringstream stream(list);
-    std::string tag;
-    while (std::getline(stream, tag, ':')) {
+    for (const std::string& tag : Split(list, ':')) {
       HostLocale locale = ParseLocale(tag);
       if (!locale.language.empty()) settings.locales.push_back(locale);
     }

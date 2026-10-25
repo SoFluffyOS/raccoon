@@ -3,8 +3,12 @@
 // plugins_linux.cc and plugins_mac.mm.
 #include "plugins.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <iterator>
+#include <vector>
+
 #include <nlohmann/json.hpp>
 
 namespace raccoon {
@@ -40,16 +44,19 @@ const nlohmann::json& List(const nlohmann::json& object, const char* key) {
 }  // namespace
 
 bool PluginHost::LoadManifest(const std::string& path, std::string* error) {
-  std::ifstream in(path);
+  std::ifstream in(path, std::ios::binary);
   if (!in) {
     *error = "cannot read " + path;
     return false;
   }
-  nlohmann::json manifest;
-  try {
-    in >> manifest;
-  } catch (const std::exception& e) {
-    *error = path + ": " + e.what();
+  const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+  // Parsed from bytes, as every other JSON in the runner: one parser in the
+  // binary rather than a second for streams.
+  const nlohmann::json manifest =
+      nlohmann::json::parse(bytes.data(), bytes.data() + bytes.size(), nullptr, false);
+  if (manifest.is_discarded()) {
+    *error = path + ": not JSON";
     return false;
   }
   if (!manifest.is_object()) {
