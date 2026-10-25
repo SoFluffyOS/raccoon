@@ -18,6 +18,10 @@
 // socket) -> whether buffers go back from here; show(textureId, generation,
 // index); dispose(textureId).
 //
+// The socket is read on a serial queue of the texture's own, and the ports
+// asked for there: a runner slow to answer the ask holds up only that
+// queue, never the main thread (raccoon#157).
+//
 // No fence crosses the socket: the runner names a frame only once its GPU
 // has drawn it, and a buffer goes back to the runner over the same socket
 // once the next one is bound, by when the drawing that read it last was
@@ -174,12 +178,13 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
   // That buffer, retained: shown again while the frame named is not of the
   // set at hand, rather than one of the set's buffers nobody named.
   CVPixelBufferRef _boundBuffer;
-  // The socket's reading state, on the main queue.
+  // Where the socket is read, and its reading state, on that queue.
+  dispatch_queue_t _queue;
   int _socket;
   dispatch_source_t _reader;
   std::vector<uint8_t> _inbox;
   // The runner's surface port service and its token, once it answered
-  // 'RPRT'; main queue.
+  // 'RPRT'; the socket's queue.
   mach_port_t _service;
   uint8_t _token[kTokenSize];
 }
@@ -192,6 +197,7 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
     _boundGeneration = 0;
     _boundIndex = -1;
     _boundBuffer = nullptr;
+    _queue = dispatch_queue_create("dev.raccoon.view.gpu", DISPATCH_QUEUE_SERIAL);
     _socket = -1;
     _reader = nil;
     _service = MACH_PORT_NULL;
@@ -257,7 +263,7 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
 
 // Parses the framed sets in the inbox: 'RGPU', generation, count, width,
 // height, fourcc, modifier (64 bits), count pairs of stride and offset,
-// then count IOSurface IDs. Main queue.
+// then count IOSurface IDs. The socket's queue.
 - (void)parseInbox {
   size_t offset = 0;
   while (_inbox.size() - offset >= 4) {
@@ -301,14 +307,18 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
     }
     // The frame was named before its set came: Flutter asked for it then
     // and keeps what it got, so it must ask again, or an idle app's pane
-    // stays as it was.
-    if (named && self.frameAvailable != nil) self.frameAvailable();
+    // stays as it was. On the main queue, where dispose clears the block.
+    if (named) {
+      dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.frameAvailable != nil) self.frameAvailable();
+      });
+    }
   }
   _inbox.erase(_inbox.begin(), _inbox.begin() + offset);
 }
 
 // 'RSVC', the length of the service's name, the name, the 16-byte token.
-// Main queue.
+// The socket's queue.
 - (void)takeService:(const uint8_t*)payload length:(uint32_t)length {
   const uint32_t size = Read32(payload + 4);
   if (length < 8 + static_cast<uint64_t>(size) + kTokenSize) return;
@@ -333,6 +343,7 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
   [self parseInbox];
 }
 
+// The socket's queue.
 - (void)closeSocket {
   if (_reader != nil) {
     // Cancelling closes the descriptor, from the cancel handler.
@@ -363,7 +374,7 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
     _socket = fd;
   }
   _reader = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, static_cast<uintptr_t>(fd), 0,
-                                   dispatch_get_main_queue());
+                                   _queue);
   dispatch_source_set_event_handler(_reader, ^{
     [self readSocket];
   });
@@ -378,11 +389,14 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
 }
 
 - (void)dispose {
-  [self closeSocket];
-  if (_service != MACH_PORT_NULL) {
-    mach_port_deallocate(mach_task_self(), _service);
-    _service = MACH_PORT_NULL;
-  }
+  // After whatever the queue is doing: an ask for ports may be under way.
+  dispatch_async(_queue, ^{
+    [self closeSocket];
+    if (self->_service != MACH_PORT_NULL) {
+      mach_port_deallocate(mach_task_self(), self->_service);
+      self->_service = MACH_PORT_NULL;
+    }
+  });
   std::lock_guard<std::mutex> lock(_mutex);
   _pending.reset();
   _current.reset();
