@@ -144,6 +144,7 @@ void main() {
       WidgetTester tester,
       List<String> names, {
       Map<String, VoidCallback> onClose = const {},
+      ValueChanged<RaccoonBoardMenuRequest>? onContextMenu,
     }) async {
       tester.view
         ..physicalSize = const Size(2400, 1600)
@@ -164,6 +165,7 @@ void main() {
             ],
             layout: layout,
             empty: const Text('nothing runs'),
+            onContextMenu: onContextMenu,
           ),
         ),
       );
@@ -490,6 +492,63 @@ void main() {
         tester.getRect(find.byType(RaccoonView)).width,
         greaterThan(before.width * 1.1),
       );
+    });
+
+    testWidgets('a secondary click asks the host for a menu', (tester) async {
+      final asked = <RaccoonBoardMenuRequest>[];
+      var closed = false;
+      await pumpBoard(
+        tester,
+        ['counter'],
+        onClose: {'counter': () => closed = true},
+        onContextMenu: asked.add,
+      );
+      await tester.tap(
+        find.byKey(RaccoonBoard.titleKey('counter')),
+        buttons: kSecondaryButton,
+      );
+      await tester.tapAt(const Offset(2000, 1400), buttons: kSecondaryButton);
+      expect(asked.map((request) => request.session), ['counter', null]);
+      final frame = asked.first;
+      expect(frame.sizes, hasLength(RaccoonDevice.presets.length));
+      // A plain name's frame is phone-sized, no preset's size exactly.
+      expect(frame.sizes.where((size) => size.current), isEmpty);
+      frame.close?.call();
+      expect(closed, isTrue);
+      final board = asked.last;
+      expect(board.sizes, isEmpty);
+      expect(board.close, isNull);
+
+      final tablet = frame.sizes.firstWhere(
+        (size) => size.label.contains('1024'),
+        orElse: () => frame.sizes.last,
+      );
+      tablet.pick();
+      await tester.pump();
+      expect(layout.frameFor('counter').size, isNot(const Size(390, 844)));
+
+      board.zoomIn();
+      await tester.pump();
+      expect(find.text('125%'), findsOneWidget);
+      board.resetZoom();
+      await tester.pump();
+      expect(find.text('100%'), findsOneWidget);
+    });
+
+    testWidgets('show all brings every frame into view', (tester) async {
+      final asked = <RaccoonBoardMenuRequest>[];
+      await pumpBoard(tester, ['a', 'b'], onContextMenu: asked.add);
+      layout.move('b', const Offset(6000, 3000));
+      await tester.pump();
+      await tester.tapAt(const Offset(2000, 1400), buttons: kSecondaryButton);
+      asked.single.showAll();
+      await tester.pump();
+      const screen = Rect.fromLTWH(0, 0, 2400, 1600);
+      for (final view in tester.widgetList(find.byType(RaccoonView))) {
+        final shown = tester.getRect(find.byWidget(view));
+        expect(screen.contains(shown.topLeft), isTrue);
+        expect(screen.contains(shown.bottomRight), isTrue);
+      }
     });
 
     testWidgets('scrolling pans the board', (tester) async {

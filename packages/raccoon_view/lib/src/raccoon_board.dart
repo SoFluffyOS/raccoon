@@ -252,6 +252,65 @@ final class RaccoonBoardSession {
   final VoidCallback? onClose;
 }
 
+/// A device size a frame can take, for a host's menu.
+final class RaccoonBoardSizeChoice {
+  const RaccoonBoardSizeChoice({
+    required this.label,
+    required this.current,
+    required this.pick,
+  });
+
+  /// `iPhone 16  393 × 852 · 3x`.
+  final String label;
+
+  /// Whether the frame has this size now.
+  final bool current;
+
+  /// Gives the frame this size, live and for next time.
+  final VoidCallback pick;
+}
+
+/// A secondary click on the board, for the host to answer with a menu of
+/// its own at [position]: on a frame's title, [session] names it, and on
+/// the empty board it is null. The board's own actions come with it.
+final class RaccoonBoardMenuRequest {
+  const RaccoonBoardMenuRequest({
+    required this.session,
+    required this.position,
+    required this.zoom,
+    required this.zoomIn,
+    required this.zoomOut,
+    required this.resetZoom,
+    required this.showAll,
+    this.sizes = const [],
+    this.close,
+  });
+
+  /// The frame's session name, or null on the empty board.
+  final String? session;
+
+  /// Where the click was, in global coordinates.
+  final Offset position;
+
+  /// The board's zoom, 1 at 100%.
+  final double zoom;
+
+  final VoidCallback zoomIn;
+  final VoidCallback zoomOut;
+
+  /// Back to 100%, about the middle of the board.
+  final VoidCallback resetZoom;
+
+  /// Zooms and pans so every frame is in view.
+  final VoidCallback showAll;
+
+  /// For a frame, the device sizes it can take; empty on the board.
+  final List<RaccoonBoardSizeChoice> sizes;
+
+  /// For a frame whose session can be shut down.
+  final VoidCallback? close;
+}
+
 /// Every running device on one canvas: a dot grid that pans and zooms, one
 /// frame per session with the device's name and size on it. Drag a frame
 /// by its title, or hold Alt (Option on macOS) and grab it anywhere; pull
@@ -265,7 +324,8 @@ final class RaccoonBoardSession {
 /// app resizes as it is picked, and starts at it next time.
 ///
 /// Hosts pass their own ink colour, title style and menu colour, and what
-/// to show while nothing runs.
+/// to show while nothing runs. A secondary click on a frame's title or on
+/// the empty board goes to [onContextMenu], for a menu in the host's look.
 class RaccoonBoard extends StatefulWidget {
   const RaccoonBoard({
     super.key,
@@ -276,6 +336,7 @@ class RaccoonBoard extends StatefulWidget {
     this.menuColor = const Color(0xFF242424),
     this.empty,
     this.spacing = 24,
+    this.onContextMenu,
   });
 
   /// The sessions to show, a frame each.
@@ -299,6 +360,9 @@ class RaccoonBoard extends StatefulWidget {
 
   /// Distance between dots at zoom 1, in the board's pixels.
   final double spacing;
+
+  /// Asked for a menu on a secondary click; without it there is none.
+  final ValueChanged<RaccoonBoardMenuRequest>? onContextMenu;
 
   /// The key of [name]'s title bar, which drags the frame.
   static ValueKey<String> titleKey(String name) =>
@@ -413,6 +477,75 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
 
   void _onScaleStart(ScaleStartDetails details) => _zoomAtStart = _zoom;
 
+  /// Every frame in view, as large as fits up to 100%, with a margin.
+  void _showAll() {
+    final frames = [
+      for (final session in widget.sessions)
+        widget.layout.frameFor(session.name),
+    ];
+    if (frames.isEmpty || _viewport.isEmpty) return;
+    var bounds = _frameBounds(frames.first);
+    for (final frame in frames.skip(1)) {
+      bounds = bounds.expandToInclude(_frameBounds(frame));
+    }
+    const margin = 48.0;
+    final zoom = math
+        .min(
+          1.0,
+          math.min(
+            (_viewport.width - 2 * margin) / bounds.width,
+            (_viewport.height - 2 * margin) / bounds.height,
+          ),
+        )
+        .clamp(minZoom, maxZoom);
+    setState(() {
+      _zoom = zoom;
+      _pan = _viewport.center(Offset.zero) - bounds.center * zoom;
+    });
+  }
+
+  static Rect _frameBounds(RaccoonBoardFrame frame) => Rect.fromLTWH(
+    frame.position.dx,
+    frame.position.dy - RaccoonBoard.titleHeight,
+    frame.size.width,
+    frame.size.height + RaccoonBoard.titleHeight,
+  );
+
+  void _askMenu(Offset position, [RaccoonBoardSession? session]) {
+    final ask = widget.onContextMenu;
+    if (ask == null) return;
+    final center = _viewport.center(Offset.zero);
+    final frame = switch (session) {
+      final session? => widget.layout.frameFor(session.name),
+      null => null,
+    };
+    ask(
+      RaccoonBoardMenuRequest(
+        session: session?.name,
+        position: position,
+        zoom: _zoom,
+        zoomIn: () => _zoomTo(_zoom * zoomStep, center),
+        zoomOut: () => _zoomTo(_zoom / zoomStep, center),
+        resetZoom: () => _zoomTo(1, center),
+        showAll: _showAll,
+        sizes: [
+          if ((session, frame) case (final session?, final frame?))
+            for (final device in RaccoonDevice.presets)
+              RaccoonBoardSizeChoice(
+                label: _SizeMenu.labelOf(device),
+                current: _SizeMenu.isCurrent(frame, device),
+                pick: () => widget.layout.setSize(
+                  session.name,
+                  Size(device.width!.toDouble(), device.height!.toDouble()),
+                  device.pixelRatio ?? 1,
+                ),
+              ),
+        ],
+        close: session?.onClose,
+      ),
+    );
+  }
+
   /// A drag pans, a pinch zooms about the fingers; with the modifier held,
   /// a drag or a trackpad's two-finger scroll zooms.
   void _onScaleUpdate(ScaleUpdateDetails details) {
@@ -452,6 +585,7 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
               dragStartBehavior: DragStartBehavior.down,
               onScaleStart: _onScaleStart,
               onScaleUpdate: _onScaleUpdate,
+              onSecondaryTapUp: (details) => _askMenu(details.globalPosition),
               child: CustomPaint(
                 painter: _GridPainter(
                   ink: widget.ink.withValues(alpha: 0.35),
@@ -549,6 +683,8 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
             behavior: HitTestBehavior.opaque,
             dragStartBehavior: DragStartBehavior.down,
             onPanUpdate: (details) => moveBy(details.delta),
+            onSecondaryTapUp: (details) =>
+                _askMenu(details.globalPosition, session),
             child: MouseRegion(
               cursor: SystemMouseCursors.grab,
               child: SizedBox(
@@ -725,10 +861,8 @@ class _SizeMenu extends StatelessWidget {
                         vertical: 6,
                       ),
                       child: Text(
-                        '${_isCurrent(device) ? '✓ ' : '   '}'
-                        '${device.label.replaceFirst('Raccoon ', '')}  '
-                        '${device.width} × ${device.height} · '
-                        '${_ratio(device.pixelRatio ?? 1)}x',
+                        '${isCurrent(current, device) ? '✓ ' : '   '}'
+                        '${labelOf(device)}',
                         style: style,
                       ),
                     ),
@@ -741,10 +875,16 @@ class _SizeMenu extends StatelessWidget {
     );
   }
 
-  bool _isCurrent(RaccoonDevice device) =>
-      current.size.width == device.width &&
-      current.size.height == device.height &&
-      current.pixelRatio == (device.pixelRatio ?? 1);
+  /// `iPhone 16  393 × 852 · 3x`.
+  static String labelOf(RaccoonDevice device) =>
+      '${device.label.replaceFirst('Raccoon ', '')}  '
+      '${device.width} × ${device.height} · '
+      '${_ratio(device.pixelRatio ?? 1)}x';
+
+  static bool isCurrent(RaccoonBoardFrame frame, RaccoonDevice device) =>
+      frame.size.width == device.width &&
+      frame.size.height == device.height &&
+      frame.pixelRatio == (device.pixelRatio ?? 1);
 
   static String _ratio(double ratio) =>
       ratio == ratio.roundToDouble() ? '${ratio.round()}' : '$ratio';
