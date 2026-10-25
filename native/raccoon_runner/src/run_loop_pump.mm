@@ -20,6 +20,7 @@ struct RunLoopPump::Impl {
   CFFileDescriptorRef descriptor = nullptr;
   CFRunLoopSourceRef source = nullptr;
   std::vector<struct kevent> changes;
+  std::vector<struct kevent> receipts;
 };
 
 namespace {
@@ -104,7 +105,8 @@ int RunLoopPump::Turn(pollfd* fds, size_t count, int timeout_ms) {
   }
   // With EV_RECEIPT every change answers in the event list, errors
   // included, so one bad descriptor does not stop the rest.
-  std::vector<struct kevent> receipts(changes.size());
+  auto& receipts = impl_->receipts;
+  receipts.resize(changes.size());
   kevent(impl_->queue, changes.data(), static_cast<int>(changes.size()), receipts.data(),
          static_cast<int>(receipts.size()), nullptr);
   CFFileDescriptorEnableCallBacks(impl_->descriptor, kCFFileDescriptorReadCallBack);

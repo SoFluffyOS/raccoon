@@ -17,11 +17,41 @@
 
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <vector>
 #include <unordered_map>
 
 using raccoon::PluginHost;
+
+namespace {
+
+// The host's bridge, for the plugin objects that outlive the host: a
+// display link or a capture queue can call in while the runner exits.
+// Calls after Close do nothing.
+class BridgeGate {
+ public:
+  explicit BridgeGate(const PluginHost::Bridge* bridge) : bridge_(bridge) {}
+
+  // Runs |call| on the bridge; false once the host is gone.
+  template <typename Call>
+  bool Use(Call&& call) {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    return bridge_ != nullptr && call(*bridge_);
+  }
+
+  void Close() {
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    bridge_ = nullptr;
+  }
+
+ private:
+  std::shared_mutex mutex_;
+  const PluginHost::Bridge* bridge_;
+};
+
+}  // namespace
 
 // ---- The messenger ----------------------------------------------------------
 
@@ -49,7 +79,7 @@ using raccoon::PluginHost;
 @end
 
 @interface RaccoonMessenger : NSObject <FlutterBinaryMessenger>
-- (instancetype)initWithBridge:(PluginHost::Bridge*)bridge;
+- (instancetype)initWithGate:(std::shared_ptr<BridgeGate>)gate;
 // A message from the app; YES when a handler took it.
 - (BOOL)handleMessage:(NSString*)channel
                  data:(NSData*)data
@@ -61,14 +91,14 @@ using raccoon::PluginHost;
 @end
 
 @implementation RaccoonMessenger {
-  PluginHost::Bridge* _bridge;
+  std::shared_ptr<BridgeGate> _gate;
   NSMutableDictionary<NSString*, RaccoonHandler*>* _handlers;
   FlutterBinaryMessengerConnection _nextConnection;
 }
 
-- (instancetype)initWithBridge:(PluginHost::Bridge*)bridge {
+- (instancetype)initWithGate:(std::shared_ptr<BridgeGate>)gate {
   if ((self = [super init])) {
-    _bridge = bridge;
+    _gate = std::move(gate);
     _handlers = [NSMutableDictionary dictionary];
     _nextConnection = 1;
   }
@@ -105,8 +135,11 @@ using raccoon::PluginHost;
       }
     };
   }
-  _bridge->send(channel.UTF8String, static_cast<const uint8_t*>(message.bytes), message.length,
+  _gate->Use([&](const PluginHost::Bridge& bridge) {
+    bridge.send(channel.UTF8String, static_cast<const uint8_t*>(message.bytes), message.length,
                 std::move(on_reply));
+    return true;
+  });
 }
 
 - (FlutterBinaryMessengerConnection)setMessageHandlerOnChannel:(NSString*)channel
@@ -176,14 +209,16 @@ using raccoon::PluginHost;
     entry = _handlers[channel];
   }
   if (entry == nil) return NO;
-  PluginHost::Bridge* bridge = _bridge;
+  std::shared_ptr<BridgeGate> gate = _gate;
   // The engine's handle takes one answer; a second would be a use after
-  // free on its side.
-  __block BOOL answered = NO;
+  // free on its side. Plugins answer from any thread.
+  __block int answered = 0;
   FlutterBinaryReply reply = ^(NSData* answer) {
-    if (handle == nullptr || answered) return;
-    answered = YES;
-    bridge->respond(handle, static_cast<const uint8_t*>(answer.bytes), answer.length);
+    if (handle == nullptr || __atomic_exchange_n(&answered, 1, __ATOMIC_ACQ_REL) != 0) return;
+    gate->Use([&](const PluginHost::Bridge& bridge) {
+      bridge.respond(handle, static_cast<const uint8_t*>(answer.bytes), answer.length);
+      return true;
+    });
   };
   FlutterBinaryMessageHandler handler = entry.handler;
   // A plugin that throws answers "not handled" and the runner goes on: one
@@ -193,7 +228,7 @@ using raccoon::PluginHost;
       handler(data, reply);
     } @catch (NSException* exception) {
       std::fprintf(stderr, "🦝 %s threw %s: %s\n", channel.UTF8String,
-                   exception.name.UTF8String, exception.reason.UTF8String);
+                   exception.name.UTF8String ?: "an exception", exception.reason.UTF8String ?: "");
       reply(nil);
     }
   };
@@ -228,31 +263,35 @@ struct TextureFrame {
 }  // namespace
 
 @interface RaccoonTextures : NSObject <FlutterTextureRegistry>
-- (instancetype)initWithBridge:(PluginHost::Bridge*)bridge;
+- (instancetype)initWithGate:(std::shared_ptr<BridgeGate>)gate
+                 metalDevice:(const void*)metalDevice;
 - (BOOL)populate:(int64_t)textureId out:(FlutterMetalExternalTexture*)out;
 @end
 
 @implementation RaccoonTextures {
-  PluginHost::Bridge* _bridge;
+  std::shared_ptr<BridgeGate> _gate;
   CVMetalTextureCacheRef _cache;
   std::mutex _mutex;
   // Registered on the main thread, read on the raster thread.
   NSMutableDictionary<NSNumber*, NSObject<FlutterTexture>*>* _textures;
-  std::unordered_map<int64_t, TextureFrame> _frames;
+  // On the heap: the engine reads the handles it was given after populate
+  // returns, so they stay put while another thread unregisters the texture.
+  std::unordered_map<int64_t, std::unique_ptr<TextureFrame>> _frames;
   // Frames of unregistered textures: the engine may still read the handles
   // it was given, so they go at the next populate, on the raster thread,
   // by when it has (#125).
-  std::vector<TextureFrame> _retired;
+  std::vector<std::unique_ptr<TextureFrame>> _retired;
   int64_t _nextId;
 }
 
-- (instancetype)initWithBridge:(PluginHost::Bridge*)bridge {
+- (instancetype)initWithGate:(std::shared_ptr<BridgeGate>)gate
+                 metalDevice:(const void*)metalDevice {
   if ((self = [super init])) {
-    _bridge = bridge;
+    _gate = std::move(gate);
     _textures = [NSMutableDictionary dictionary];
     _nextId = 1;
-    if (bridge->metal_device != nullptr) {
-      id<MTLDevice> device = (__bridge id<MTLDevice>)bridge->metal_device;
+    if (metalDevice != nullptr) {
+      id<MTLDevice> device = (__bridge id<MTLDevice>)metalDevice;
       CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &_cache);
     }
   }
@@ -260,8 +299,8 @@ struct TextureFrame {
 }
 
 - (void)dealloc {
-  for (auto& entry : _frames) entry.second.Clear();
-  for (auto& frame : _retired) frame.Clear();
+  for (auto& entry : _frames) entry.second->Clear();
+  for (auto& frame : _retired) frame->Clear();
   if (_cache != nullptr) CFRelease(_cache);
 }
 
@@ -272,7 +311,9 @@ struct TextureFrame {
     textureId = _nextId++;
     _textures[@(textureId)] = texture;
   }
-  if (_cache == nullptr || !_bridge->register_texture(textureId)) {
+  if (_cache == nullptr || !_gate->Use([&](const PluginHost::Bridge& bridge) {
+        return bridge.register_texture(textureId);
+      })) {
     std::fprintf(stderr, "🦝 texture %lld: %s\n", static_cast<long long>(textureId),
                  _cache == nullptr ? "textures need the Metal renderer"
                                    : "the engine took no texture");
@@ -281,11 +322,15 @@ struct TextureFrame {
 }
 
 - (void)textureFrameAvailable:(int64_t)textureId {
-  _bridge->mark_texture_frame_available(textureId);
+  _gate->Use([&](const PluginHost::Bridge& bridge) {
+    return bridge.mark_texture_frame_available(textureId);
+  });
 }
 
 - (void)unregisterTexture:(int64_t)textureId {
-  _bridge->unregister_texture(textureId);
+  _gate->Use([&](const PluginHost::Bridge& bridge) {
+    return bridge.unregister_texture(textureId);
+  });
   NSObject<FlutterTexture>* texture;
   {
     std::lock_guard<std::mutex> lock(_mutex);
@@ -293,7 +338,7 @@ struct TextureFrame {
     [_textures removeObjectForKey:@(textureId)];
     const auto frame = _frames.find(textureId);
     if (frame != _frames.end()) {
-      _retired.push_back(frame->second);
+      _retired.push_back(std::move(frame->second));
       _frames.erase(frame);
     }
   }
@@ -324,7 +369,7 @@ struct TextureFrame {
   NSObject<FlutterTexture>* texture;
   {
     std::lock_guard<std::mutex> lock(_mutex);
-    for (auto& frame : _retired) frame.Clear();
+    for (auto& frame : _retired) frame->Clear();
     _retired.clear();
     texture = _textures[@(textureId)];
   }
@@ -378,14 +423,15 @@ struct TextureFrame {
     next.Clear();
     return NO;
   }
-  TextureFrame& kept = _frames[textureId];
-  kept.Clear();
-  kept = next;
+  std::unique_ptr<TextureFrame>& kept = _frames[textureId];
+  if (!kept) kept = std::make_unique<TextureFrame>();
+  kept->Clear();
+  *kept = next;
   out->width = width;
   out->height = height;
   out->pixel_format = pixel_format;
   out->num_textures = count;
-  out->textures = kept.handles;
+  out->textures = kept->handles;
   out->yuv_color_space = color_space;
   return YES;
 }
@@ -470,14 +516,17 @@ struct TextureFrame {
 namespace raccoon {
 
 struct PluginHost::Impl {
+  std::shared_ptr<BridgeGate> gate;
   RaccoonMessenger* messenger = nil;
   RaccoonTextures* textures = nil;
   NSMutableArray<RaccoonRegistrar*>* registrars = nil;
 };
 
 PluginHost::PluginHost(Bridge bridge) : bridge_(std::move(bridge)), impl_(std::make_unique<Impl>()) {
-  impl_->messenger = [[RaccoonMessenger alloc] initWithBridge:&bridge_];
-  impl_->textures = [[RaccoonTextures alloc] initWithBridge:&bridge_];
+  impl_->gate = std::make_shared<BridgeGate>(&bridge_);
+  impl_->messenger = [[RaccoonMessenger alloc] initWithGate:impl_->gate];
+  impl_->textures = [[RaccoonTextures alloc] initWithGate:impl_->gate
+                                              metalDevice:bridge_.metal_device];
   impl_->registrars = [NSMutableArray array];
   // Plugins that open panels or alerts want an application; as an accessory
   // it has no Dock icon and no menu bar of its own.
@@ -486,8 +535,9 @@ PluginHost::PluginHost(Bridge bridge) : bridge_(std::move(bridge)), impl_(std::m
   [NSApp finishLaunching];
 }
 
-// The frameworks stay loaded: a plugin's objects may outlive this.
-PluginHost::~PluginHost() = default;
+// The frameworks stay loaded: a plugin's objects may outlive this, and
+// what they call from now on does nothing.
+PluginHost::~PluginHost() { impl_->gate->Close(); }
 
 bool PluginHost::Prepare(const std::string& flutter_framework, std::string* error) {
   if (flutter_framework.empty()) {
@@ -575,8 +625,9 @@ bool PluginHost::Load(const PluginEntry& entry, std::string* error) {
     [cls registerWithRegistrar:registrar];
   } @catch (NSException* exception) {
     [impl_->messenger dropConnectionsFrom:first];
-    *error = std::string("registerWithRegistrar: threw ") + exception.name.UTF8String + ": " +
-             exception.reason.UTF8String;
+    *error = std::string("registerWithRegistrar: threw ") +
+             (exception.name.UTF8String ?: "an exception") + ": " +
+             (exception.reason.UTF8String ?: "");
     return false;
   }
   [impl_->registrars addObject:registrar];

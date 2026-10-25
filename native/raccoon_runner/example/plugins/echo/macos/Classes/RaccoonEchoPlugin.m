@@ -54,7 +54,7 @@
   NSObject<FlutterTextureRegistry>* _textures;
   RaccoonEchoTexture* _texture;
   int64_t _textureId;
-  NSTimer* _timer;
+  dispatch_source_t _timer;
 }
 
 + (void)registerWithRegistrar:(id<FlutterPluginRegistrar>)registrar {
@@ -90,19 +90,22 @@
     return;
   }
   if ([call.method isEqualToString:@"texture"]) {
-    // Registers the texture once and answers its id; frames are marked
-    // every half second so the host keeps drawing it.
+    // Registers the texture once and answers its id. Frames are marked
+    // from a background queue at 60 Hz, as a video plugin's display link
+    // does, and on until the process ends: the host takes calls from
+    // plugin threads, while it shuts down too.
     if (_texture == nil) {
       _texture = [[RaccoonEchoTexture alloc] init];
       _textureId = [_textures registerTexture:_texture];
       NSObject<FlutterTextureRegistry>* textures = _textures;
       const int64_t textureId = _textureId;
-      _timer = [NSTimer scheduledTimerWithTimeInterval:0.5
-                                               repeats:YES
-                                                 block:^(NSTimer* timer) {
-                                                   [textures textureFrameAvailable:textureId];
-                                                 }];
-      [_textures textureFrameAvailable:_textureId];
+      _timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+                                      dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0));
+      dispatch_source_set_timer(_timer, DISPATCH_TIME_NOW, NSEC_PER_SEC / 60, NSEC_PER_MSEC);
+      dispatch_source_set_event_handler(_timer, ^{
+        [textures textureFrameAvailable:textureId];
+      });
+      dispatch_resume(_timer);
     }
     result(@(_textureId));
     return;
