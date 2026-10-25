@@ -822,6 +822,65 @@ def vendored(made, roots):
     return found
 
 
+# A plugin that failed to build is kept failed, so each install does not
+# spend minutes on it again (#136): by the key a success would have, so a
+# new version, an edited path plugin or a new runner tries again, and by
+# the toolchain, so a new Xcode or CocoaPods does; for a day, in case what
+# failed was the network; and never with RACCOON_RETRY_PLUGINS=1. A missing
+# toolchain is never kept: installing it is the fix.
+FAILURE_DAYS = 1
+toolchain_id = None
+
+
+def toolchain_identity():
+    global toolchain_id
+    if toolchain_id is None:
+        versions = []
+        for command in (['xcodebuild', '-version'], ['pod', '--version']):
+            try:
+                versions.append(subprocess.run(command, capture_output=True, text=True, env=env).stdout.strip())
+            except OSError:
+                versions.append('')
+        toolchain_id = ' / '.join(v.replace('\n', ' ') for v in versions)
+    return toolchain_id
+
+
+def failure_path(plugin):
+    return os.path.join(cache, 'failed', plugin['key'] + '.json')
+
+
+def kept_failure(plugin):
+    """Why [plugin] failed last time, when that still holds; else None."""
+    if os.environ.get('RACCOON_RETRY_PLUGINS') == '1':
+        return None
+    try:
+        with open(failure_path(plugin)) as f:
+            kept = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if time.time() - kept.get('at', 0) > FAILURE_DAYS * 86400:
+        return None
+    if kept.get('toolchain') != toolchain_identity():
+        return None
+    return '%s (kept from %s; RACCOON_RETRY_PLUGINS=1 builds it again)' % (
+        kept.get('why', 'failed'), time.strftime('%Y-%m-%d %H:%M', time.localtime(kept['at'])))
+
+
+def keep_failure(plugin, why, log):
+    """Keeps [plugin]'s failure, with a copy of [log] beside it, which the
+    reason names: the install's own is written over by the next."""
+    record = failure_path(plugin)
+    os.makedirs(os.path.dirname(record), exist_ok=True)
+    if log and os.path.isfile(log):
+        kept_log = record[:-len('.json')] + '.log'
+        shutil.copyfile(log, kept_log)
+        why = why.replace(log, kept_log)
+    staging = record + '.partial-%d' % os.getpid()
+    with open(staging, 'w') as f:
+        json.dump({'why': why, 'at': time.time(), 'toolchain': toolchain_identity()}, f)
+    os.replace(staging, record)
+
+
 def in_cache(plugin):
     """Whether the cache holds the plugin, every framework and library its
     frameworks load by @rpath included: helpers before #84 and #93 left out
@@ -912,6 +971,12 @@ if misses:
 broken = {}  # name: why, for the misses that did not build
 if misses:
     toolchain = can_build()
+    if toolchain is None:
+        for plugin in misses:
+            if (why := kept_failure(plugin)) is not None:
+                broken[plugin['name']] = why
+        misses = [p for p in misses if p['name'] not in broken]
+if misses:
     pods = os.path.join(out, 'build')
     log_path = os.path.join(pods, 'pod-install.log')
     if toolchain is None:
@@ -949,7 +1014,7 @@ if misses:
         # one (firebase_analytics on firebase_core) resolves; only the misses
         # are built. A miss CocoaPods names in what stops it is dropped, its
         # log kept, and the rest are installed again without it (#82).
-        podded = list(wanted)
+        podded = [p for p in wanted if p['name'] not in broken]
         miss_names = {p['name'] for p in misses}
         while True:
             with open(os.path.join(pods, 'Podfile'), 'w') as f:
@@ -1010,6 +1075,7 @@ if misses:
                 kept = os.path.join(pods, 'pod-install-%s.log' % name)
                 shutil.copyfile(log_path, kept)
                 broken[name] = 'pod install failed; see ' + kept
+                keep_failure(next(p for p in misses if p['name'] == name), broken[name], kept)
             podded = [p for p in podded if p['name'] not in culprits]
     for plugin in misses:
         name = plugin['name']
@@ -1031,6 +1097,7 @@ if misses:
                 env=env, stdout=log, stderr=subprocess.STDOUT).returncode == 0
         if not ok:
             broken[name] = 'did not build; see ' + build_log
+            keep_failure(plugin, broken[name], build_log)
             continue
         cached = os.path.join(cache, plugin['key'])
         release = os.path.join(symroot, 'Release')

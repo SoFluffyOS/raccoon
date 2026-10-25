@@ -1111,6 +1111,120 @@ void main() {
     timeout: const Timeout(Duration(minutes: 5)),
   );
   test(
+    'a macOS plugin that fails to build is kept failed until it changes',
+    () async {
+      // #136: building it again costs pod install and xcodebuild on every
+      // install. Kept by its key and the toolchain, for a day; retried at
+      // once with RACCOON_RETRY_PLUGINS=1, or when its sources change.
+      final temp = Directory.systemTemp.createTempSync('raccoon_pods');
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      write(
+        'plugin_f/pubspec.yaml',
+        'name: plugin_f\nversion: 1.0.0\nflutter:\n  plugin:\n    platforms:\n'
+            '      macos:\n        pluginClass: PluginF\n',
+      );
+      write(
+        'plugin_f/macos/plugin_f.podspec',
+        "Pod::Spec.new do |s|\n  s.name = 'plugin_f'\n  s.version = '1.0.0'\n"
+            "  s.summary = 'plugin_f'\n  s.homepage = 'https://example.com'\n"
+            "  s.license = { :type => 'BSD' }\n  s.author = 'Raccoon'\n"
+            "  s.source = { :path => '.' }\n  s.source_files = 'Classes/**/*'\n"
+            "  s.dependency 'FlutterMacOS'\n  s.platform = :osx, '10.15'\nend\n",
+      );
+      write(
+        'plugin_f/macos/Classes/PluginF.h',
+        '@import FlutterMacOS;\n@interface PluginF : NSObject <FlutterPlugin>\n@end\n',
+      );
+      void source({required bool compiles}) => write(
+        'plugin_f/macos/Classes/PluginF.m',
+        '#import "PluginF.h"\n@implementation PluginF\n'
+            '+ (void)registerWithRegistrar:(id<FlutterPluginRegistrar>)registrar {\n'
+            '  ${compiles ? '' : 'not code;'}\n}\n@end\n',
+      );
+      source(compiles: false);
+      write('app/pubspec.yaml', 'name: app\ndependencies:\n  plugin_f:\n');
+      write(
+        'app/.dart_tool/package_config.json',
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+            {
+              'name': 'plugin_f',
+              'rootUri': '../../plugin_f',
+              'packageUri': 'lib/',
+            },
+          ],
+        }),
+      );
+      final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+        ..createSync(recursive: true);
+      final data = p.join(temp.path, 'data');
+      // The detail the helper gave plugin_f, null once it built.
+      Future<String?> install({bool retry = false}) async {
+        final result = await Process.run(
+          p.join(runnerDir, 'tool', 'raccoon-device'),
+          ['install', bundle.path, 'app'],
+          environment: {
+            'RACCOON_RUNNER': binary!,
+            if (sdk != null) 'FLUTTER_ROOT': sdk,
+            'XDG_DATA_HOME': data,
+            'RACCOON_PLUGIN_CACHE': p.join(temp.path, 'cache'),
+            'RACCOON_NO_PREBUILT': '1',
+            if (retry) 'RACCOON_RETRY_PLUGINS': '1',
+          },
+        );
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        final manifest =
+            jsonDecode(
+                  File(
+                    p.join(
+                      data,
+                      'raccoon',
+                      'apps',
+                      'app',
+                      'plugins',
+                      'manifest.json',
+                    ),
+                  ).readAsStringSync(),
+                )
+                as Map;
+        for (final entry in manifest['status'] as List) {
+          final status = entry as Map;
+          if (status['name'] == 'plugin_f') return status['detail'] as String;
+        }
+        return null;
+      }
+
+      try {
+        final first = await install();
+        expect(first, startsWith('did not build'));
+        expect(first, isNot(contains('kept')));
+        final kept = await install();
+        expect(kept, contains('kept from'));
+        // Its log is kept beside the failure: the install's is written over.
+        final log = RegExp(r'see (\S+\.log)').firstMatch(kept ?? '')?.group(1);
+        expect(log, isNotNull);
+        expect(File(log ?? '').readAsStringSync(), contains('not code'));
+        expect(await install(retry: true), isNot(contains('kept')));
+        source(compiles: true);
+        expect(await install(), isNull);
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isMacOS)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'CocoaPods plugins are macOS',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 8)),
+  );
+
+  test(
     'on macOS a ready-made framework in a plugin\'s pod lands beside it',
     () async {
       // plugin_d's pod brings Ready.xcframework, a dynamic framework the

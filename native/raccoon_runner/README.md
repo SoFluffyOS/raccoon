@@ -198,6 +198,12 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   M1 Pro: `url_launcher` built in 12 s cold, 0.2 s from the cache; the
   fifteen of `tool/plugins` in 2 min cold, all loaded; `firebase_core`
   and its pods in 47 s cold, and `Firebase.initializeApp` answers.
+  A plugin that fails to build is kept failed, its log beside it in the
+  cache, so the next install skips it instead of spending its pod install
+  and build again. It is kept for a day, by the same key a build would have
+  and by the Xcode and CocoaPods versions, so a new version of the plugin,
+  an edit to a path plugin, a new runner or a new toolchain tries again.
+  `RACCOON_RETRY_PLUGINS=1` tries again at once (#136).
   Loading FlutterMacOS adds about 17 MB of resident memory and no
   measurable time to the first frame (184 to 188 ms, median of five); the
   run loop costs nothing at idle. The Objective-C runtime notes, once per
