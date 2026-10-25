@@ -3301,9 +3301,11 @@ void main() {
         socket.destroy();
         await frames.cancel();
         printOnFailure('GPU frames a second: $before before, $gpuFrames after');
-        // With the ring left full, none came at all.
+        // With the ring left full, none came at all. A slow machine (CI's
+        // x64 Mac: 57 a second before, 23 in the first second back) takes
+        // part of that second to come back up to speed.
         expect(gpuFrames, greaterThan(0));
-        expect(gpuFrames, greaterThanOrEqualTo(before ~/ 2));
+        expect(gpuFrames, greaterThanOrEqualTo(before ~/ 4));
       } finally {
         client.shutdown();
         await client.close();
