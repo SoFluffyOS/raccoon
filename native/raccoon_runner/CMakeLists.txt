@@ -166,6 +166,7 @@ add_executable(raccoon_channels_check
   src/secure_storage_options.cc
   src/standard_codec.cc
   src/text_input.cc
+  src/user_defaults_channels.cc
   src/window_channels.cc
 )
 target_include_directories(raccoon_channels_check PRIVATE src)

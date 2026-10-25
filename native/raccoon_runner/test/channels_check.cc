@@ -4,7 +4,9 @@
 // selection or composing range leaves its text. Prints one line; exits 0
 // on a pass. Also: what the codec encodes decodes to the same bytes. Run by
 // the runtime's integration tests; not shipped.
+#include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <random>
 #include <string>
 #include <vector>
@@ -14,6 +16,7 @@
 #include "secure_storage_options.h"
 #include "standard_codec.h"
 #include "text_input.h"
+#include "user_defaults_channels.h"
 #include "window_channels.h"
 
 using raccoon::CodecValue;
@@ -127,6 +130,55 @@ int CheckWindowChannels() {
   return 0;
 }
 
+// shared_preferences' two Pigeon APIs, in memory, then a store written by
+// one instance and read by the next.
+int CheckUserDefaults() {
+  static const char* legacy[] = {"setBool", "setDouble", "setValue", "remove", "clear", "getAll"};
+  static const char* async[] = {"set", "getValue", "getKeys", "getAll", "clear"};
+  const std::string prefix = "dev.flutter.pigeon.shared_preferences_foundation.";
+  raccoon::UserDefaultsChannels memory;
+  for (int i = 0; i < 20000; ++i) {
+    const bool old = rng() % 2 == 0;
+    const std::string channel = prefix + (old ? "LegacyUserDefaultsApi." : "UserDefaultsApi.") +
+                                (old ? legacy[rng() % 6] : async[rng() % 5]);
+    std::vector<CodecValue> args;
+    for (int k = rng() % 4; k > 0; --k) args.push_back(RandomValue(1));
+    const std::vector<uint8_t> data = Mangle(raccoon::EncodeValue(CodecValue::List(args)));
+    std::vector<uint8_t> reply;
+    memory.Handle(channel, data.data(), data.size(), &reply);
+  }
+  const std::string path =
+      (std::filesystem::temp_directory_path() / ("raccoon_channels_check_" + std::to_string(rng())))
+          .string();
+  auto call = [&prefix](raccoon::UserDefaultsChannels& store, const char* method,
+                        std::vector<CodecValue> args) {
+    const std::vector<uint8_t> data = raccoon::EncodeValue(CodecValue::List(std::move(args)));
+    std::vector<uint8_t> reply;
+    store.Handle(prefix + "LegacyUserDefaultsApi." + method, data.data(), data.size(), &reply);
+    return reply;
+  };
+  std::vector<uint8_t> written;
+  {
+    raccoon::UserDefaultsChannels first;
+    first.SetStorePath(path);
+    call(first, "setValue", {CodecValue::String("flutter.name"), CodecValue::String("raccoon")});
+    call(first, "setBool", {CodecValue::String("flutter.on"), CodecValue::Bool(true)});
+    call(first, "setDouble", {CodecValue::String("flutter.ratio"), CodecValue::Double(1.5)});
+    written = call(first, "getAll", {CodecValue::String("flutter."), CodecValue()});
+  }
+  raccoon::UserDefaultsChannels second;
+  second.SetStorePath(path);
+  const std::vector<uint8_t> read = call(second, "getAll", {CodecValue::String("flutter."), CodecValue()});
+  std::error_code ignored;
+  std::filesystem::remove(path, ignored);
+  const std::string value = "raccoon";
+  if (std::search(written.begin(), written.end(), value.begin(), value.end()) == written.end()) {
+    return Fail("the store kept nothing");
+  }
+  if (read != written) return Fail("a store read back is not what was written");
+  return 0;
+}
+
 int CheckTextInput() {
   static const uint64_t keys[] = {0x100000008, 0x10000007f, 0x100000302, 0x100000303,
                                   0x100000301, 0x100000304, 0x100000305, 0x100000306,
@@ -185,10 +237,14 @@ int CheckTextInput() {
 
 int main() {
   try {
-    if (CheckCodec() != 0 || CheckWindowChannels() != 0 || CheckTextInput() != 0) return 1;
+    if (CheckCodec() != 0 || CheckWindowChannels() != 0 || CheckUserDefaults() != 0 ||
+        CheckTextInput() != 0) {
+      return 1;
+    }
   } catch (const std::exception& error) {
     return Fail(std::string("an exception: ") + error.what());
   }
-  std::printf("CHANNELS ok: the codec, the window channels and the text field held\n");
+  std::printf(
+      "CHANNELS ok: the codec, the window channels, the defaults and the text field held\n");
   return 0;
 }
