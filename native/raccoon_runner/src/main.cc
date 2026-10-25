@@ -954,9 +954,9 @@ int Serve(const Options& options) {
   std::fflush(stdout);
 
   // One turn of the loop's work: platform tasks, vsync, and what goes to
-  // the client. The loop below takes one between waits; on Windows a
-  // plugin's modal dialog takes them while its own message loop holds
-  // ours (MessagePump).
+  // the client. The loop below takes one between waits; a plugin's modal
+  // dialog takes them while its own loop holds ours (MessagePump on
+  // Windows, RunLoopPump on macOS).
   auto Turn = [&]() {
 #if RACCOON_HAS_METAL
     if (ports_asked.exchange(false)) host.ShareGpuBuffersByPort(true);
@@ -1088,7 +1088,7 @@ int Serve(const Options& options) {
       stop = true;
     }
   };
-#if RACCOON_HAS_PLUGINS && defined(_WIN32)
+#if RACCOON_HAS_PLUGINS && (defined(_WIN32) || defined(__APPLE__))
   if (plugins) plugins->SetModalTurn([&] {
     Turn();
     loop.RunOnce(0);

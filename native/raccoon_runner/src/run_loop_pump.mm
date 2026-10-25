@@ -19,6 +19,7 @@ struct RunLoopPump::Impl {
   int queue = -1;
   CFFileDescriptorRef descriptor = nullptr;
   CFRunLoopSourceRef source = nullptr;
+  CFRunLoopTimerRef modal_timer = nullptr;
   std::vector<struct kevent> changes;
   std::vector<struct kevent> receipts;
 };
@@ -28,6 +29,9 @@ namespace {
 // Nothing to do: the run loop returns once a source fired, and the loop
 // looks at its descriptors itself.
 void OnQueueReady(CFFileDescriptorRef, CFOptionFlags, void*) {}
+
+// How often a modal loop's timer takes a turn: under a 60 Hz frame.
+constexpr CFTimeInterval kModalTurn = 0.008;
 
 // AppKit's events, for plugins that open panels or alerts: they queue on
 // the run loop and wait for someone to hand them out.
@@ -57,6 +61,11 @@ RunLoopPump::RunLoopPump(EventLoop& loop) : loop_(loop), impl_(std::make_unique<
                                              OnQueueReady, nullptr);
   impl_->source = CFFileDescriptorCreateRunLoopSource(kCFAllocatorDefault, impl_->descriptor, 0);
   CFRunLoopAddSource(CFRunLoopGetMain(), impl_->source, kCFRunLoopDefaultMode);
+  CFRunLoopTimerContext context = {0, this, nullptr, nullptr, nullptr};
+  impl_->modal_timer = CFRunLoopTimerCreate(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent(),
+                                            kModalTurn, 0, 0, OnModalTimer, &context);
+  CFRunLoopAddTimer(CFRunLoopGetMain(), impl_->modal_timer,
+                    (__bridge CFStringRef)NSModalPanelRunLoopMode);
   loop_.SetWaiter([this](pollfd* fds, size_t count, int timeout_ms) {
     return Wait(fds, count, timeout_ms);
   });
@@ -64,6 +73,10 @@ RunLoopPump::RunLoopPump(EventLoop& loop) : loop_(loop), impl_(std::make_unique<
 
 RunLoopPump::~RunLoopPump() {
   loop_.SetWaiter(nullptr);
+  if (impl_->modal_timer != nullptr) {
+    CFRunLoopTimerInvalidate(impl_->modal_timer);
+    CFRelease(impl_->modal_timer);
+  }
   if (impl_->source != nullptr) {
     CFRunLoopRemoveSource(CFRunLoopGetMain(), impl_->source, kCFRunLoopDefaultMode);
     CFRelease(impl_->source);
@@ -83,7 +96,19 @@ int RunLoopPump::Wait(pollfd* fds, size_t count, int timeout_ms) {
   }
 }
 
+void RunLoopPump::OnModalTimer(CFRunLoopTimerRef, void* info) {
+  auto* pump = static_cast<RunLoopPump*>(info);
+  if (pump->turning_ || !pump->turn_) return;
+  pump->turning_ = true;
+  @autoreleasepool {
+    pump->turn_();
+  }
+  pump->turning_ = false;
+}
+
 int RunLoopPump::Turn(pollfd* fds, size_t count, int timeout_ms) {
+  // A turn from the modal timer: the descriptors now, nothing else.
+  if (turning_) return poll(fds, count, 0);
   // Ready already, or not to wait: turn the run loop once without blocking
   // so the main queue keeps moving while the loop is busy.
   int ready = poll(fds, count, 0);

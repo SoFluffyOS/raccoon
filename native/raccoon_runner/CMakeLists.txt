@@ -242,7 +242,7 @@ if(APPLE)
     target_compile_options(raccoon_echo PRIVATE -fobjc-arc -F${RACCOON_FLUTTER_MACOS_DIR})
     target_link_options(raccoon_echo PRIVATE -F${RACCOON_FLUTTER_MACOS_DIR})
     target_link_libraries(raccoon_echo PRIVATE
-      "-framework FlutterMacOS" "-framework Foundation" "-framework CoreVideo")
+      "-framework FlutterMacOS" "-framework AppKit" "-framework CoreVideo")
   else()
     message(STATUS "No FlutterMacOS.framework in the SDK cache: example plugin skipped")
   endif()

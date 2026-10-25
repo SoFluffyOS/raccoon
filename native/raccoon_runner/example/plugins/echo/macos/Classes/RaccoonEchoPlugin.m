@@ -3,7 +3,7 @@
 // messenger. The answer comes from the main queue, so it proves the host
 // turns the main run loop. The `texture` method registers a pixel-buffer
 // texture of one colour, so a texture's way through the host's renderer can
-// be seen too.
+// be seen too, and the `modal` method runs a modal loop for a while.
 #import "RaccoonEchoPlugin.h"
 
 #import <CoreVideo/CoreVideo.h>
@@ -108,6 +108,31 @@
       dispatch_resume(_timer);
     }
     result(@(_textureId));
+    return;
+  }
+  if ([call.method isEqualToString:@"modal"]) {
+    // A modal window that closes itself after the given milliseconds, as a
+    // panel a user dismisses would: its run loop holds the main thread's
+    // until then. Out of sight, and never key.
+    const double ms = [call.arguments isKindOfClass:[NSNumber class]]
+                          ? [call.arguments doubleValue]
+                          : 1000;
+    NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(-10000, -10000, 1, 1)
+                                                   styleMask:NSWindowStyleMaskBorderless
+                                                     backing:NSBackingStoreBuffered
+                                                       defer:YES];
+    window.releasedWhenClosed = NO;
+    window.alphaValue = 0;
+    // A timer, not an event, ends it: stopModal would wait for an event.
+    NSTimer* timer = [NSTimer timerWithTimeInterval:ms / 1000
+                                            repeats:NO
+                                              block:^(NSTimer* t) {
+                                                [NSApp abortModal];
+                                              }];
+    [[NSRunLoop currentRunLoop] addTimer:timer forMode:NSModalPanelRunLoopMode];
+    [NSApp runModalForWindow:window];
+    [window close];
+    result(@YES);
     return;
   }
   result(FlutterMethodNotImplemented);
