@@ -115,6 +115,12 @@ void main() {
     expect(StartupFailure.tells('flutter: loading 3 of 9'), isFalse);
   });
 
+  test('a bare exception marker leaves the text to the next line', () {
+    expect(StartupFailure.leavesTextToNext('Unhandled exception:'), isTrue);
+    expect(StartupFailure.leavesTextToNext(_log[2]), isFalse);
+    expect(StartupFailure.leavesTextToNext('Bad state: boom'), isFalse);
+  });
+
   test('a log that tells of nothing gone wrong is no failure', () {
     expect(
       StartupFailure.fromLog([

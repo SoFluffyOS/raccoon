@@ -207,6 +207,8 @@ final class RunnerClient
   }
 
   final _startupLog = ListQueue<String>();
+  // The line before marked an exception and left its text to this one.
+  var _textNext = false;
   StartupFailure? _startupFailure;
   Timer? _startupTimer;
   final _startupChanges = StreamController<StartupFailure?>.broadcast();
@@ -300,7 +302,8 @@ final class RunnerClient
         // a lot before its first frame dearly (#163). A line that can't tell
         // of a failure changes nothing: before a report the grace timer
         // reads the log anew anyway.
-        if (StartupFailure.tells(line)) _readStartup();
+        if (StartupFailure.tells(line) || _textNext) _readStartup();
+        _textNext = StartupFailure.leavesTextToNext(line);
       }
       if (message.hasPlatformMessage()) {
         unawaited(_servePlatformMessage(message.platformMessage));

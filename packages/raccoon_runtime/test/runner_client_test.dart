@@ -112,6 +112,25 @@ void main() {
     temp.deleteSync(recursive: true);
   });
 
+  test(
+    'a report takes the exception the Dart VM prints on the next line',
+    () async {
+      // A failure reported for a channel, then the VM's own form: the
+      // marker alone, the text on the line after, no stack.
+      runner.log(_unanswered);
+      await client.startupFailures
+          .firstWhere((failure) => failure != null)
+          .timeout(const Duration(seconds: 5));
+      runner
+        ..log('Unhandled exception:')
+        ..log('Bad state: boom');
+      final failure = await client.startupFailures
+          .firstWhere((failure) => failure?.exception == 'Bad state: boom')
+          .timeout(const Duration(seconds: 5));
+      expect(failure?.exception, 'Bad state: boom');
+    },
+  );
+
   test('an app that logs a lot before its first frame costs little to '
       'follow', () async {
     // #163: every line read the whole startup window again, two regexes

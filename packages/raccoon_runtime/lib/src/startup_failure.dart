@@ -171,6 +171,11 @@ final class StartupFailure {
       _unhandled.hasMatch(line) ||
       _isStackLine(line);
 
+  /// Whether [line] marks an unhandled exception and leaves its text to the
+  /// next line, as the Dart VM's own form does: that line tells too.
+  static bool leavesTextToNext(String line) =>
+      (_unhandled.firstMatch(line)?.group(1) ?? 'x').trim().isEmpty;
+
   static bool _isStackLine(String line) {
     final text = line.trim();
     return text.startsWith('#') || text == '<asynchronous suspension>';

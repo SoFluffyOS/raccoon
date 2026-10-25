@@ -4021,7 +4021,20 @@ void main() {
       );
       try {
         for (final mode in ['', '--never-ask']) {
-          final client = await RunnerClient.connect(endpoint, gpuBuffers: true);
+          // The runner may not have seen the last client go yet, and
+          // answers Busy until it has.
+          late RunnerClient client;
+          for (var attempt = 0; ; attempt++) {
+            client = await RunnerClient.connect(endpoint, gpuBuffers: true);
+            try {
+              await client.hello;
+              break;
+            } on RunnerBusy {
+              await client.close();
+              if (attempt == 20) rethrow;
+              await Future<void>.delayed(const Duration(milliseconds: 50));
+            }
+          }
           final set = await client.gpuBufferSets.first.timeout(
             const Duration(seconds: 10),
           );
