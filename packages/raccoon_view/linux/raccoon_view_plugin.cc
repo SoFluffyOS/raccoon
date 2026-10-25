@@ -25,11 +25,13 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -56,6 +58,8 @@ struct Imported {
   // The GL context the textures were made in: another engine's window may
   // not share it.
   EGLContext context = EGL_NO_CONTEXT;
+  // The plugin instance, one per engine, whose texture imported it.
+  uint64_t owner = 0;
   uint32_t generation = 0;
   uint32_t width = 0;
   uint32_t height = 0;
@@ -86,10 +90,47 @@ void destroy_set(Imported& imported) {
 std::mutex graveyard_mutex;
 std::vector<std::unique_ptr<Imported>> graveyard;
 
+// Plugin instances gone, with their engines and GL contexts. Graveyard mutex.
+std::set<uint64_t> gone_owners;
+
+// Lets go of |imported|'s EGL images only: its context is gone, and its
+// texture names with it; deleting them in another context would delete
+// that one's.
+void release_images(Imported& imported) {
+  const auto destroy_image = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(
+      eglGetProcAddress("eglDestroyImageKHR"));
+  for (EGLImageKHR image : imported.images) {
+    if (image != EGL_NO_IMAGE_KHR && destroy_image != nullptr) {
+      destroy_image(imported.display, image);
+    }
+  }
+  imported.images.clear();
+  imported.textures.clear();
+}
+
 void bury(std::unique_ptr<Imported> imported) {
   if (!imported) return;
   std::lock_guard<std::mutex> lock(graveyard_mutex);
+  if (gone_owners.count(imported->owner) != 0) {
+    release_images(*imported);
+    return;
+  }
   graveyard.push_back(std::move(imported));
+}
+
+// |owner|'s engine is gone: its sets leave the graveyard, so a new context
+// at the same address never takes them for its own.
+void forget_owner(uint64_t owner) {
+  std::lock_guard<std::mutex> lock(graveyard_mutex);
+  gone_owners.insert(owner);
+  for (auto it = graveyard.begin(); it != graveyard.end();) {
+    if ((*it)->owner == owner) {
+      release_images(**it);
+      it = graveyard.erase(it);
+    } else {
+      ++it;
+    }
+  }
 }
 
 // Raster thread, context current: deletes the sets made in it.
@@ -121,6 +162,8 @@ struct _RaccoonGpuTexture {
   FlTextureGL parent_instance;
   // Marks a frame available, for a set that comes after its frame was named.
   FlTextureRegistrar* registrar;
+  // The plugin instance it belongs to.
+  uint64_t owner;
   std::mutex* mutex;
   // The set waiting to be imported, and the one imported, in Flutter's GL
   // context, which only populate sees.
@@ -309,6 +352,7 @@ static gboolean import_pending(RaccoonGpuTexture* self, GError** error) {
   auto imported = std::make_unique<Imported>();
   imported->display = self->display;
   imported->context = eglGetCurrentContext();
+  imported->owner = self->owner;
   imported->generation = set->generation;
   imported->width = set->width;
   imported->height = set->height;
@@ -447,6 +491,7 @@ static void raccoon_gpu_texture_class_init(RaccoonGpuTextureClass* klass) {
 
 static void raccoon_gpu_texture_init(RaccoonGpuTexture* self) {
   self->registrar = nullptr;
+  self->owner = 0;
   self->mutex = new std::mutex();
   self->shown_generation = 0;
   self->shown_index = -1;
@@ -617,6 +662,8 @@ static bool connect_socket(RaccoonGpuTexture* self, const std::string& path) {
 
 struct _RaccoonViewPlugin {
   GObject parent_instance;
+  // Tells this instance's rings from another engine's.
+  uint64_t id;
   FlTextureRegistrar* registrar;
   std::map<int64_t, RaccoonGpuTexture*>* textures;
 };
@@ -648,6 +695,7 @@ static void raccoon_view_plugin_handle_method_call(RaccoonViewPlugin* self,
     } else {
       const int64_t id = fl_texture_get_id(FL_TEXTURE(texture));
       texture->registrar = self->registrar;
+      texture->owner = self->id;
       (*self->textures)[id] = texture;
       g_autoptr(FlValue) result = fl_value_new_int(id);
       response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
@@ -715,13 +763,19 @@ static void raccoon_view_plugin_handle_method_call(RaccoonViewPlugin* self,
 
 static void raccoon_view_plugin_dispose(GObject* object) {
   RaccoonViewPlugin* self = RACCOON_VIEW_PLUGIN(object);
-  // C++14, as Flutter's Linux template builds plugins.
-  for (auto& entry : *self->textures) {
-    fl_texture_registrar_unregister_texture(self->registrar, FL_TEXTURE(entry.second));
-    g_object_unref(entry.second);
+  // GObject may dispose twice.
+  if (self->textures != nullptr) {
+    // C++14, as Flutter's Linux template builds plugins.
+    for (auto& entry : *self->textures) {
+      fl_texture_registrar_unregister_texture(self->registrar, FL_TEXTURE(entry.second));
+      g_object_unref(entry.second);
+    }
+    delete self->textures;
+    self->textures = nullptr;
+    // The engine goes with it: its rings' GL names are gone with its
+    // context.
+    forget_owner(self->id);
   }
-  delete self->textures;
-  self->textures = nullptr;
   G_OBJECT_CLASS(raccoon_view_plugin_parent_class)->dispose(object);
 }
 
@@ -730,6 +784,8 @@ static void raccoon_view_plugin_class_init(RaccoonViewPluginClass* klass) {
 }
 
 static void raccoon_view_plugin_init(RaccoonViewPlugin* self) {
+  static std::atomic<uint64_t> next_id{1};
+  self->id = next_id++;
   self->textures = new std::map<int64_t, RaccoonGpuTexture*>();
 }
 
