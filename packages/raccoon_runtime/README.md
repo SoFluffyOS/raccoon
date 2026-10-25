@@ -11,8 +11,15 @@ as buffer indices, no pixels; `releaseGpuBuffer` gives one back. What
 imports the buffers rides a second socket for a native host side: file
 descriptors on Linux, which Dart cannot hold, IOSurfaces by Mach port (or
 ID) on macOS, and D3D11 shared handles on Windows. `raccoon_view` has the
-host sides. A frame the runner cannot put
-in a buffer still comes with pixels.
+host sides. A frame the runner cannot put in a buffer still comes with
+pixels.
+
+Pixel frames come through shared memory where the socket carries file
+descriptors (Linux and macOS), and the client reads each into a new buffer.
+With `reusePixels: true` it reads them into three buffers it keeps instead:
+about a quarter of a core less at a phone's size and 60 fps, but a frame's
+pixels then hold only until the third frame after it, so a consumer that
+keeps them longer copies them. `raccoon_view` copies what it shows.
 
 An app that stops before its first frame, such as one whose `main()` awaits
 a plugin with no implementation on this host, shows up as
