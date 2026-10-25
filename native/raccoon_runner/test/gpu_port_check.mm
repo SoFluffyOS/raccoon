@@ -174,7 +174,15 @@ int main(int argc, char** argv) {
       }
       if (never_ask) {
         mach_port_deallocate(mach_task_self(), port);
-        if (!global) return Fail("a ring went private with no ask");
+        // The ring re-announced may still be the one a client before this
+        // one made private: the switch back to global takes the next frame.
+        // What counts is that a global ring comes and no private one after.
+        if (!global) {
+          if (global_since != std::chrono::steady_clock::time_point{}) {
+            return Fail("a ring went private with no ask");
+          }
+          continue;
+        }
         if (global_since == std::chrono::steady_clock::time_point{}) {
           global_since = std::chrono::steady_clock::now();
         }
