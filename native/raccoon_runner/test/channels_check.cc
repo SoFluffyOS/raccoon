@@ -139,6 +139,52 @@ int CheckCodec() {
   return 0;
 }
 
+// The answer to |method| on |channel| with no arguments, decoded.
+CodecValue Ask(raccoon::WindowChannels& windows, const char* channel, const char* method) {
+  const std::vector<uint8_t> data = raccoon::EncodeMethodCall(method, CodecValue());
+  std::vector<uint8_t> reply;
+  windows.Handle(channel, data.data(), data.size(), &reply);
+  // A success envelope is 0 (which also encodes null), then the result,
+  // aligned from the envelope's start. Eight bytes before it, a list of
+  // eight and six nulls, make it one list without moving that alignment:
+  // its last item is the result.
+  if (reply.empty() || reply[0] != 0) return CodecValue();
+  std::vector<uint8_t> list = {12, 8, 0, 0, 0, 0, 0, 0};
+  list.insert(list.end(), reply.begin(), reply.end());
+  CodecValue items;
+  if (!raccoon::DecodeValue(list.data(), list.size(), &items) || items.items().size() != 8) {
+    return CodecValue();
+  }
+  return items.items().back();
+}
+
+// Every window plugin and screen_retriever see the view's logical size,
+// whatever its size and ratio.
+int CheckWindowSizes() {
+  raccoon::WindowChannels windows;
+  for (int i = 0; i < 2000; ++i) {
+    const size_t width = 1 + rng() % 4000;
+    const size_t height = 1 + rng() % 4000;
+    const double ratios[] = {1.0, 1.5, 2.0, 3.0};
+    const double ratio = ratios[rng() % 4];
+    windows.SetViewSize(width, height, ratio);
+    const double logical_width = width / ratio;
+    const double logical_height = height / ratio;
+    const CodecValue size = Ask(windows, "desktop_window", "getWindowSize");
+    const CodecValue display =
+        Ask(windows, "dev.leanflutter.plugins/screen_retriever", "getPrimaryDisplay");
+    const CodecValue& display_size = display.Get("size");
+    if (size.items().size() != 2 || size.items()[0].AsDouble(-1) != logical_width ||
+        size.items()[1].AsDouble(-1) != logical_height ||
+        display_size.Get("width").AsDouble(-1) != logical_width ||
+        display_size.Get("height").AsDouble(-1) != logical_height ||
+        display.Get("scaleFactor").AsDouble(-1) != ratio) {
+      return Fail("a window or display size that is not the view's");
+    }
+  }
+  return 0;
+}
+
 int CheckWindowChannels() {
   static const char* channels[] = {"desktop_window", "window_manager", "flutter/windowsize",
                                    "dev.leanflutter.plugins/screen_retriever", "screen_retriever",
@@ -344,7 +390,8 @@ int CheckTextInput() {
 
 int main() {
   try {
-    if (CheckCodec() != 0 || CheckWindowChannels() != 0 || CheckSecureStorage() != 0 ||
+    if (CheckCodec() != 0 || CheckWindowChannels() != 0 || CheckWindowSizes() != 0 ||
+        CheckSecureStorage() != 0 ||
         CheckUserDefaults() != 0 || CheckTextInput() != 0) {
       return 1;
     }
