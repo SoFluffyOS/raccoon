@@ -2768,6 +2768,61 @@ void main() {
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
+  test(
+    'a client that reuses its pixel buffers gets the frames all the same',
+    () async {
+      // With reusePixels, frames from shared buffers land in three buffers
+      // the client keeps: the fourth frame's is the first's again.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final spinAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'spin',
+        'build',
+        'flutter_assets',
+      );
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: spinAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint, reusePixels: true);
+      try {
+        final shared = await client.frames
+            .where(
+              (frame) => client.sharedFrames > 0 && frame.pixels.isNotEmpty,
+            )
+            .skip(2)
+            .take(4)
+            .toList()
+            .timeout(const Duration(seconds: 15));
+        expect(shared.last.pixels.any((byte) => byte != 0), isTrue);
+        // The same memory: a write to the first frame's pixels shows in the
+        // fourth's, not in the second's.
+        final first = shared[0].pixels as Uint8List;
+        final before = [shared[1].pixels[0], shared[3].pixels[0]];
+        first[0] = before[1] ^ 0xff;
+        expect(shared[3].pixels[0], before[1] ^ 0xff);
+        expect(shared[1].pixels[0], before[0]);
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((ready, Platform.isWindows)) {
+      (false, _) => 'build the runner and example first',
+      (_, true) => 'shared buffers are Unix sockets',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   // #146: a single message past the unread limit, a 4K frame inline, let
   // a client go that was reading.
   test(

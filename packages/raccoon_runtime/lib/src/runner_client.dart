@@ -24,6 +24,7 @@ final class RunnerClient
     required this.composes,
     required this.gpuBuffers,
     required this.startupGrace,
+    required this.reusePixels,
   }) {
     _subscription = _transport.inbound.listen(
       _onInbound,
@@ -53,17 +54,36 @@ final class RunnerClient
   ///
   /// [startupGrace] is how long a failure in the app's log may go without a
   /// frame before [startupFailure] reports it.
+  ///
+  /// With [reusePixels], see the field.
   static Future<RunnerClient> connect(
     RunnerEndpoint endpoint, {
     bool composes = false,
     bool gpuBuffers = false,
     Duration startupGrace = defaultStartupGrace,
+    bool reusePixels = false,
   }) async => RunnerClient._(
     await RunnerTransport.connect(endpoint),
     composes: composes,
     gpuBuffers: gpuBuffers,
     startupGrace: startupGrace,
+    reusePixels: reusePixels,
   );
+
+  /// Whether a frame from a shared buffer is read into one of
+  /// [reusedPixelBuffers] buffers the client keeps per frame size, rather
+  /// than a new one: its [Frame.pixels] then hold until that many frames
+  /// later, and a consumer that keeps pixels longer copies them. A new
+  /// buffer a frame costs its allocation, zeroing and collection, about a
+  /// quarter of a core at a phone's size and 60 fps; off by default, as
+  /// pixels stay valid for as long as the frame is held.
+  final bool reusePixels;
+
+  /// How many frames [reusePixels] keeps a buffer for.
+  static const reusedPixelBuffers = 3;
+
+  final _pixelBuffers = <Uint8List>[];
+  var _nextPixelBuffer = 0;
 
   /// See [startupGrace].
   static const defaultStartupGrace = Duration(seconds: 1);
@@ -417,7 +437,14 @@ final class RunnerClient
       return null;
     }
     final file = _buffers[index]..setPositionSync(0);
-    final pixels = file.readSync(frame.rowBytes * frame.height);
+    final length = frame.rowBytes * frame.height;
+    final Uint8List pixels;
+    if (reusePixels) {
+      final buffer = _pixelBuffer(length);
+      pixels = Uint8List.sublistView(buffer, 0, file.readIntoSync(buffer));
+    } else {
+      pixels = file.readSync(length);
+    }
     _releaseShared(index);
     _sharedFrames++;
     // The frame of a message parsed just now, nobody's but this one's:
@@ -425,6 +452,19 @@ final class RunnerClient
     return frame
       ..pixels = pixels
       ..inSharedBuffer = false;
+  }
+
+  /// The next of [reusedPixelBuffers] buffers of [length] bytes; a new set
+  /// when the size changed.
+  Uint8List _pixelBuffer(int length) {
+    if (_pixelBuffers.isEmpty || _pixelBuffers.first.length != length) {
+      _pixelBuffers
+        ..clear()
+        ..addAll(List.generate(reusedPixelBuffers, (_) => Uint8List(length)));
+    }
+    final buffer = _pixelBuffers[_nextPixelBuffer % reusedPixelBuffers];
+    _nextPixelBuffer++;
+    return buffer;
   }
 
   void _releaseShared(int index) => send(
