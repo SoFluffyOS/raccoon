@@ -1968,6 +1968,79 @@ void main() {
             : 'build the runner and example/views first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
+  test(
+    'an app that only calls runApp draws in every view from the views entry',
+    () async {
+      // example/hello as it is, built through the generated entry point.
+      final temp = Directory.systemTemp.createTempSync('raccoon_entry');
+      final app = Directory(p.join(temp.path, 'hello'))..createSync();
+      final hello = p.join(runnerDir, 'example', 'hello');
+      for (final file in [
+        'pubspec.yaml',
+        'pubspec.lock',
+        p.join('lib', 'main.dart'),
+        p.join('.dart_tool', 'package_config.json'),
+      ]) {
+        final copy = File(p.join(app.path, file))
+          ..parent.createSync(recursive: true);
+        File(p.join(hello, file)).copySync(copy.path);
+      }
+      try {
+        final entry = ViewsEntrypoint.write(app.path);
+        expect(entry, p.join(app.path, ViewsEntrypoint.path));
+        final target = switch (Platform.operatingSystem) {
+          'macos' => 'darwin',
+          'windows' => 'windows-x64',
+          _ when Platform.version.contains('arm64') => 'linux-arm64',
+          _ => 'linux-x64',
+        };
+        final build = await Process.run(
+          p.join(sdk!, 'bin', Platform.isWindows ? 'flutter.bat' : 'flutter'),
+          ['build', 'bundle', '-t', entry!, '--target-platform=$target'],
+          workingDirectory: app.path,
+          runInShell: Platform.isWindows,
+        );
+        expect(build.exitCode, 0, reason: '${build.stdout}${build.stderr}');
+        final out = p.join(temp.path, 'frame.ppm');
+        final render = await Process.run(binary!, [
+          'render',
+          '--engine-dir',
+          engineDir!,
+          '--assets',
+          p.join(app.path, 'build', 'flutter_assets'),
+          '--icu',
+          icu!,
+          '--view',
+          '600x400@1',
+          '--out',
+          out,
+        ]);
+        expect(render.exitCode, 0, reason: '${render.stderr}');
+        for (final (file, width) in [
+          (out, 800),
+          (p.join(temp.path, 'frame.view1.ppm'), 600),
+        ]) {
+          final bytes = File(file).readAsBytesSync();
+          // P6, width, height, 255, then RGB from the first pixel.
+          final header = String.fromCharCodes(
+            bytes.take(32),
+          ).split(RegExp(r'\s+'));
+          expect(int.parse(header[1]), width);
+          final start =
+              '${header[0]}\n${header[1]} ${header[2]}\n${header[3]}\n'.length;
+          expect((
+            r: bytes[start],
+            g: bytes[start + 1],
+            b: bytes[start + 2],
+          ), _blue);
+        }
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready && sdk != null ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
   final channelsAssets = p.join(
     runnerDir,
     'example',
