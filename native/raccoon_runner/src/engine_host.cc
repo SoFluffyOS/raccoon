@@ -885,6 +885,8 @@ void EngineHost::Shutdown() {
 #endif
   loader_.procs().Shutdown(engine_);
   engine_ = nullptr;
+  // A task still queued must not run on the engine now gone.
+  platform_->SetEngine(nullptr);
   if (gpu_) gpu_->Shutdown();
 }
 

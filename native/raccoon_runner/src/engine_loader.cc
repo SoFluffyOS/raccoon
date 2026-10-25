@@ -52,8 +52,6 @@ void* Symbol(void* handle, const char* name) {
   return reinterpret_cast<void*>(GetProcAddress(static_cast<HMODULE>(handle), name));
 }
 
-void CloseLibrary(void* handle) { FreeLibrary(static_cast<HMODULE>(handle)); }
-
 #else
 
 void* OpenLibrary(const std::string& path, std::string* error) {
@@ -64,15 +62,13 @@ void* OpenLibrary(const std::string& path, std::string* error) {
 
 void* Symbol(void* handle, const char* name) { return dlsym(handle, name); }
 
-void CloseLibrary(void* handle) { dlclose(handle); }
-
 #endif
 
 }  // namespace
 
-EngineLoader::~EngineLoader() {
-  if (handle_ != nullptr) CloseLibrary(handle_);
-}
+// The library stays loaded: the Dart VM outlives the engine's shutdown, and
+// its threads may still run code from it while the process exits.
+EngineLoader::~EngineLoader() = default;
 
 bool EngineLoader::Load(const std::string& engine_dir, std::string* error) {
   const std::string path = engine_dir + "/" + kEngineLibrary;
