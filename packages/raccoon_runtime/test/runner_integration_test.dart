@@ -3286,7 +3286,10 @@ void main() {
           0,
         );
         var socket = await view();
-        await Future<void>.delayed(const Duration(milliseconds: 500));
+        await Future<void>.delayed(const Duration(seconds: 1));
+        // The rate before the tab hid: a slow machine (CI's x64 Mac) draws
+        // well under 60 a second.
+        final before = gpuFrames;
         releasing = false;
         previous = null;
         socket.destroy();
@@ -3294,10 +3297,13 @@ void main() {
         releasing = true;
         gpuFrames = 0;
         socket = await view();
-        await Future<void>.delayed(const Duration(seconds: 2));
+        await Future<void>.delayed(const Duration(seconds: 1));
         socket.destroy();
         await frames.cancel();
-        expect(gpuFrames, greaterThan(30));
+        printOnFailure('GPU frames a second: $before before, $gpuFrames after');
+        // With the ring left full, none came at all.
+        expect(gpuFrames, greaterThan(0));
+        expect(gpuFrames, greaterThanOrEqualTo(before ~/ 2));
       } finally {
         client.shutdown();
         await client.close();
