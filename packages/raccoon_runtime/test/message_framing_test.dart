@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:raccoon_runtime/raccoon_runtime.dart';
@@ -61,5 +62,36 @@ void main() {
     expect(unframer.add(framed.sublist(5)), [
       [7, 8, 9],
     ]);
+  });
+
+  test('any split of a stream gives back its messages, whole and in order', () {
+    // Messages of every size class (empty, small, past a socket read),
+    // cut at random places, a fixed seed so a failure repeats.
+    final random = Random(20261025);
+    for (var round = 0; round < 200; round++) {
+      final messages = [
+        for (var i = 0; i < 1 + random.nextInt(8); i++)
+          Uint8List.fromList(
+            List.generate(
+              [0, 1, 3, 255, 4096, 70000][random.nextInt(6)],
+              (k) => (k * 7 + i) & 0xff,
+            ),
+          ),
+      ];
+      final stream = [for (final m in messages) ...MessageFraming.frame(m)];
+      final unframer = MessageUnframer();
+      final out = <Uint8List>[];
+      var at = 0;
+      while (at < stream.length) {
+        final take = 1 + random.nextInt(9000);
+        final end = at + take > stream.length ? stream.length : at + take;
+        out.addAll(unframer.add(stream.sublist(at, end)));
+        at = end;
+      }
+      expect(out.length, messages.length, reason: 'round $round');
+      for (var i = 0; i < messages.length; i++) {
+        expect(out[i], messages[i], reason: 'round $round, message $i');
+      }
+    }
   });
 }
