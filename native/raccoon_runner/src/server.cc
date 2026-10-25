@@ -74,6 +74,12 @@ int OpenListenSocket() {
   return fd;
 }
 
+// A Unix socket on macOS takes 8 KB a write by default, so a frame sent
+// inline went out in hundreds of writes, each after the loop woke for the
+// socket. With room for a phone-sized frame it goes in a few. The kernel
+// holds only what is unread; nothing is set aside.
+constexpr int kSendBuffer = 4 << 20;
+
 int AcceptClient(int listen_fd) {
   const int fd = accept(listen_fd, nullptr, nullptr);
   if (fd < 0) return fd;
@@ -84,6 +90,8 @@ int AcceptClient(int listen_fd) {
     close(fd);
     return -1;
   }
+  // Best effort: a smaller buffer only costs writes.
+  setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &kSendBuffer, sizeof(kSendBuffer));
   return fd;
 }
 
