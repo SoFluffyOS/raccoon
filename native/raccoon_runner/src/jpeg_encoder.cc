@@ -1,7 +1,10 @@
 #include "jpeg_encoder.h"
 
 #include <algorithm>
-#include <cmath>
+
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 
 namespace raccoon {
 
@@ -96,41 +99,41 @@ class BitWriter {
  public:
   explicit BitWriter(std::vector<uint8_t>* out) : out_(out) {}
 
+  // Writes the low |count| bits of |bits|, at most 32, high bit first.
   void Write(uint32_t bits, int count) {
-    for (int i = count - 1; i >= 0; --i) {
-      byte_ = static_cast<uint8_t>((byte_ << 1) | ((bits >> i) & 1));
-      if (++filled_ == 8) Flush();
+    buffer_ = (buffer_ << count) | (bits & ((uint64_t{1} << count) - 1));
+    filled_ += count;
+    while (filled_ >= 8) {
+      filled_ -= 8;
+      const auto byte = static_cast<uint8_t>(buffer_ >> filled_);
+      out_->push_back(byte);
+      // A 0xFF in the data is followed by a zero, so it reads as no marker.
+      if (byte == 0xFF) out_->push_back(0);
     }
   }
 
   // Pads the last byte with ones, as the standard asks.
   void Finish() {
-    while (filled_ != 0) Write(1, 1);
+    if (filled_ != 0) Write(0xFF, 8 - filled_);
   }
 
  private:
-  void Flush() {
-    out_->push_back(byte_);
-    // A 0xFF in the data is followed by a zero, so it reads as no marker.
-    if (byte_ == 0xFF) out_->push_back(0);
-    byte_ = 0;
-    filled_ = 0;
-  }
-
   std::vector<uint8_t>* out_;
-  uint8_t byte_ = 0;
+  uint64_t buffer_ = 0;
   int filled_ = 0;
 };
 
 // The number of bits |value|'s magnitude takes: its category.
 int Category(int value) {
-  int magnitude = value < 0 ? -value : value;
-  int bits = 0;
-  while (magnitude != 0) {
-    ++bits;
-    magnitude >>= 1;
-  }
-  return bits;
+  const auto magnitude = static_cast<unsigned long>(value < 0 ? -value : value);
+  if (magnitude == 0) return 0;
+#if defined(_MSC_VER)
+  unsigned long top;
+  _BitScanReverse(&top, magnitude);
+  return static_cast<int>(top) + 1;
+#else
+  return static_cast<int>(sizeof(unsigned long) * 8) - __builtin_clzl(magnitude);
+#endif
 }
 
 // A value of its category's bits: negative values as their ones' complement.
@@ -139,72 +142,103 @@ uint32_t Amplitude(int value, int category) {
   return static_cast<uint32_t>(bits) & ((1u << category) - 1);
 }
 
-class BlockEncoder {
- public:
-  BlockEncoder() {
+// Writes |symbol|'s code and then |count| extra bits, in one go: a code
+// takes at most 16 bits and the extra bits at most 11.
+void WriteCoded(const HuffmanTable& table, int symbol, uint32_t extra, int count,
+                BitWriter* writer) {
+  writer->Write((uint32_t{table.code[symbol]} << count) | extra, table.length[symbol] + count);
+}
+
+// The scale of the DCT below in each direction: libjpeg's
+// aanscalefactor, cos(k * pi / 16) * sqrt(2) and 1 for k = 0.
+constexpr float kAanScale[8] = {1.0f,         1.387039845f, 1.306562965f, 1.175875602f,
+                                1.0f,         0.785694958f, 0.541196100f, 0.275899379f};
+
+// One 8-point DCT in place, |step| apart: the AAN algorithm, as libjpeg's
+// jfdctflt.c has it. Over rows and columns, output (u, v) comes out scaled
+// by kAanScale[u] * kAanScale[v] * 8; the quantization divides that out.
+void Dct8(float* d, int step) {
+  const float tmp0 = d[0] + d[7 * step];
+  const float tmp7 = d[0] - d[7 * step];
+  const float tmp1 = d[step] + d[6 * step];
+  const float tmp6 = d[step] - d[6 * step];
+  const float tmp2 = d[2 * step] + d[5 * step];
+  const float tmp5 = d[2 * step] - d[5 * step];
+  const float tmp3 = d[3 * step] + d[4 * step];
+  const float tmp4 = d[3 * step] - d[4 * step];
+
+  const float tmp10 = tmp0 + tmp3;
+  const float tmp13 = tmp0 - tmp3;
+  const float tmp11 = tmp1 + tmp2;
+  const float tmp12 = tmp1 - tmp2;
+  d[0] = tmp10 + tmp11;
+  d[4 * step] = tmp10 - tmp11;
+  const float z1 = (tmp12 + tmp13) * 0.707106781f;
+  d[2 * step] = tmp13 + z1;
+  d[6 * step] = tmp13 - z1;
+
+  const float odd10 = tmp4 + tmp5;
+  const float odd11 = tmp5 + tmp6;
+  const float odd12 = tmp6 + tmp7;
+  const float z5 = (odd10 - odd12) * 0.382683433f;
+  const float z2 = 0.541196100f * odd10 + z5;
+  const float z4 = 1.306562965f * odd12 + z5;
+  const float z3 = odd11 * 0.707106781f;
+  const float z11 = tmp7 + z3;
+  const float z13 = tmp7 - z3;
+  d[5 * step] = z13 + z2;
+  d[3 * step] = z13 - z2;
+  d[step] = z11 + z4;
+  d[7 * step] = z11 - z4;
+}
+
+// What each of the DCT's outputs is multiplied by to quantize it: one over
+// the quantizer and the DCT's own scale.
+void QuantScale(const uint8_t quant[64], float out[64]) {
+  for (int v = 0; v < 8; ++v) {
     for (int u = 0; u < 8; ++u) {
-      for (int x = 0; x < 8; ++x) {
-        cosines_[u][x] = std::cos((2 * x + 1) * u * 3.14159265358979323846 / 16);
-      }
+      out[v * 8 + u] = 1.0f / (quant[v * 8 + u] * kAanScale[v] * kAanScale[u] * 8.0f);
     }
   }
+}
 
-  // Transforms, quantizes and writes one 8x8 block of samples, level
-  // shifted; |previous_dc| is the component's last DC value.
-  void Encode(const float samples[64], const uint8_t quant[64], const HuffmanTable& dc,
-              const HuffmanTable& ac, int* previous_dc, BitWriter* writer) const {
-    // Rows, then columns.
-    double rows[64];
-    for (int y = 0; y < 8; ++y) {
-      for (int u = 0; u < 8; ++u) {
-        double sum = 0;
-        for (int x = 0; x < 8; ++x) sum += samples[y * 8 + x] * cosines_[u][x];
-        rows[y * 8 + u] = sum;
-      }
-    }
-    int coefficients[64];
-    for (int v = 0; v < 8; ++v) {
-      for (int u = 0; u < 8; ++u) {
-        double sum = 0;
-        for (int y = 0; y < 8; ++y) sum += rows[y * 8 + u] * cosines_[v][y];
-        const double cu = u == 0 ? 1 / std::sqrt(2.0) : 1;
-        const double cv = v == 0 ? 1 / std::sqrt(2.0) : 1;
-        const double value = sum * cu * cv / 4;
-        coefficients[v * 8 + u] = static_cast<int>(std::lround(value / quant[v * 8 + u]));
-      }
-    }
-
-    const int diff = coefficients[0] - *previous_dc;
-    *previous_dc = coefficients[0];
-    const int dc_category = Category(diff);
-    writer->Write(dc.code[dc_category], dc.length[dc_category]);
-    writer->Write(Amplitude(diff, dc_category), dc_category);
-
-    int zeros = 0;
-    for (int i = 1; i < 64; ++i) {
-      const int value = coefficients[kZigzag[i]];
-      if (value == 0) {
-        ++zeros;
-        continue;
-      }
-      // Sixteen zeros at a time, as ZRL.
-      while (zeros >= 16) {
-        writer->Write(ac.code[0xF0], ac.length[0xF0]);
-        zeros -= 16;
-      }
-      const int category = Category(value);
-      const int symbol = (zeros << 4) | category;
-      writer->Write(ac.code[symbol], ac.length[symbol]);
-      writer->Write(Amplitude(value, category), category);
-      zeros = 0;
-    }
-    // End of block, for trailing zeros.
-    if (zeros > 0) writer->Write(ac.code[0x00], ac.length[0x00]);
+// Transforms, quantizes and writes one 8x8 block of samples, level shifted;
+// |previous_dc| is the component's last DC value.
+void EncodeBlock(float block[64], const float scale[64], const HuffmanTable& dc,
+                 const HuffmanTable& ac, int* previous_dc, BitWriter* writer) {
+  for (int y = 0; y < 8; ++y) Dct8(block + y * 8, 1);
+  for (int x = 0; x < 8; ++x) Dct8(block + x, 8);
+  int coefficients[64];
+  for (int i = 0; i < 64; ++i) {
+    const float value = block[i] * scale[i];
+    coefficients[i] = static_cast<int>(value < 0 ? value - 0.5f : value + 0.5f);
   }
 
- private:
-  double cosines_[8][8];
-};
+  const int diff = coefficients[0] - *previous_dc;
+  *previous_dc = coefficients[0];
+  const int dc_category = Category(diff);
+  WriteCoded(dc, dc_category, Amplitude(diff, dc_category), dc_category, writer);
+
+  int zeros = 0;
+  for (int i = 1; i < 64; ++i) {
+    const int value = coefficients[kZigzag[i]];
+    if (value == 0) {
+      ++zeros;
+      continue;
+    }
+    // Sixteen zeros at a time, as ZRL.
+    while (zeros >= 16) {
+      writer->Write(ac.code[0xF0], ac.length[0xF0]);
+      zeros -= 16;
+    }
+    const int category = Category(value);
+    const int symbol = (zeros << 4) | category;
+    WriteCoded(ac, symbol, Amplitude(value, category), category, writer);
+    zeros = 0;
+  }
+  // End of block, for trailing zeros.
+  if (zeros > 0) writer->Write(ac.code[0x00], ac.length[0x00]);
+}
 
 void Marker(std::vector<uint8_t>* out, uint8_t marker) {
   out->push_back(0xFF);
@@ -287,7 +321,10 @@ std::vector<uint8_t> EncodeJpeg(const uint8_t* bgra, size_t width, size_t height
   const HuffmanTable luma_ac = BuildTable(kLumaAcBits, kLumaAcValues);
   const HuffmanTable chroma_dc = BuildTable(kChromaDcBits, kDcValues);
   const HuffmanTable chroma_ac = BuildTable(kChromaAcBits, kChromaAcValues);
-  const BlockEncoder encoder;
+  float luma_scale[64];
+  float chroma_scale[64];
+  QuantScale(luma_quant, luma_scale);
+  QuantScale(chroma_quant, chroma_scale);
   BitWriter writer(&out);
   int dc_y = 0;
   int dc_cb = 0;
@@ -312,9 +349,9 @@ std::vector<uint8_t> EncodeJpeg(const uint8_t* bgra, size_t width, size_t height
           cr_block[y * 8 + x] = 0.5f * r - 0.418688f * g - 0.081312f * b;
         }
       }
-      encoder.Encode(y_block, luma_quant, luma_dc, luma_ac, &dc_y, &writer);
-      encoder.Encode(cb_block, chroma_quant, chroma_dc, chroma_ac, &dc_cb, &writer);
-      encoder.Encode(cr_block, chroma_quant, chroma_dc, chroma_ac, &dc_cr, &writer);
+      EncodeBlock(y_block, luma_scale, luma_dc, luma_ac, &dc_y, &writer);
+      EncodeBlock(cb_block, chroma_scale, chroma_dc, chroma_ac, &dc_cb, &writer);
+      EncodeBlock(cr_block, chroma_scale, chroma_dc, chroma_ac, &dc_cr, &writer);
     }
   }
   writer.Finish();
