@@ -3894,8 +3894,9 @@ void main() {
     'frames keep coming while a plugin\'s modal dialog runs its own loop',
     () async {
       // A modal dialog's loop holds the runner's until it closes: a message
-      // loop on Windows, the run loop in its modal panel mode on macOS. The
-      // runner takes its turns from a timer meanwhile.
+      // loop on Windows, the run loop in its modal panel mode on macOS, a
+      // nested GLib loop on Linux. The runner takes its turns from a timer
+      // meanwhile.
       final temp = Directory.systemTemp.createTempSync('raccoon_test');
       final manifest = File(p.join(temp.path, 'plugins.json'))
         ..writeAsStringSync(
@@ -3948,9 +3949,7 @@ void main() {
       }
     },
     skip:
-        Platform.isLinux
-            ? 'the echo plugin has a modal dialog on Windows and macOS'
-            : ready &&
+        ready &&
                 File(pluginLibrary).existsSync() &&
                 Directory(pluginsModalAssets).existsSync()
             ? false

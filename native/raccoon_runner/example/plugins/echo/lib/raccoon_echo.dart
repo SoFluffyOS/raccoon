@@ -14,8 +14,9 @@ abstract final class RaccoonEcho {
   static Future<int?> texture() => _channel.invokeMethod<int>('texture');
 
   /// A modal dialog that closes itself after [milliseconds], as a user
-  /// would; it answers once the dialog is gone. Windows and macOS: while it
-  /// is up its own loop holds the platform thread's.
+  /// would; it answers once the dialog is gone. While it is up its own loop
+  /// holds the platform thread's: a message loop on Windows, the run loop
+  /// in its modal mode on macOS, a nested GLib loop on Linux.
   static Future<bool?> modal(int milliseconds) =>
       _channel.invokeMethod<bool>('modal', milliseconds);
 
