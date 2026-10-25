@@ -525,7 +525,6 @@ uint32_t GlRenderer::Fbo(size_t width, size_t height) {
     }
     if (fbo == 0) {
       if (kTrace && pool_wanted_) std::fprintf(stderr, "🦝 gl fbo -> readback\n");
-      if (pool_wanted_ && !pool_.empty()) missed_ = true;
       fbo = EnsureSize(width, height) ? fbo_ : 0;
     }
   }
@@ -549,6 +548,10 @@ bool GlRenderer::Present(const FrameCallback& callback) {
     height = pool_height_;
     pooled = pool_wanted_;
     current_ = -1;
+    // A frame going by readback while a client takes the ring: it never
+    // sees it. Marked here, where it goes, not where Skia took the
+    // framebuffer for it a frame before.
+    if (index < 0 && pool_wanted_ && !pool_.empty()) missed_ = true;
   }
   if (index >= 0 && pooled) {
     // The client reads the buffer from its own context: it gets a fence for

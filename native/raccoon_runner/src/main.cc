@@ -863,6 +863,7 @@ int Serve(const Options& options) {
 #if RACCOON_HAS_METAL
   // Set once the GPU socket's server exists, below.
   std::function<void()> SharePorts;
+  std::function<void()> ForgetPortToken;
   // A request with the token reached the service: the client can take
   // surfaces by port, so the ring stops being global. Until then a client
   // whose lookup fails still sees global surfaces by ID.
@@ -875,7 +876,9 @@ int Serve(const Options& options) {
     // Whatever it held, nothing samples now.
     host.ReleaseAllGpuBuffers();
 #if RACCOON_HAS_METAL
-    // The next client may not ask for ports.
+    // The next client may not ask for ports, and a request the one gone
+    // left queued must not count as its ask.
+    if (ForgetPortToken) ForgetPortToken();
     ports_asked = false;
     host.ShareGpuBuffersByPort(false);
 #endif
@@ -907,6 +910,7 @@ int Serve(const Options& options) {
   // Surfaces by Mach port, for a client that asks: the service starts at the
   // first ask and stays; each ask gets its name and a token of its own.
   raccoon::SurfacePortServer ports;
+  ForgetPortToken = [&ports] { ports.RenewToken(); };
   SharePorts = [&] {
     std::string why;
     const bool started = ports.Start(
@@ -952,6 +956,7 @@ int Serve(const Options& options) {
     if (ports_asked.exchange(false)) host.ShareGpuBuffersByPort(true);
 #endif
     host.platform().RunDueTasks();
+    host.RedrawIfMissed();
     host.ServiceVsync();
     host.ServiceCamera();
     SendLogs();

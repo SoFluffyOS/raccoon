@@ -30,10 +30,14 @@ endif()
 # Link-time optimisation, but for Debug: 66 KB off the release runner on
 # macOS, 7%, at no measurable CPU, and the tests run what ships. Set before
 # protobuf and json are fetched, so they get it too.
+# Per configuration, so a multi-config generator (Visual Studio, Xcode)
+# leaves Debug alone too.
 include(CheckIPOSupported)
 check_ipo_supported(RESULT RACCOON_IPO LANGUAGES CXX)
-if(RACCOON_IPO AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+if(RACCOON_IPO)
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO ON)
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL ON)
 endif()
 
 # The runner's version, one line in VERSION: what --version prints, what the

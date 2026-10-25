@@ -149,6 +149,9 @@ class EngineHost {
   void ReleaseGpuBuffer(uint32_t generation, int index, int fence_fd = -1);
   // Every buffer is the runner's again: the client holding them is gone.
   void ReleaseAllGpuBuffers();
+  // A frame went by readback that a client taking the ring never saw, and
+  // a buffer is free now: asks for another. From the loop, every turn.
+  void RedrawIfMissed();
 #if RACCOON_HAS_METAL
   // Whether the host takes the ring's surfaces by Mach port, the ring then
   // not global; on a change a frame is asked for, so the new ring comes at

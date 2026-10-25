@@ -107,12 +107,10 @@ void SurfacePortServer::Answer(mach_msg_header_t* request) {
     const auto* body = reinterpret_cast<const Request*>(request);
     generation = body->generation;
     // Only the GPU socket's client knows the token; anyone else gets none.
-    bool known;
-    {
-      std::lock_guard<std::mutex> lock(token_mutex_);
-      known = std::memcmp(body->token, token_, kTokenSize) == 0;
-    }
-    if (known) {
+    // Held through the lookup, so a token renewed meanwhile can't let a
+    // request through that no longer has the right.
+    std::lock_guard<std::mutex> lock(token_mutex_);
+    if (std::memcmp(body->token, token_, kTokenSize) == 0) {
       if (!lookup_(generation, &ports) || ports.size() > kMaxPorts) {
         for (uint32_t port : ports) mach_port_deallocate(mach_task_self(), port);
         ports.clear();

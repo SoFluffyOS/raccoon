@@ -495,6 +495,11 @@ int EngineHost::MillisUntilCamera() const {
   return camera_.MillisUntilDue(NowMicros());
 }
 
+void EngineHost::RedrawIfMissed() {
+  if (!gpu_ || engine_ == nullptr || !gpu_->HasFreeBuffer()) return;
+  if (gpu_->TakeMissedFrame()) loader_.procs().ScheduleFrame(engine_);
+}
+
 void EngineHost::ReleaseAllGpuBuffers() {
   if (gpu_) gpu_->ReleaseAll();
 }
