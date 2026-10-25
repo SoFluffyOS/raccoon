@@ -2,7 +2,8 @@
 // random and broken input from a fixed seed. Fails on a crash, an
 // exception, a reply the app could not read, or a text field whose
 // selection or composing range leaves its text. Prints one line; exits 0
-// on a pass. Run by the runtime's integration tests; not shipped.
+// on a pass. Also: what the codec encodes decodes to the same bytes. Run by
+// the runtime's integration tests; not shipped.
 #include <cstdio>
 #include <random>
 #include <string>
@@ -31,12 +32,17 @@ int Fail(const std::string& why) {
 CodecValue RandomValue(int depth) {
   static const char* keys[] = {"width", "height", "title", "options", "key", "value",
                                "devicePixelRatio", "fullscreen"};
-  switch (rng() % (depth > 2 ? 4 : 6)) {
+  // Sizes past 253 and 65,535 take the codec's longer size forms.
+  static const size_t lengths[] = {0, 3, 253, 254, 300, 65535, 65536};
+  switch (rng() % (depth > 2 ? 7 : 9)) {
     case 0: return CodecValue();
     case 1: return CodecValue::Double(static_cast<double>(static_cast<int>(rng())) / 7);
-    case 2: return CodecValue::String(std::string(rng() % 5, 'k'));
+    case 2: return CodecValue::String(std::string(lengths[rng() % 7], 'k'));
     case 3: return CodecValue::Bool(rng() % 2 == 0);
-    case 4: {
+    case 4: return CodecValue::Int(static_cast<int32_t>(rng()));
+    case 5: return CodecValue::Int((static_cast<int64_t>(rng()) << 32) | rng());
+    case 6: return CodecValue::Bytes(std::vector<uint8_t>(lengths[rng() % 7], 7));
+    case 7: {
       std::vector<CodecValue> items;
       for (int i = rng() % 4; i > 0; --i) items.push_back(RandomValue(depth + 1));
       return CodecValue::List(std::move(items));
@@ -75,6 +81,15 @@ std::string RandomText() {
 int Position() { return static_cast<int>(rng() % 30) - 5; }
 
 int CheckCodec() {
+  // What it encodes reads back as itself: the same bytes once more.
+  for (int i = 0; i < 20000; ++i) {
+    const std::vector<uint8_t> once = raccoon::EncodeValue(RandomValue(0));
+    CodecValue value;
+    if (!raccoon::DecodeValue(once.data(), once.size(), &value)) {
+      return Fail("an encoded value did not decode");
+    }
+    if (raccoon::EncodeValue(value) != once) return Fail("a value changed on its way back");
+  }
   for (int i = 0; i < 100000; ++i) {
     std::vector<uint8_t> data;
     if (i % 2 == 0) {

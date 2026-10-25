@@ -149,9 +149,14 @@ bool ReadValue(Reader* reader, CodecValue* out, int depth) {
       return true;
     }
     case kUint8List: {
-      std::vector<CodecValue> items;
-      if (!ReadTypedList<uint8_t>(reader, &items, false)) return false;
-      *out = CodecValue::List(std::move(items));
+      // Bytes, so they go out again as a Uint8List: as a list of ints a
+      // plugin's cast to Uint8List would throw. The other typed lists come
+      // in as lists of numbers; no channel the runner answers takes them.
+      size_t length = 0;
+      if (!reader->Size(&length) || length > reader->remaining()) return false;
+      std::vector<uint8_t> bytes(length);
+      if (!reader->Bytes(bytes.data(), length)) return false;
+      *out = CodecValue::Bytes(std::move(bytes));
       return true;
     }
     case kInt32List: {
