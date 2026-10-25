@@ -13,6 +13,7 @@
 #endif
 
 #include "host_settings.h"
+#include "key_codes.h"
 #include "secure_storage_options.h"
 
 namespace raccoon {
@@ -560,45 +561,73 @@ uint32_t FirstCodePoint(const std::string& utf8) {
 
 }  // namespace
 
+namespace {
+
+// Bits of EngineHost::modifiers_: left, then right.
+constexpr uint64_t kControlLeft = 0x200000100;
+constexpr uint8_t kControl = 0x03;
+constexpr uint8_t kShift = 0x0C;
+constexpr uint8_t kAlt = 0x30;
+constexpr uint8_t kMeta = 0xC0;
+
+}  // namespace
+
+// Each side on its own: with both Shifts down, letting one go leaves Shift
+// held.
 void EngineHost::TrackModifiers(const FlutterKeyEvent& event) {
-  const bool down = event.type != kFlutterKeyEventTypeUp;
-  switch (event.logical) {
-    case 0x200000100: case 0x200000101: control_ = down; break;
-    case 0x200000102: case 0x200000103: shift_ = down; break;
-    case 0x200000104: case 0x200000105: alt_ = down; break;
-    case 0x200000106: case 0x200000107: meta_ = down; break;
-    default: break;
+  if (event.logical < kControlLeft || event.logical > kControlLeft + 7) return;
+  const auto bit = static_cast<uint8_t>(1u << (event.logical - kControlLeft));
+  if (event.type == kFlutterKeyEventTypeUp) {
+    modifiers_ &= static_cast<uint8_t>(~bit);
+  } else {
+    modifiers_ |= bit;
   }
 }
 
 std::string EngineHost::RawKeyMessage(const FlutterKeyEvent& event,
                                       const std::string& character) const {
   // The framework reads this message by host keymap; only the logical key
-  // and the character matter to it, the rest feeds the deprecated RawKeyboard.
+  // and the character matter to it, the rest feeds the deprecated
+  // RawKeyboard, which keeps pressed keys by the physical key it reads from
+  // the platform's code.
+  const bool shift = (modifiers_ & kShift) != 0;
+  const bool control = (modifiers_ & kControl) != 0;
+  const bool alt = (modifiers_ & kAlt) != 0;
+  const bool meta = (modifiers_ & kMeta) != 0;
   nlohmann::json message;
   message["type"] = event.type == kFlutterKeyEventTypeUp ? "keyup" : "keydown";
   message["specifiedLogicalKey"] = event.logical;
 #if defined(__APPLE__)
   message["keymap"] = "macos";
-  message["keyCode"] = 0;
+  message["keyCode"] = PlatformKeyCode(event.physical);
   message["characters"] = character;
   message["charactersIgnoringModifiers"] = character;
-  message["modifiers"] = (shift_ ? 0x20000 : 0) | (control_ ? 0x40000 : 0) |
-                         (alt_ ? 0x80000 : 0) | (meta_ ? 0x100000 : 0);
+  message["modifiers"] = (shift ? 0x20000 : 0) | (control ? 0x40000 : 0) |
+                         (alt ? 0x80000 : 0) | (meta ? 0x100000 : 0);
 #elif defined(_WIN32)
   message["keymap"] = "windows";
   message["keyCode"] = 0;
-  message["scanCode"] = 0;
+  message["scanCode"] = PlatformKeyCode(event.physical);
   message["characterCodePoint"] = FirstCodePoint(character);
-  message["modifiers"] = 0;
+  // Either side, then left and right, as RawKeyEventDataWindows has them;
+  // Meta has sides only.
+  const auto bits = [this](uint8_t mask, int any, int left) {
+    const int pressed = modifiers_ & mask;
+    if (pressed == 0) return 0;
+    const int low = pressed & (mask & -mask);
+    return (any >= 0 ? 1 << any : 0) | (low != 0 ? 1 << left : 0) |
+           (pressed != low ? 1 << (left + 1) : 0);
+  };
+  message["modifiers"] = bits(kShift, 0, 1) | bits(kControl, 3, 4) | bits(kAlt, 6, 7) |
+                         bits(kMeta, -1, 9);
 #else
   message["keymap"] = "linux";
   message["toolkit"] = "gtk";
   message["keyCode"] = 0;
-  message["scanCode"] = 0;
+  message["scanCode"] = PlatformKeyCode(event.physical);
   message["unicodeScalarValues"] = FirstCodePoint(character);
-  message["modifiers"] = (shift_ ? 1 << 0 : 0) | (control_ ? 1 << 2 : 0) |
-                         (alt_ ? 1 << 3 : 0) | (meta_ ? 1 << 26 : 0);
+  message["modifiers"] = (shift ? 1 << 0 : 0) | (control ? 1 << 2 : 0) |
+                         (alt ? 1 << 3 : 0) | (meta ? 1 << 26 : 0);
 #endif
   return message.dump();
 }
@@ -620,8 +649,9 @@ void EngineHost::SendKey(const FlutterKeyEvent& event) {
       "flutter/keyevent", reinterpret_cast<const uint8_t*>(raw.data()),
       raw.size(),
       // The modifiers as the key was pressed, not as the reply finds them.
-      [this, down, logical, character, shift = shift_, control = control_,
-       alt = alt_, meta = meta_](const uint8_t* data, size_t size) {
+      [this, down, logical, character, shift = (modifiers_ & kShift) != 0,
+       control = (modifiers_ & kControl) != 0, alt = (modifiers_ & kAlt) != 0,
+       meta = (modifiers_ & kMeta) != 0](const uint8_t* data, size_t size) {
         if (!down) return;
         const auto reply = nlohmann::json::parse(data, data + size, nullptr, false);
         const bool handled = reply.is_object() && reply.contains("handled") &&

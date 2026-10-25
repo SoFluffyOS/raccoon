@@ -123,6 +123,7 @@ add_executable(raccoon_runner
   src/camera_channels.cc
   src/camera_source.cc
   src/engine_host.cc
+  src/key_codes.cc
   src/engine_loader.cc
   src/event_loop.cc
   src/host_settings.cc

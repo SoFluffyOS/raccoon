@@ -6,6 +6,9 @@ void main() => runApp(const TextApp());
 /// A focused text field, for testing text input end to end. Every change
 /// prints `TEXT:<value>`; every key event the framework dispatches prints
 /// `KEY:<type>:<label>`, so a probe can tell key delivery from text entry.
+/// The deprecated RawKeyboard's events print `RAW:<type>:<physical key>:
+/// <keys it holds pressed>:<shift>:<control>`, physical keys as USB HID
+/// usages in hex.
 class TextApp extends StatefulWidget {
   const TextApp({super.key});
 
@@ -21,11 +24,15 @@ class _TextAppState extends State<TextApp> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_onKey);
+    // ignore: deprecated_member_use
+    RawKeyboard.instance.addListener(_onRawKey);
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_onKey);
+    // ignore: deprecated_member_use
+    RawKeyboard.instance.removeListener(_onRawKey);
     _controller.dispose();
     _focus.dispose();
     super.dispose();
@@ -34,6 +41,19 @@ class _TextAppState extends State<TextApp> {
   bool _onKey(KeyEvent event) {
     debugPrint('KEY:${event.runtimeType}:${event.logicalKey.keyLabel}');
     return false;
+  }
+
+  // ignore: deprecated_member_use
+  void _onRawKey(RawKeyEvent event) {
+    String hex(PhysicalKeyboardKey key) => key.usbHidUsage.toRadixString(16);
+    // ignore: deprecated_member_use
+    final pressed = RawKeyboard.instance.physicalKeysPressed.map(hex).toList()
+      ..sort();
+    debugPrint(
+      'RAW:${event.runtimeType}:${hex(event.physicalKey)}:${pressed.join(',')}'
+      // ignore: deprecated_member_use
+      ':${event.isShiftPressed}:${event.isControlPressed}',
+    );
   }
 
   @override

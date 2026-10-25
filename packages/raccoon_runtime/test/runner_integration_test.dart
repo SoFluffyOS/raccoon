@@ -2283,6 +2283,110 @@ void main() {
   );
 
   test(
+    'the deprecated RawKeyboard tells keys apart and keeps a modifier held '
+    'on either side',
+    () async {
+      // example/text prints RAW:<type>:<physical>:<pressed>:<shift>:<control>
+      // for every RawKeyboard event; physical keys are HID usages in hex.
+      final textAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'text',
+        'build',
+        'flutter_assets',
+      );
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: textAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      runner.stderr.listen(output.add);
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.frames.first.timeout(const Duration(seconds: 15));
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        Future<void> send(
+          KeyKind kind,
+          int logical,
+          int physical, [
+          String character = '',
+        ]) async {
+          client.sendKey(
+            KeyEvent(
+              kind: kind,
+              physical: Int64(physical),
+              logical: Int64(logical),
+              character: character,
+              timestampMicros: Int64(DateTime.now().microsecondsSinceEpoch),
+            ),
+          );
+          await Future<void>.delayed(const Duration(milliseconds: 60));
+        }
+
+        const down = KeyKind.KEY_KIND_DOWN;
+        const up = KeyKind.KEY_KIND_UP;
+        // A down, B down, A up: B is still held.
+        await send(down, 0x61, 0x00070004, 'a');
+        await send(down, 0x62, 0x00070005, 'b');
+        await send(up, 0x61, 0x00070004);
+        await send(up, 0x62, 0x00070005);
+        // Both Shifts down, the left one up: Shift is still held.
+        await send(down, 0x200000102, 0x000700e1);
+        await send(down, 0x200000103, 0x000700e5);
+        await send(up, 0x200000102, 0x000700e1);
+        await send(down, 0x63, 0x00070006, 'C');
+        await send(up, 0x63, 0x00070006);
+        await send(up, 0x200000103, 0x000700e5);
+        final deadline = DateTime.now().add(const Duration(seconds: 10));
+        bool done() =>
+            output.any((line) => line.contains('RAW:RawKeyUpEvent:700e5:'));
+        while (!done() && DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        final raw =
+            output
+                .where((line) => line.contains('RAW:'))
+                .map((line) => line.substring(line.indexOf('RAW:')))
+                .toList();
+        printOnFailure(raw.join('\n'));
+        String event(String type, String physical) =>
+            raw.firstWhere((line) => line.startsWith('RAW:$type:$physical:'));
+        final aUp = event('RawKeyUpEvent', '70004').split(':')[3].split(',');
+        expect(aUp, contains('70005'));
+        expect(aUp, isNot(contains('70004')));
+        final cDown = event('RawKeyDownEvent', '70006').split(':');
+        expect(cDown[3].split(','), contains('70006'));
+        expect(cDown.sublist(4), ['true', 'false']);
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready &&
+                Directory(
+                  p.join(
+                    p.dirname(p.dirname(p.dirname(assets))),
+                    'text',
+                    'build',
+                    'flutter_assets',
+                  ),
+                ).existsSync()
+            ? false
+            : 'build the runner and the text example first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'on a Mac, editing keys reach the field as AppKit selectors',
     () async {
       // A Mac app's framework leaves Option, Cmd and arrow keys in a text

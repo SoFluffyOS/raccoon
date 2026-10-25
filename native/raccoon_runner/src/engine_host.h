@@ -218,10 +218,9 @@ class EngineHost {
                             const std::string& character) const;
   WindowChannels windows_;
   TextInput text_input_;
-  bool shift_ = false;
-  bool control_ = false;
-  bool alt_ = false;
-  bool meta_ = false;
+  // The modifier keys down, a bit each by its logical key's offset from
+  // Control Left: Control, Shift, Alt and Meta, left then right.
+  uint8_t modifiers_ = 0;
   UserDefaultsChannels user_defaults_;
   CameraChannels camera_;
   FLUTTER_API_SYMBOL(FlutterEngine) engine_ = nullptr;
