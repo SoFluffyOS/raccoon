@@ -158,6 +158,18 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(raccoon_runner PRIVATE raccoon_proto ${CMAKE_DL_LIBS} Threads::Threads)
 target_link_libraries(raccoon_runner PRIVATE nlohmann_json::nlohmann_json)
+
+# The channels the runner answers itself, fed random input: run by the
+# runtime's integration tests on every host, not shipped.
+add_executable(raccoon_channels_check
+  test/channels_check.cc
+  src/secure_storage_options.cc
+  src/standard_codec.cc
+  src/text_input.cc
+  src/window_channels.cc
+)
+target_include_directories(raccoon_channels_check PRIVATE src)
+target_link_libraries(raccoon_channels_check PRIVATE nlohmann_json::nlohmann_json)
 if(WIN32)
   target_link_libraries(raccoon_runner PRIVATE ws2_32 winmm)
   # A video as the camera's source, and its recordings, by Media

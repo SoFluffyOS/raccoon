@@ -3821,6 +3821,32 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  // Built beside the runner: the channels it answers itself, fed random
+  // and broken input (test/channels_check.cc).
+  final channelsCheck =
+      binary == null
+          ? ''
+          : p.join(
+            p.dirname(binary),
+            Platform.isWindows
+                ? 'raccoon_channels_check.exe'
+                : 'raccoon_channels_check',
+          );
+  test(
+    'the channels the runner answers itself hold up to random input',
+    () async {
+      final check = await Process.run(channelsCheck, const []);
+      printOnFailure('${check.stdout}${check.stderr}');
+      expect(check.exitCode, 0);
+      expect('${check.stdout}', contains('CHANNELS ok'));
+    },
+    skip:
+        File(channelsCheck).existsSync()
+            ? false
+            : 'build the runner\'s channels check first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   // Built beside the runner on macOS: a GPU socket client that takes the
   // ring's surfaces by Mach port and checks them.
   final portCheck =
