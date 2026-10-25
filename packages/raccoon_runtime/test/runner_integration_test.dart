@@ -1111,10 +1111,10 @@ void main() {
     timeout: const Timeout(Duration(minutes: 5)),
   );
   test(
-    'a macOS plugin that fails to build is kept failed until it changes',
+    'a plugin that fails to build is kept failed until it changes',
     () async {
-      // #136: building it again costs pod install and xcodebuild on every
-      // install. Kept by its key and the toolchain, for a day; retried at
+      // #136: building it again costs pod install and xcodebuild, or
+      // CMake, on every install. Kept by its key and the toolchain, for a day; retried at
       // once with RACCOON_RETRY_PLUGINS=1, or when its sources change.
       final temp = Directory.systemTemp.createTempSync('raccoon_pods');
       void write(String path, String text) =>
@@ -1124,6 +1124,7 @@ void main() {
       write(
         'plugin_f/pubspec.yaml',
         'name: plugin_f\nversion: 1.0.0\nflutter:\n  plugin:\n    platforms:\n'
+            '      linux:\n        pluginClass: PluginF\n'
             '      macos:\n        pluginClass: PluginF\n',
       );
       write(
@@ -1144,7 +1145,17 @@ void main() {
             '+ (void)registerWithRegistrar:(id<FlutterPluginRegistrar>)registrar {\n'
             '  ${compiles ? '' : 'not code;'}\n}\n@end\n',
       );
+      write(
+        'plugin_f/linux/CMakeLists.txt',
+        'cmake_minimum_required(VERSION 3.14)\n'
+            'add_library(plugin_f_plugin SHARED plugin_f.cc)\n',
+      );
+      void linuxSource({required bool compiles}) => write(
+        'plugin_f/linux/plugin_f.cc',
+        compiles ? 'int plugin_f_value() { return 1; }\n' : 'not code;\n',
+      );
       source(compiles: false);
+      linuxSource(compiles: false);
       write('app/pubspec.yaml', 'name: app\ndependencies:\n  plugin_f:\n');
       write(
         'app/.dart_tool/package_config.json',
@@ -1211,14 +1222,15 @@ void main() {
         expect(File(log ?? '').readAsStringSync(), contains('not code'));
         expect(await install(retry: true), isNot(contains('kept')));
         source(compiles: true);
+        linuxSource(compiles: true);
         expect(await install(), isNull);
       } finally {
         temp.deleteSync(recursive: true);
       }
     },
-    skip: switch ((binary != null && sdk != null, Platform.isMacOS)) {
+    skip: switch ((binary != null && sdk != null, Platform.isWindows)) {
       (false, _) => 'build the runner first, with a Flutter SDK on PATH',
-      (_, false) => 'CocoaPods plugins are macOS',
+      (_, true) => 'Windows builds plugins in its own helper',
       _ => false,
     },
     timeout: const Timeout(Duration(minutes: 8)),

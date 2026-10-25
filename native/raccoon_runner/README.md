@@ -201,7 +201,8 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   A plugin that fails to build is kept failed, its log beside it in the
   cache, so the next install skips it instead of spending its pod install
   and build again. It is kept for a day, by the same key a build would have
-  and by the Xcode and CocoaPods versions, so a new version of the plugin,
+  and by the Xcode and CocoaPods versions (CMake and the compiler on
+  Linux, which keeps failures the same way), so a new version of the plugin,
   an edit to a path plugin, a new runner or a new toolchain tries again.
   `RACCOON_RETRY_PLUGINS=1` tries again at once (#136).
   Loading FlutterMacOS adds about 17 MB of resident memory and no

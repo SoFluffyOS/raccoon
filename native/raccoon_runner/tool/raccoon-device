@@ -504,6 +504,63 @@ for name, root, pubspec in packages:
 if not wanted and not status:
     sys.exit(0)
 
+# A plugin that failed to build is kept failed, as on macOS (#136): by
+# its key and the compiler and CMake, for a day, never with
+# RACCOON_RETRY_PLUGINS=1, and never for a missing toolchain.
+FAILURE_DAYS = 1
+toolchain_id = None
+
+
+def toolchain_identity():
+    global toolchain_id
+    if toolchain_id is None:
+        versions = []
+        for command in (['cmake', '--version'], ['cc', '--version']):
+            try:
+                found = subprocess.run(command, capture_output=True, text=True).stdout
+                versions.append(found.splitlines()[0] if found else '')
+            except OSError:
+                versions.append('')
+        toolchain_id = ' / '.join(versions)
+    return toolchain_id
+
+
+def failure_path(plugin):
+    return os.path.join(cache, 'failed', plugin['key'] + '.json')
+
+
+def kept_failure(plugin):
+    """Why [plugin] failed last time, when that still holds; else None."""
+    if os.environ.get('RACCOON_RETRY_PLUGINS') == '1':
+        return None
+    try:
+        with open(failure_path(plugin)) as f:
+            kept = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if time.time() - kept.get('at', 0) > FAILURE_DAYS * 86400:
+        return None
+    if kept.get('toolchain') != toolchain_identity():
+        return None
+    return '%s (kept from %s; RACCOON_RETRY_PLUGINS=1 builds it again)' % (
+        kept.get('why', 'failed'), time.strftime('%Y-%m-%d %H:%M', time.localtime(kept['at'])))
+
+
+def keep_failure(plugin, why, log):
+    """Keeps [plugin]'s failure, with a copy of [log] beside it, which the
+    reason names: the install's own is written over by the next."""
+    record = failure_path(plugin)
+    os.makedirs(os.path.dirname(record), exist_ok=True)
+    if os.path.isfile(log):
+        kept_log = record[:-len('.json')] + '.log'
+        shutil.copyfile(log, kept_log)
+        why = why.replace(log, kept_log)
+    staging = record + '.partial-%d' % os.getpid()
+    with open(staging, 'w') as f:
+        json.dump({'why': why, 'at': time.time(), 'toolchain': toolchain_identity()}, f)
+    os.replace(staging, record)
+
+
 os.makedirs(os.path.join(out, 'lib'), exist_ok=True)
 built, failed, empty, from_cache = [], [], [], []
 entries = []
@@ -524,6 +581,10 @@ for plugin in wanted:
             failed.append('%s (%s)' % (name, toolchain))
             status.append({'name': name, 'state': 'failed', 'detail': toolchain + '; native plugins need the desktop toolchain'})
             continue
+        if (why := kept_failure(plugin)) is not None:
+            failed.append('%s (%s)' % (name, why))
+            status.append({'name': name, 'state': 'failed', 'detail': why})
+            continue
         project = os.path.join(out, 'build', name)
         os.makedirs(project, exist_ok=True)
         with open(os.path.join(project, 'CMakeLists.txt'), 'w') as f:
@@ -536,8 +597,11 @@ for plugin in wanted:
                                        stdout=log, stderr=subprocess.STDOUT).returncode == 0
         libs = sorted(glob.glob(os.path.join(project, 'out', 'plugin', '**', '*.so'), recursive=True)) if ok else []
         if not ok:
-            failed.append('%s (see %s)' % (name, os.path.join(project, 'build.log')))
-            status.append({'name': name, 'state': 'failed', 'detail': 'did not build; see ' + os.path.join(project, 'build.log')})
+            log = os.path.join(project, 'build.log')
+            why = 'did not build; see ' + log
+            keep_failure(plugin, why, log)
+            failed.append('%s (see %s)' % (name, log))
+            status.append({'name': name, 'state': 'failed', 'detail': why})
             continue
         if not libs:
             # Built fine and made nothing: an FFI plugin whose library wants
