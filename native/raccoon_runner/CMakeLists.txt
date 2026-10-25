@@ -171,6 +171,14 @@ add_executable(raccoon_channels_check
 )
 target_include_directories(raccoon_channels_check PRIVATE src)
 target_link_libraries(raccoon_channels_check PRIVATE nlohmann_json::nlohmann_json)
+# The runner's warnings, so the check is held to its sources' standard.
+if(MSVC)
+  target_compile_options(raccoon_channels_check PRIVATE /W3 /utf-8)
+  target_compile_definitions(raccoon_channels_check PRIVATE
+    NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+else()
+  target_compile_options(raccoon_channels_check PRIVATE -Wall -Wextra)
+endif()
 if(WIN32)
   target_link_libraries(raccoon_runner PRIVATE ws2_32 winmm)
   # A video as the camera's source, and its recordings, by Media
