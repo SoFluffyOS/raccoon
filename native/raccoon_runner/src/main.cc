@@ -1047,17 +1047,23 @@ int Serve(const Options& options) {
       }
       // Resize the shared buffers only after the pending frame went out:
       // replacing the pool releases it, and that frame would be lost.
-      // Shared buffers, sized for the current frame; replaced on resize.
+      // Shared buffers with room to grow: a frame that fits goes through
+      // them. Sized to the frame exactly, every frame of a pane being
+      // dragged larger missed them and went inline, a copy of its pixels
+      // through the socket, while the buffers were made anew each time.
+      // They grow by a quarter when a frame no longer fits, and shrink when
+      // more than twice what a frame needs.
       const size_t need = host.frame().LatestSizeBytes();
       if (client_shared && !client_gpu && need > 0 && !frames_held &&
-          (!pool || pool->size() != need)) {
+          (!pool || pool->size() < need || pool->size() / 2 > need)) {
         host.frame().SetSharedPool(nullptr);
         auto fresh = std::make_unique<raccoon::SharedBufferPool>();
         std::string pool_error;
-        if (fresh->Allocate(2, need, &pool_error)) {
+        const size_t room = (need + need / 4 + 4095) / 4096 * 4096;
+        if (fresh->Allocate(2, room, &pool_error)) {
           raccoon::v1::RunnerMessage message;
           message.mutable_shared_buffers()->set_count(2);
-          message.mutable_shared_buffers()->set_size(need);
+          message.mutable_shared_buffers()->set_size(room);
           message.mutable_shared_buffers()->set_generation(shared_generation + 1);
           if (server.SendWithFds(message, fresh->fds())) {
             ++shared_generation;

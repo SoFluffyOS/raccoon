@@ -2824,6 +2824,63 @@ void main() {
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
+  test(
+    'frames of a pane being dragged larger keep to the shared buffers',
+    () async {
+      // The buffers were sized to each frame exactly: every frame of a
+      // growing pane missed them and went inline, ten megabytes through the
+      // socket each, while they were made anew. They have room now.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final spinAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'spin',
+        'build',
+        'flutter_assets',
+      );
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: spinAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        var frames = 0;
+        final counting = client.frames.listen((_) => frames++);
+        await client.frames
+            .firstWhere((_) => client.sharedFrames > 0)
+            .timeout(const Duration(seconds: 15));
+        final framesBefore = frames;
+        final sharedBefore = client.sharedFrames;
+        for (var i = 0; i < 120; i++) {
+          client.resize(1000 + i * 4, 700 + i * 3, 2.0);
+          await Future<void>.delayed(const Duration(milliseconds: 16));
+        }
+        await counting.cancel();
+        final dragged = frames - framesBefore;
+        final shared = client.sharedFrames - sharedBefore;
+        printOnFailure('$shared of $dragged frames shared');
+        expect(dragged, greaterThan(20));
+        expect(shared / dragged, greaterThan(0.7));
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((ready, Platform.isWindows)) {
+      (false, _) => 'build the runner and example first',
+      (_, true) => 'shared buffers are Unix sockets',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   // #146: a single message past the unread limit, a 4K frame inline, let
   // a client go that was reading.
   test(
