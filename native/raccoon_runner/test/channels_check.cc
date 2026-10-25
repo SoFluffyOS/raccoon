@@ -83,6 +83,36 @@ std::string RandomText() {
 
 int Position() { return static_cast<int>(rng() % 30) - 5; }
 
+// |text|'s length as Flutter counts it, in UTF-16 code units.
+int Utf16Length(const std::string& text) {
+  int length = 0;
+  for (size_t i = 0; i < text.size(); ++i) {
+    const auto byte = static_cast<unsigned char>(text[i]);
+    if ((byte & 0xC0) == 0x80) continue;  // a continuation byte
+    length += byte >= 0xF0 ? 2 : 1;
+  }
+  return length;
+}
+
+// What the framework asserts of an editing state it is sent (in debug, in
+// TextEditingValue and TextEditingDelta): a selection inside the text, and
+// a composing range that is none or inside it too. Empty when it holds.
+std::string BadEditingState(const json& state, int size) {
+  const auto at = [&state](const char* key) {
+    return state.contains(key) && state[key].is_number_integer() ? state[key].get<int>() : -2;
+  };
+  const int base = at("selectionBase");
+  const int extent = at("selectionExtent");
+  const int composing_base = at("composingBase");
+  const int composing_extent = at("composingExtent");
+  if (base < 0 || base > size || extent < 0 || extent > size) return "a selection past the text";
+  if (composing_base == -1 && composing_extent == -1) return "";
+  if (composing_base < 0 || composing_extent > size || composing_base > composing_extent) {
+    return "a composing range past the text";
+  }
+  return "";
+}
+
 int CheckCodec() {
   // What it encodes reads back as itself: the same bytes once more.
   for (int i = 0; i < 20000; ++i) {
@@ -187,8 +217,33 @@ int CheckTextInput() {
     raccoon::TextInput input;
     input.SetComposer(rng() % 2 == 0);
     bool unreadable = false;
-    input.SetSender([&unreadable](const std::string&, const std::string& body) {
-      if (json::parse(body, nullptr, false).is_discarded()) unreadable = true;
+    std::string sent_wrong;
+    input.SetSender([&unreadable, &sent_wrong](const std::string&, const std::string& body) {
+      const json call = json::parse(body, nullptr, false);
+      if (call.is_discarded()) {
+        unreadable = true;
+        return;
+      }
+      const std::string method = call.value("method", "");
+      const json& args = call["args"];
+      if (method == "TextInputClient.updateEditingState" && args.size() > 1) {
+        const json& state = args[1];
+        const std::string why =
+            BadEditingState(state, Utf16Length(state.value("text", std::string())));
+        if (!why.empty()) sent_wrong = why;
+      }
+      if (method == "TextInputClient.updateEditingStateWithDeltas" && args.size() > 1) {
+        for (const json& delta : args[1]["deltas"]) {
+          // One replacement of the whole old text: it ends where the old
+          // text did, and the state that comes with it is the new text's.
+          if (delta.value("deltaEnd", -1) != Utf16Length(delta.value("oldText", std::string()))) {
+            sent_wrong = "a delta that does not cover the old text";
+          }
+          const std::string why =
+              BadEditingState(delta, Utf16Length(delta.value("deltaText", std::string())));
+          if (!why.empty()) sent_wrong = why;
+        }
+      }
     });
     auto call = [&input](const json& message) {
       const std::string text = message.dump(-1, ' ', false, json::error_handler_t::replace);
@@ -217,6 +272,7 @@ int CheckTextInput() {
           input.ApplyEditing(RandomText(), Position(), Position(), Position(), Position());
       }
       if (unreadable) return Fail("the text field sent a message that is not JSON");
+      if (!sent_wrong.empty()) return Fail("the text field sent " + sent_wrong);
       const raccoon::TextFieldState state = input.state();
       const int size = static_cast<int>(input.text().size());
       if (input.selection_base() < 0 || input.selection_base() > size ||
