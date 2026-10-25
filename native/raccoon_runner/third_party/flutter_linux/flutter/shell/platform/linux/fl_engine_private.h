@@ -57,6 +57,10 @@ gboolean fl_engine_unregister_external_texture(FlEngine* engine, int64_t texture
 // An engine over |bridge|, which must outlive it.
 FlEngine* fl_engine_new_raccoon(const FlRaccoonBridge* bridge, gpointer user_data);
 
+// Cuts the engine off its bridge, which may go after: calls plugins make on
+// it from then on, from any thread, do nothing.
+void fl_engine_raccoon_detach(FlEngine* engine);
+
 // A message the app sent: TRUE when a handler took it (and will answer
 // through the bridge), FALSE when nothing listens on |channel|.
 gboolean fl_engine_raccoon_handle_platform_message(

@@ -7,7 +7,10 @@
 
 struct _FlEngine {
   GObject parent_instance;
+  // Null once detached; read under |bridge_lock| by every call into it,
+  // which plugins make from any thread.
   const FlRaccoonBridge* bridge;
+  GRWLock bridge_lock;
   gpointer user_data;
   FlEnginePlatformMessageHandler handler;
   gpointer handler_data;
@@ -33,17 +36,38 @@ static void fl_engine_dispose(GObject* object) {
   G_OBJECT_CLASS(fl_engine_parent_class)->dispose(object);
 }
 
-static void fl_engine_class_init(FlEngineClass* klass) {
-  G_OBJECT_CLASS(klass)->dispose = fl_engine_dispose;
+static void fl_engine_finalize(GObject* object) {
+  g_rw_lock_clear(&FL_ENGINE(object)->bridge_lock);
+  G_OBJECT_CLASS(fl_engine_parent_class)->finalize(object);
 }
 
-static void fl_engine_init(FlEngine* self) {}
+static void fl_engine_class_init(FlEngineClass* klass) {
+  G_OBJECT_CLASS(klass)->dispose = fl_engine_dispose;
+  G_OBJECT_CLASS(klass)->finalize = fl_engine_finalize;
+}
+
+static void fl_engine_init(FlEngine* self) { g_rw_lock_init(&self->bridge_lock); }
+
+// The bridge, held until unlock_bridge; null once the runner detached it.
+static const FlRaccoonBridge* lock_bridge(FlEngine* self) {
+  g_rw_lock_reader_lock(&self->bridge_lock);
+  return self->bridge;
+}
+
+static void unlock_bridge(FlEngine* self) { g_rw_lock_reader_unlock(&self->bridge_lock); }
 
 FlEngine* fl_engine_new_raccoon(const FlRaccoonBridge* bridge, gpointer user_data) {
   FlEngine* self = FL_ENGINE(g_object_new(fl_engine_get_type(), nullptr));
   self->bridge = bridge;
   self->user_data = user_data;
   return self;
+}
+
+void fl_engine_raccoon_detach(FlEngine* self) {
+  g_return_if_fail(FL_IS_ENGINE(self));
+  g_rw_lock_writer_lock(&self->bridge_lock);
+  self->bridge = nullptr;
+  g_rw_lock_writer_unlock(&self->bridge_lock);
 }
 
 void fl_engine_set_platform_message_handler(FlEngine* self,
@@ -74,7 +98,11 @@ gboolean fl_engine_send_platform_message_response(
   const uint8_t* data = response == nullptr
                             ? nullptr
                             : static_cast<const uint8_t*>(g_bytes_get_data(response, &size));
-  if (!self->bridge->send_platform_message_response(self->user_data, handle, data, size)) {
+  const FlRaccoonBridge* bridge = lock_bridge(self);
+  const gboolean sent =
+      bridge != nullptr && bridge->send_platform_message_response(self->user_data, handle, data, size);
+  unlock_bridge(self);
+  if (!sent) {
     g_set_error(error, FL_ENGINE_ERROR, FL_ENGINE_ERROR_FAILED,
                 "Failed to send platform message response");
     return FALSE;
@@ -93,12 +121,23 @@ void fl_engine_send_platform_message(FlEngine* self, const gchar* channel,
                                      GBytes* message, GCancellable* cancellable,
                                      GAsyncReadyCallback callback, gpointer user_data) {
   g_return_if_fail(FL_IS_ENGINE(self));
-  GTask* task = g_task_new(self, cancellable, callback, user_data);
+  // Without a callback nobody waits for the answer: the app is asked for
+  // none, as an event channel's events want.
+  GTask* task = callback == nullptr ? nullptr : g_task_new(self, cancellable, callback, user_data);
   gsize size = 0;
   const uint8_t* data = message == nullptr
                             ? nullptr
                             : static_cast<const uint8_t*>(g_bytes_get_data(message, &size));
-  self->bridge->send_platform_message(self->user_data, channel, data, size, on_reply, task);
+  const FlRaccoonBridge* bridge = lock_bridge(self);
+  if (bridge != nullptr) {
+    bridge->send_platform_message(self->user_data, channel, data, size,
+                                  task == nullptr ? nullptr : on_reply, task);
+  }
+  unlock_bridge(self);
+  if (bridge == nullptr && task != nullptr) {
+    g_task_return_new_error(task, FL_ENGINE_ERROR, FL_ENGINE_ERROR_FAILED, "The engine is gone");
+    g_object_unref(task);
+  }
 }
 
 GBytes* fl_engine_send_platform_message_finish(FlEngine* self, GAsyncResult* result,
@@ -110,20 +149,34 @@ GBytes* fl_engine_send_platform_message_finish(FlEngine* self, GAsyncResult* res
 
 gboolean fl_engine_register_external_texture(FlEngine* self, int64_t texture_id) {
   g_return_val_if_fail(FL_IS_ENGINE(self), FALSE);
-  return self->bridge->register_external_texture(self->user_data, texture_id);
+  const FlRaccoonBridge* bridge = lock_bridge(self);
+  const gboolean ok =
+      bridge != nullptr && bridge->register_external_texture(self->user_data, texture_id);
+  unlock_bridge(self);
+  return ok;
 }
 
 gboolean fl_engine_mark_texture_frame_available(FlEngine* self, int64_t texture_id) {
   g_return_val_if_fail(FL_IS_ENGINE(self), FALSE);
-  return self->bridge->mark_texture_frame_available(self->user_data, texture_id);
+  const FlRaccoonBridge* bridge = lock_bridge(self);
+  const gboolean ok =
+      bridge != nullptr && bridge->mark_texture_frame_available(self->user_data, texture_id);
+  unlock_bridge(self);
+  return ok;
 }
 
 gboolean fl_engine_unregister_external_texture(FlEngine* self, int64_t texture_id) {
   g_return_val_if_fail(FL_IS_ENGINE(self), FALSE);
-  return self->bridge->unregister_external_texture(self->user_data, texture_id);
+  const FlRaccoonBridge* bridge = lock_bridge(self);
+  const gboolean ok =
+      bridge != nullptr && bridge->unregister_external_texture(self->user_data, texture_id);
+  unlock_bridge(self);
+  return ok;
 }
 
-// The two public accessors a plugin might call on an engine.
+// The two public accessors a plugin might call on an engine. The runner
+// takes its messenger and registrar from them too: a second messenger would
+// take over the engine's messages from the first.
 G_MODULE_EXPORT FlBinaryMessenger* fl_engine_get_binary_messenger(FlEngine* self) {
   g_return_val_if_fail(FL_IS_ENGINE(self), nullptr);
   if (self->messenger == nullptr) self->messenger = fl_binary_messenger_new(self);

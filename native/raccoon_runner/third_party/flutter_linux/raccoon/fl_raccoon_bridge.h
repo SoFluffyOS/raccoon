@@ -14,7 +14,8 @@ G_BEGIN_DECLS
 typedef void (*FlRaccoonReply)(const uint8_t* data, size_t size, gpointer reply_data);
 
 typedef struct {
-  // Host to app: sends |data| on |channel| and later calls |reply|.
+  // Host to app: sends |data| on |channel| and later calls |reply|, unless
+  // it is NULL.
   void (*send_platform_message)(gpointer user_data, const gchar* channel, const uint8_t* data,
                                 size_t size, FlRaccoonReply reply, gpointer reply_data);
   // Answers a message the app sent; |handle| came with the message.

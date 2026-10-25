@@ -22,8 +22,8 @@ PluginHost::PluginHost(Bridge bridge) : bridge_(std::move(bridge)) {
   c_bridge_.mark_texture_frame_available = MarkTextureFrameAvailable;
   c_bridge_.unregister_external_texture = UnregisterExternalTexture;
   engine_ = fl_engine_new_raccoon(&c_bridge_, this);
-  messenger_ = fl_binary_messenger_new(engine_);
-  textures_ = fl_texture_registrar_new(engine_);
+  messenger_ = FL_BINARY_MESSENGER(g_object_ref(fl_engine_get_binary_messenger(engine_)));
+  textures_ = FL_TEXTURE_REGISTRAR(g_object_ref(fl_engine_get_texture_registrar(engine_)));
   // No view: the app's window is the client's pane.
   registrar_ = fl_plugin_registrar_new(nullptr, messenger_, textures_);
   // Plugins that open dialogs want GTK up; without a display that is a no.
@@ -33,7 +33,10 @@ PluginHost::PluginHost(Bridge bridge) : bridge_(std::move(bridge)) {
 }
 
 PluginHost::~PluginHost() {
-  // The libraries stay mapped: a plugin's objects may outlive this.
+  // The libraries stay mapped: a plugin's objects may outlive this, and the
+  // engine with them, which a plugin thread or a reply still to come can
+  // keep. What they call on it from now on does nothing.
+  fl_engine_raccoon_detach(engine_);
   g_clear_object(&registrar_);
   g_clear_object(&textures_);
   g_clear_object(&messenger_);
@@ -97,10 +100,13 @@ void PluginHost::SendPlatformMessage(gpointer user_data, const gchar* channel,
                                      const uint8_t* data, size_t size, FlRaccoonReply reply,
                                      gpointer reply_data) {
   auto* self = static_cast<PluginHost*>(user_data);
-  self->bridge_.send(channel, data, size,
-                     [reply, reply_data](const uint8_t* answer, size_t answer_size) {
-                       reply(answer, answer_size, reply_data);
-                     });
+  std::function<void(const uint8_t*, size_t)> on_reply;
+  if (reply != nullptr) {
+    on_reply = [reply, reply_data](const uint8_t* answer, size_t answer_size) {
+      reply(answer, answer_size, reply_data);
+    };
+  }
+  self->bridge_.send(channel, data, size, std::move(on_reply));
 }
 
 gboolean PluginHost::SendPlatformMessageResponse(
