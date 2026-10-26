@@ -969,6 +969,60 @@ void main() {
           '${((fallback['plugins'] as List).single as Map)['library']}',
           endsWith('plugin_g.framework/plugin_g'),
         );
+
+        // #191: one Swift package that does not resolve (its product named
+        // other than Flutter names it) leaves the others to build.
+        void swiftPlugin(String name, String className, {String? product}) {
+          write(
+            '$name/pubspec.yaml',
+            'name: $name\nversion: 1.0.0\nflutter:\n  plugin:\n    platforms:\n'
+                '      macos:\n        pluginClass: $className\n',
+          );
+          write(
+            '$name/macos/$name/Package.swift',
+            '// swift-tools-version: 5.9\nimport PackageDescription\n'
+                'let package = Package(name: "$name", platforms: [.macOS("10.15")],\n'
+                '  products: [.library(name: "${product ?? name.replaceAll('_', '-')}", targets: ["$name"])],\n'
+                '  dependencies: [.package(name: "FlutterFramework", path: "../FlutterFramework")],\n'
+                '  targets: [.target(name: "$name", dependencies: [\n'
+                '    .product(name: "FlutterFramework", package: "FlutterFramework")])])\n',
+          );
+          write(
+            '$name/macos/$name/Sources/$name/include/$className.h',
+            '#import <FlutterMacOS/FlutterMacOS.h>\n'
+                '@interface $className : NSObject <FlutterPlugin>\n@end\n',
+          );
+          write(
+            '$name/macos/$name/Sources/$name/$className.m',
+            '#import "$className.h"\n@implementation $className\n'
+                '+ (void)registerWithRegistrar:(id<FlutterPluginRegistrar>)registrar {}\n'
+                '@end\n',
+          );
+        }
+
+        swiftPlugin('plugin_h', 'PluginH');
+        swiftPlugin('plugin_i', 'PluginI', product: 'PluginI');
+        configure(['plugin_h', 'plugin_i']);
+        final one = await install();
+        expect(loaded(one), ['plugin_h']);
+        expect(
+          '${((one['plugins'] as List).single as Map)['library']}',
+          endsWith('RaccoonPlugins.framework/RaccoonPlugins'),
+        );
+        expect(
+          [
+            for (final entry in one['status'] as List)
+              '${(entry as Map)['name']}',
+          ],
+          ['plugin_i'],
+        );
+        // Left out at once next time, the others from the cache.
+        final next = await install();
+        expect(log, contains('1 from the cache: plugin_h'));
+        expect(
+          '${((next['status'] as List).single as Map)['detail']}',
+          contains('kept from'),
+        );
       } finally {
         temp.deleteSync(recursive: true);
       }

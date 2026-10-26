@@ -190,8 +190,10 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   `FlutterFramework` package) and builds a package of its own, a dynamic
   library depending on every plugin's product, with `xcodebuild`. Needs
   Xcode only. It is cached by the plugins' keys together and kept failed
-  like a pod; when it fails, the plugins that have a podspec too go
-  through CocoaPods. When every one of them is a pod in the cache already
+  like a pod. The plugins its errors name (a package that does not
+  resolve, a source that does not compile) are left out and the rest built
+  again, as for pods (#191); when it fails otherwise, the plugins that
+  have a podspec too go through CocoaPods. When every one of them is a pod in the cache already
   (the release's prebuilt plugins), those load instead of a build. `RACCOON_NO_SWIFT_PACKAGES=1` builds them all through
   CocoaPods. On an M1 Pro: FlutterFire's core, Auth, Firestore and
   Analytics in 89 s cold into one 33 MB framework (13 min and 266 MB
