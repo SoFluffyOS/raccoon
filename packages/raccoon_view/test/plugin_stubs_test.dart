@@ -79,4 +79,17 @@ void main() {
     expect(await task('isRunningService'), isFalse);
     expect(await task('checkNotificationPermission'), 0);
   });
+
+  test('a vibration does nothing, and there are no custom ones', () async {
+    final stubs = PluginStubs();
+    expect(
+      reply(await stubs.handleVibration(call('vibrate', {'duration': 500}))),
+      isNull,
+    );
+    expect(
+      reply(await stubs.handleVibration(call('hasCustomVibrationsSupport'))),
+      isFalse,
+    );
+    expect(await stubs.handleVibration(call('somethingNew')), isNull);
+  });
 }

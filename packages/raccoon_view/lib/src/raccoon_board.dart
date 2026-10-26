@@ -534,11 +534,12 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
               RaccoonBoardSizeChoice(
                 label: _SizeMenu.labelOf(device),
                 current: _SizeMenu.isCurrent(frame, device),
-                pick: () => widget.layout.setSize(
-                  session.name,
-                  Size(device.width!.toDouble(), device.height!.toDouble()),
-                  device.pixelRatio ?? 1,
-                ),
+                pick:
+                    () => widget.layout.setSize(
+                      session.name,
+                      Size(device.width!.toDouble(), device.height!.toDouble()),
+                      device.pixelRatio ?? 1,
+                    ),
               ),
         ],
         close: session?.onClose,
@@ -683,8 +684,8 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
             behavior: HitTestBehavior.opaque,
             dragStartBehavior: DragStartBehavior.down,
             onPanUpdate: (details) => moveBy(details.delta),
-            onSecondaryTapUp: (details) =>
-                _askMenu(details.globalPosition, session),
+            onSecondaryTapUp:
+                (details) => _askMenu(details.globalPosition, session),
             child: MouseRegion(
               cursor: SystemMouseCursors.grab,
               child: SizedBox(

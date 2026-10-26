@@ -7,7 +7,8 @@ enum StubPermission { granted, denied, permanentlyDenied }
 /// Answers the channels of plugins that have no implementation for the
 /// runner's host, as a phone would, so the app goes on as it would there
 /// (#195): permissions granted (or as [permission] says), a foreground
-/// service that starts and stops, ads that initialize and never fill.
+/// service that starts and stops, ads that initialize and never fill, a
+/// vibration that does nothing.
 /// Only messages no native plugin took reach the client, so a plugin the
 /// runner loaded is never answered here. A method not listed stays "no
 /// plugin", as before.
@@ -23,6 +24,7 @@ final class PluginStubs {
     'permission_handler',
     'google_mobile_ads',
     'flutter_foreground_task',
+    'vibration',
   };
 
   /// Told the first time each plugin is answered here.
@@ -41,6 +43,9 @@ final class PluginStubs {
   static const String foregroundTaskBackgroundChannel =
       'flutter_foreground_task/background';
 
+  /// `vibration`'s channel (Android and iOS only).
+  static const String vibrationChannel = 'vibration';
+
   static const MethodCodec _codec = StandardMethodCodec();
 
   final _answered = <String>{};
@@ -52,7 +57,8 @@ final class PluginStubs {
       ..registerChannel(permissionHandlerChannel, handlePermissionHandler)
       ..registerChannel(mobileAdsChannel, handleMobileAds)
       ..registerChannel(foregroundTaskChannel, handleForegroundTask)
-      ..registerChannel(foregroundTaskBackgroundChannel, handleForegroundTask);
+      ..registerChannel(foregroundTaskBackgroundChannel, handleForegroundTask)
+      ..registerChannel(vibrationChannel, handleVibration);
   }
 
   /// permission_handler sends a permission's int and reads a
@@ -160,6 +166,19 @@ final class PluginStubs {
       default:
         return null;
     }
+  }
+
+  /// vibration's Dart side says a desktop has no vibrator without asking;
+  /// a vibrate the app doesn't await would throw, so it is answered, and
+  /// custom patterns aren't supported, as with no vibrator.
+  Future<Uint8List?> handleVibration(Uint8List data) async {
+    final call = _codec.decodeMethodCall(ByteData.sublistView(data));
+    return switch (call.method) {
+      'vibrate' || 'cancel' => _success('vibration', null),
+      'hasCustomVibrationsSupport' ||
+      'hasAmplitudeControl' => _success('vibration', false),
+      _ => null,
+    };
   }
 
   Uint8List _success(String plugin, Object? result) {
