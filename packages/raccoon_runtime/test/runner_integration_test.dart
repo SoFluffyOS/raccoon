@@ -4985,8 +4985,9 @@ class Report extends StatelessWidget {
           await done.future.timeout(const Duration(seconds: 20)),
           contains('MODAL:done'),
         );
-        // Two seconds at 60 Hz are 120 frames; a held loop sends none.
-        expect(during, greaterThan(30));
+        // Two seconds at 60 Hz are 120 frames; a held loop sends none, so
+        // 10 tells them apart on a loaded CI runner too (one drew 27).
+        expect(during, greaterThan(10));
       } finally {
         await frames.cancel();
         client.shutdown();
