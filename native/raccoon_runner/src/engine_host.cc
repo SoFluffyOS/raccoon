@@ -178,6 +178,9 @@ void EngineHost::SendHostSettings() {
   HostSettings settings = ReadHostSettings();
   const SettingsOverride& device = settings_override_;
   if (!device.locales.empty()) settings.locales = device.locales;
+  // The engine keeps the last locales it was told: a host with none of its
+  // own, after a client's, is "undetermined", as an app told nothing sees.
+  if (settings.locales.empty() && locales_sent_) settings.locales.push_back({"und", "", ""});
   if (device.dark) settings.dark = *device.dark;
   if (device.always_24_hour) settings.always_24_hour = *device.always_24_hour;
   std::vector<FlutterLocale> locales;
@@ -193,6 +196,7 @@ void EngineHost::SendHostSettings() {
   for (const FlutterLocale& locale : locales) pointers.push_back(&locale);
   if (!pointers.empty()) {
     loader_.procs().UpdateLocales(engine_, pointers.data(), pointers.size());
+    locales_sent_ = true;
   }
   const std::string json = nlohmann::json{
       {"textScaleFactor", device.text_scale.value_or(1.0)},
