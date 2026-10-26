@@ -15,9 +15,13 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <functional>
+#include <map>
 #include <memory>
+#include <string>
 #include <mutex>
 #include <shared_mutex>
 #include <vector>
@@ -513,6 +517,79 @@ struct TextureFrame {
 
 // ---- The host ---------------------------------------------------------------
 
+// ---- Loading ----------------------------------------------------------------
+
+namespace {
+
+// Runs |open| with stderr held, and returns what it printed meanwhile, a
+// line each: the runtime reports a duplicate class as an image maps.
+std::vector<std::string> HoldingStderr(const std::function<void()>& open) {
+  std::vector<std::string> lines;
+  fflush(stderr);
+  const int saved = dup(STDERR_FILENO);
+  FILE* held = tmpfile();
+  if (saved >= 0 && held != nullptr) dup2(fileno(held), STDERR_FILENO);
+  open();
+  if (saved >= 0 && held != nullptr) {
+    fflush(stderr);
+    dup2(saved, STDERR_FILENO);
+    rewind(held);
+    char line[4096];
+    while (fgets(line, sizeof(line), held) != nullptr) lines.emplace_back(line);
+  }
+  if (held != nullptr) fclose(held);
+  if (saved >= 0) close(saved);
+  return lines;
+}
+
+// "objc[1]: Class C is implemented in both /x/A (0x1) and /y/B (0x2). ...":
+// C, and A and B by file name. False for any other line.
+bool ParseDuplicate(const std::string& line, std::string* cls, std::string* first,
+                    std::string* second) {
+  const size_t at = line.find("Class ");
+  const size_t both = line.find(" is implemented in both ");
+  if (at == std::string::npos || both == std::string::npos || both < at) return false;
+  *cls = line.substr(at + 6, both - at - 6);
+  const size_t a = both + std::strlen(" is implemented in both ");
+  const size_t a_end = line.find(" (0x", a);
+  const size_t b = line.find(") and ", a_end == std::string::npos ? a : a_end);
+  if (a_end == std::string::npos || b == std::string::npos) return false;
+  const size_t b_end = line.find(" (0x", b + 6);
+  if (b_end == std::string::npos) return false;
+  auto Name = [](const std::string& path) { return path.substr(path.rfind('/') + 1); };
+  *first = Name(line.substr(a, a_end - a));
+  *second = Name(line.substr(b + 6, b_end - b - 6));
+  return true;
+}
+
+// Prints |lines|, the runtime's duplicate classes as one line for each two
+// libraries that share them, with a few of the classes (#198): two plugins
+// that link the same SDK, one as a pod and one as a package, say 25.
+void PrintFolded(const std::vector<std::string>& lines) {
+  std::map<std::pair<std::string, std::string>, std::vector<std::string>> shared;
+  for (const std::string& line : lines) {
+    std::string cls, first, second;
+    if (!ParseDuplicate(line, &cls, &first, &second)) {
+      std::fputs(line.c_str(), stderr);
+      continue;
+    }
+    shared[{first, second}].push_back(cls);
+  }
+  for (auto& [pair, classes] : shared) {
+    std::sort(classes.begin(), classes.end());
+    std::string some;
+    for (size_t i = 0; i < classes.size() && i < 3; ++i) some += (i ? ", " : "") + classes[i];
+    if (classes.size() > 3) some += ", ...";
+    const char* are = classes.size() == 1 ? "class is" : "classes are";
+    std::fprintf(stderr,
+                 "🦝 %zu Objective-C %s in both %s and %s (%s); each calls its own "
+                 "copy, a lookup by name gets either\n",
+                 classes.size(), are, pair.first.c_str(), pair.second.c_str(), some.c_str());
+  }
+}
+
+}  // namespace
+
 namespace raccoon {
 
 struct PluginHost::Impl {
@@ -549,29 +626,20 @@ bool PluginHost::Prepare(const std::string& flutter_framework, std::string* erro
   // classes (channels, codecs, the Darwin helpers), and the runtime prints
   // a line for each as the framework maps. Same engine revision, nothing
   // to act on: those lines go, anything else printed meanwhile stays.
-  fflush(stderr);
-  const int saved = dup(STDERR_FILENO);
-  FILE* held = tmpfile();
-  if (saved >= 0 && held != nullptr) dup2(fileno(held), STDERR_FILENO);
-  void* handle = dlopen(flutter_framework.c_str(), RTLD_NOW | RTLD_GLOBAL);
-  const std::string why = handle == nullptr ? dlerror() : "";
+  void* handle = nullptr;
+  std::string why;
   int shared = 0;
-  if (saved >= 0 && held != nullptr) {
-    fflush(stderr);
-    dup2(saved, STDERR_FILENO);
-    rewind(held);
-    char line[4096];
-    while (fgets(line, sizeof(line), held) != nullptr) {
-      if (std::strstr(line, " is implemented in both ") != nullptr &&
-          std::strstr(line, "FlutterMacOS") != nullptr) {
-        ++shared;
-        continue;
-      }
-      std::fputs(line, stderr);
+  for (const std::string& line : HoldingStderr([&] {
+         handle = dlopen(flutter_framework.c_str(), RTLD_NOW | RTLD_GLOBAL);
+         if (handle == nullptr) why = dlerror();
+       })) {
+    if (line.find(" is implemented in both ") != std::string::npos &&
+        line.find("FlutterMacOS") != std::string::npos) {
+      ++shared;
+      continue;
     }
+    std::fputs(line.c_str(), stderr);
   }
-  if (held != nullptr) fclose(held);
-  if (saved >= 0) close(saved);
   if (shared > 0) {
     std::fprintf(stderr,
                  "🦝 FlutterMacOS shares %d Objective-C classes with the engine "
@@ -601,10 +669,12 @@ bool PluginHost::Load(const PluginEntry& entry, std::string* error) {
     *error = "no library or class";
     return false;
   }
-  if (dlopen(entry.library.c_str(), RTLD_NOW | RTLD_LOCAL) == nullptr) {
-    *error = dlerror();
-    return false;
-  }
+  bool opened = false;
+  PrintFolded(HoldingStderr([&] {
+    opened = dlopen(entry.library.c_str(), RTLD_NOW | RTLD_LOCAL) != nullptr;
+    if (!opened) *error = dlerror();
+  }));
+  if (!opened) return false;
   NSString* name = @(entry.plugin_class.c_str());
   Class cls = nil;
   if (!entry.module.empty()) {

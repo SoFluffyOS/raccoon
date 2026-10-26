@@ -204,8 +204,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   pubspecs goes (#192). A plugin goes with those it is tied to, so a family
   never loads its SDK twice, half package and half pod. What the two sides
   share below that loads twice (Google Sign-In's pod links its own
-  `GTMSessionFetcher` 3 and `GoogleUtilities`, so the runtime warns that
-  25 classes are "implemented in both"); each library calls its own copy.
+  `GTMSessionFetcher` 3 and `GoogleUtilities`: 25 classes "implemented in
+  both", which the runner says in one line for each two libraries, #198);
+  each library calls its own copy.
   Flutter's own build refuses the pair. When it fails otherwise, the plugins that
   have a podspec too go through CocoaPods. When every one of them is a pod in the cache already
   (the release's prebuilt plugins), those load instead of a build. `RACCOON_NO_SWIFT_PACKAGES=1` builds them all through

@@ -5002,6 +5002,100 @@ class Report extends StatelessWidget {
   );
 
   test(
+    'classes two plugins both carry are said once for the two',
+    () async {
+      // #198: a pod and a package of the same SDK each link it, and the
+      // runtime printed a line per class, 25 for Firebase and Google
+      // Sign-In. Two libraries with the same two classes stand in.
+      final temp = Directory.systemTemp.createTempSync('raccoon_twins');
+      final libraries = <String>[];
+      for (final name in ['twin_a', 'twin_b']) {
+        final source = File(p.join(temp.path, '$name.m'))..writeAsStringSync(
+          '#import <Foundation/Foundation.h>\n'
+          '@interface RaccoonTwinOne : NSObject\n@end\n'
+          '@implementation RaccoonTwinOne\n@end\n'
+          '@interface RaccoonTwinTwo : NSObject\n@end\n'
+          '@implementation RaccoonTwinTwo\n@end\n',
+        );
+        final library = p.join(temp.path, 'lib$name.dylib');
+        final built = await Process.run('clang', [
+          '-dynamiclib',
+          '-framework',
+          'Foundation',
+          source.path,
+          '-o',
+          library,
+        ]);
+        expect(built.exitCode, 0, reason: '${built.stderr}');
+        libraries.add(library);
+      }
+      final manifest = File(p.join(temp.path, 'plugins.json'))
+        ..writeAsStringSync(
+          jsonEncode({
+            'flutter_framework': flutterFramework,
+            'plugins': [
+              for (final (index, library) in libraries.indexed)
+                {
+                  'name': 'twin_$index',
+                  'library': library,
+                  'class': 'RaccoonTwinOne',
+                },
+            ],
+          }),
+        );
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: pluginsAppAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          plugins: manifest.path,
+        ),
+      );
+      final stderr = <String>[];
+      runner.stderr.listen(stderr.add);
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        await client.plugins.first.timeout(const Duration(seconds: 10));
+        final deadline = DateTime.now().add(const Duration(seconds: 10));
+        while (!stderr.any((line) => line.contains('Objective-C classes')) &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        expect(
+          stderr.where((line) => line.contains('is implemented in both')),
+          isEmpty,
+        );
+        expect(
+          stderr,
+          contains(
+            '🦝 2 Objective-C classes are in both libtwin_a.dylib and '
+            'libtwin_b.dylib (RaccoonTwinOne, RaccoonTwinTwo); each calls its '
+            'own copy, a lookup by name gets either',
+          ),
+        );
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        !Platform.isMacOS
+            ? 'Objective-C classes are macOS'
+            : ready &&
+                flutterFramework != null &&
+                Directory(pluginsAppAssets).existsSync()
+            ? false
+            : 'build the runner with plugins and example/plugins_app first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'the runner tells a client what became of the plugins',
     () async {
       // The manifest carries the helper's word on what never got as far as a
