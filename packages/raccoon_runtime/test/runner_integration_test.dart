@@ -972,10 +972,18 @@ void main() {
 
         // #191: one Swift package that does not resolve (its product named
         // other than Flutter names it) leaves the others to build.
-        void swiftPlugin(String name, String className, {String? product}) {
+        void swiftPlugin(
+          String name,
+          String className, {
+          String? product,
+          String? shared,
+          String? needs,
+        }) {
           write(
             '$name/pubspec.yaml',
-            'name: $name\nversion: 1.0.0\nflutter:\n  plugin:\n    platforms:\n'
+            'name: $name\nversion: 1.0.0\n'
+                '${needs == null ? '' : 'dependencies:\n  $needs:\n'}'
+                'flutter:\n  plugin:\n    platforms:\n'
                 '      macos:\n        pluginClass: $className\n',
           );
           write(
@@ -983,9 +991,11 @@ void main() {
             '// swift-tools-version: 5.9\nimport PackageDescription\n'
                 'let package = Package(name: "$name", platforms: [.macOS("10.15")],\n'
                 '  products: [.library(name: "${product ?? name.replaceAll('_', '-')}", targets: ["$name"])],\n'
-                '  dependencies: [.package(name: "FlutterFramework", path: "../FlutterFramework")],\n'
+                '  dependencies: [.package(name: "FlutterFramework", path: "../FlutterFramework")'
+                '${shared == null ? '' : ', .package(url: "file://${p.join(temp.path, 'shared')}", exact: "$shared")'}],\n'
                 '  targets: [.target(name: "$name", dependencies: [\n'
-                '    .product(name: "FlutterFramework", package: "FlutterFramework")])])\n',
+                '    .product(name: "FlutterFramework", package: "FlutterFramework")'
+                '${shared == null ? '' : ', .product(name: "Shared", package: "shared")'}])])\n',
           );
           write(
             '$name/macos/$name/Sources/$name/include/$className.h',
@@ -1022,6 +1032,53 @@ void main() {
         expect(
           '${((next['status'] as List).single as Map)['detail']}',
           contains('kept from'),
+        );
+
+        // #192: two that want versions of a third no one version gives. The
+        // side with fewer plugins tied to it goes, though the error names
+        // the other first.
+        Future<void> git(List<String> args) async {
+          final result = await Process.run('git', [
+            '-c',
+            'user.name=raccoon',
+            '-c',
+            'user.email=raccoon@example.com',
+            '-c',
+            'commit.gpgsign=false',
+            '-c',
+            'tag.gpgsign=false',
+            ...args,
+          ], workingDirectory: p.join(temp.path, 'shared'));
+          expect(result.exitCode, 0, reason: '${result.stderr}');
+        }
+
+        write(
+          'shared/Package.swift',
+          '// swift-tools-version: 5.9\nimport PackageDescription\n'
+              'let package = Package(name: "Shared",\n'
+              '  products: [.library(name: "Shared", targets: ["Shared"])],\n'
+              '  targets: [.target(name: "Shared")])\n',
+        );
+        write('shared/Sources/Shared/Shared.swift', 'public let shared = 1\n');
+        await git(['init', '-q']);
+        await git(['add', '.']);
+        await git(['commit', '-qm', 'one']);
+        await git(['tag', '1.0.0']);
+        write('shared/Sources/Shared/Shared.swift', 'public let shared = 2\n');
+        await git(['commit', '-qam', 'two']);
+        await git(['tag', '2.0.0']);
+        swiftPlugin('plugin_j', 'PluginJ', shared: '1.0.0');
+        swiftPlugin('plugin_k', 'PluginK', shared: '2.0.0');
+        swiftPlugin('plugin_l', 'PluginL', needs: 'plugin_j');
+        configure(['plugin_j', 'plugin_k', 'plugin_l']);
+        final conflict = await install();
+        expect(loaded(conflict), ['plugin_j', 'plugin_l']);
+        expect(
+          [
+            for (final entry in conflict['status'] as List)
+              '${(entry as Map)['name']}',
+          ],
+          ['plugin_k'],
         );
       } finally {
         temp.deleteSync(recursive: true);

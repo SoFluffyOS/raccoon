@@ -192,7 +192,15 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   Xcode only. It is cached by the plugins' keys together and kept failed
   like a pod. The plugins its errors name (a package that does not
   resolve, a source that does not compile) are left out and the rest built
-  again, as for pods (#191); when it fails otherwise, the plugins that
+  again, as for pods (#191). Two that pin versions of a third no one
+  version gives (FlutterFire 13 and Google Sign-In 9, through
+  `gtm-session-fetcher`): the side with fewer plugins tied to it by their
+  pubspecs goes (#192). A plugin goes with those it is tied to, so a family
+  never loads its SDK twice, half package and half pod. What the two sides
+  share below that loads twice (Google Sign-In's pod links its own
+  `GTMSessionFetcher` 3 and `GoogleUtilities`, so the runtime warns that
+  25 classes are "implemented in both"); each library calls its own copy.
+  Flutter's own build refuses the pair. When it fails otherwise, the plugins that
   have a podspec too go through CocoaPods. When every one of them is a pod in the cache already
   (the release's prebuilt plugins), those load instead of a build. `RACCOON_NO_SWIFT_PACKAGES=1` builds them all through
   CocoaPods. On an M1 Pro: FlutterFire's core, Auth, Firestore and

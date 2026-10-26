@@ -1085,6 +1085,15 @@ def build_packages(plugins, entry):
                     if "package '%s'" % p['name'] in errors
                     or os.path.realpath(p['package']) + os.sep in errors
                     or os.path.join(packages_dir, p['name']) + os.sep in errors}
+        # Two that want versions of a third no one version gives (Firebase
+        # and Google Sign-In, say): the side with fewer plugins tied to it
+        # goes (#192).
+        names = [p['name'] for p in plugins]
+        sides = [n for n in dict.fromkeys(re.findall(r"'([\w-]+)' depends on", errors)) if n in names]
+        if not culprits and sides:
+            culprits = {min(sides, key=lambda n: len(family(n, names)))}
+        # With them: a family half in pods would load its SDK twice.
+        culprits = set().union(*(family(n, names) for n in culprits))
         drop(work)
         return why, culprits
     os.makedirs(cache, exist_ok=True)
@@ -1213,6 +1222,20 @@ built, failed, empty, from_cache = [], [], [], []
 def swift_entry_of(plugins):
     return {'name': 'swift packages', 'key': 'swiftpm-%s' % hashlib.sha256(
         '\n'.join(sorted(p['key'] for p in plugins)).encode('utf-8', 'surrogateescape')).hexdigest()[:16]}
+
+
+def family(name, names):
+    """[name] and those of [names] tied to it through their pubspecs,
+    either way: what shares its native code."""
+    found, pending = set(), [name]
+    while pending:
+        current = pending.pop()
+        if current in found:
+            continue
+        found.add(current)
+        pending.extend(dependencies(by_name.get(current, '')) & set(names))
+        pending.extend(n for n in names if current in dependencies(by_name.get(n, '')))
+    return found
 
 
 def swift_failure_of(plugin):
