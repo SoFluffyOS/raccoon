@@ -201,7 +201,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   again, as for pods (#191). Two that pin versions of a third no one
   version gives (FlutterFire 13 and Google Sign-In 9, through
   `gtm-session-fetcher`): the side with fewer plugins tied to it by their
-  pubspecs goes (#192). A plugin goes with those it is tied to, so a family
+  pubspecs goes (#192). A plugin left out is kept out while the app's set
+  of Swift packages stays the same, and tried again when it changes, the
+  other side of a conflict gone, say (#203). A plugin goes with those it is tied to, so a family
   never loads its SDK twice, half package and half pod. What the two sides
   share below that loads twice (Google Sign-In's pod links its own
   `GTMSessionFetcher` 3 and `GoogleUtilities`: 25 classes "implemented in

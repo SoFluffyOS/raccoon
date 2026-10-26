@@ -1095,7 +1095,7 @@ def build_packages(plugins, entry):
         # With them: a family half in pods would load its SDK twice.
         culprits = set().union(*(family(n, names) for n in culprits))
         drop(work)
-        return why, culprits
+        return why, culprits, kept
     os.makedirs(cache, exist_ok=True)
     staging = tempfile.mkdtemp(prefix=entry['key'] + '.partial-', dir=cache)
     shutil.copytree(framework, os.path.join(staging, SWIFT_FRAMEWORK + '.framework'), symlinks=True)
@@ -1125,7 +1125,7 @@ def build_packages(plugins, entry):
             shutil.copy2(path, target)
     settle(staging, os.path.join(cache, entry['key']), lambda: in_cache(entry))
     drop(work)
-    return None, None
+    return None, None, None
 
 
 def error_lines(log):
@@ -1238,17 +1238,28 @@ def family(name, names):
     return found
 
 
+# The set of Swift packages the app has, before any is left out: what a
+# plugin was left out of. A conflict or a family is about the others too,
+# so a change to the set (the other side of a conflict gone, a member
+# upgraded) tries it again (#203).
+swift_set = hashlib.sha256('\n'.join(sorted(p['key'] for p in swift)).encode(
+    'utf-8', 'surrogateescape')).hexdigest()[:16]
+
+
 def swift_failure_of(plugin):
     # Kept apart from the plugin's pod, which may well build.
-    return {'name': plugin['name'], 'key': 'swiftpm-' + plugin['key']}
+    return {'name': plugin['name'], 'key': 'swiftpm-%s-%s' % (plugin['key'], swift_set)}
 
 
 # A plugin whose package failed the build is left out of the next, for
-# as long as a pod's failure is kept (#191).
+# as long as a pod's failure is kept (#191), with the plugins tied to it
+# (#192): a family half in pods would load its SDK twice (#203).
 swift_dropped = {}  # name: why
+swift_names = [p['name'] for p in swift]
 for plugin in swift:
     if (why := kept_failure(swift_failure_of(plugin))) is not None:
-        swift_dropped[plugin['name']] = why
+        for name in family(plugin['name'], swift_names):
+            swift_dropped.setdefault(name, why)
 swift_all, swift = swift, [p for p in swift if p['name'] not in swift_dropped]
 swift_entry = swift_entry_of(swift)
 swift_why, swift_built = None, False
@@ -1261,7 +1272,7 @@ while swift and not in_cache(swift_entry):
     swift_why = can_build_packages() or kept_failure(swift_entry)
     if swift_why is not None:
         break
-    swift_why, culprits = build_packages(swift, swift_entry)
+    swift_why, culprits, log = build_packages(swift, swift_entry)
     if swift_why is None:
         swift_built = True
         break
@@ -1271,7 +1282,7 @@ while swift and not in_cache(swift_entry):
         break
     for plugin in swift:
         if plugin['name'] in culprits:
-            keep_failure(swift_failure_of(plugin), swift_why, swift_why.rsplit(' ', 1)[-1])
+            keep_failure(swift_failure_of(plugin), swift_why, log)
             swift_dropped[plugin['name']] = swift_why
     swift = [p for p in swift if p['name'] not in culprits]
     swift_entry = swift_entry_of(swift)

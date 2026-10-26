@@ -1080,6 +1080,12 @@ void main() {
           ],
           ['plugin_k'],
         );
+        // #203: with the other side gone, plugin_k builds again rather than
+        // staying left out for a day.
+        configure(['plugin_k']);
+        final alone = await install();
+        expect(loaded(alone), ['plugin_k']);
+        expect(alone['status'], isEmpty);
       } finally {
         temp.deleteSync(recursive: true);
       }
