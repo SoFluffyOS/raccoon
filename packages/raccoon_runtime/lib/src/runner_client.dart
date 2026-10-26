@@ -225,14 +225,18 @@ final class RunnerClient
 
   /// What covers the view's edges from now on, in physical pixels, as the
   /// app sees `MediaQuery.viewInsets`: an on-screen keyboard (#193). Goes
-  /// with every size, the one the view has already too.
+  /// with every size, the one the view has already too; with [resend]
+  /// false only with the next, for a host about to resize the view, so no
+  /// size goes out with the insets of another.
   void setViewInsets({
     double top = 0,
     double right = 0,
     double bottom = 0,
     double left = 0,
+    bool resend = true,
   }) {
     _viewInsets = (top: top, right: right, bottom: bottom, left: left);
+    if (!resend) return;
     if (_size case final size?) {
       resize(size.width, size.height, size.pixelRatio);
     }

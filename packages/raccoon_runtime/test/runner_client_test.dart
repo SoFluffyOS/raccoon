@@ -246,6 +246,25 @@ void main() {
     await shutdown.timeout(const Duration(seconds: 10));
   });
 
+  test('insets go with the next size, or wait for it', () async {
+    final sent = <Resize>[];
+    final subscription = runner.received
+        .where((message) => message.hasResize())
+        .listen((message) => sent.add(message.resize));
+    client
+      ..resize(1170, 2532, 3)
+      ..setViewInsets(bottom: 1008)
+      // A host about to resize the view: the insets wait for its size.
+      ..setViewInsets(bottom: 796, resend: false)
+      ..resize(1640, 2360, 2);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await subscription.cancel();
+    expect(
+      [for (final resize in sent) (resize.width, resize.viewInsetBottom)],
+      [(1170, 0.0), (1170, 1008.0), (1640, 796.0)],
+    );
+  });
+
   test('once a frame arrived, the log no longer counts', () async {
     runner
       ..log(_exception)
