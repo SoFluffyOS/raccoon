@@ -157,7 +157,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   `pluginClass`) in one CMake project with what the desktop template gives
   a plugin, and `run` passes it. Needs cmake, ninja, pkg-config and the
   GTK development files, as the desktop target does; what built is cached
-  by plugin version, runner version and engine, and a release's archive of
+  by plugin version, runner version and engine
+  (`~/.cache/raccoon/plugins/<engine revision>`; a revision no install has
+  used for a month goes, #197), and a release's archive of
   the common plugins (`tool/plugins`, built by CI) drops into that cache
   on the first install, so those cost nothing and a machine without a
   toolchain still gets them. Without a toolchain for the rest, or when a

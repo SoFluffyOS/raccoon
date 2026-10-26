@@ -9,7 +9,7 @@ enum StubPermission { granted, denied, permanentlyDenied }
 /// (#195): permissions granted (or as [permission] says), a foreground
 /// service that starts and stops, ads that initialize and never fill.
 /// Only messages no native plugin took reach the client, so a plugin the
-/// runner loaded is never answered here (#195). A method not listed stays "no
+/// runner loaded is never answered here. A method not listed stays "no
 /// plugin", as before.
 final class PluginStubs {
   PluginStubs({this.permission = StubPermission.granted, this.onAnswered});
