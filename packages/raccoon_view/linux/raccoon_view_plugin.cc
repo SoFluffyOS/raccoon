@@ -258,7 +258,10 @@ static void wait_fence(RaccoonGpuTexture* self, int fd) {
   if (self->wait_sync != nullptr) {
     self->wait_sync(self->display, sync, 0);
   } else {
-    self->client_wait_sync(self->display, sync, 0, EGL_FOREVER_KHR);
+    // On the CPU, so bounded: a runner whose GPU hangs must not hold the
+    // host's raster thread for good (#157). Past it the frame shows as is.
+    constexpr EGLTimeKHR kFenceWaitNs = 100 * 1000 * 1000;
+    self->client_wait_sync(self->display, sync, 0, kFenceWaitNs);
   }
   self->destroy_sync(self->display, sync);
 }
