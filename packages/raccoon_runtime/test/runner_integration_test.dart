@@ -888,6 +888,21 @@ void main() {
       try {
         configure(['plugin_a']);
         expect(loaded(await install()), ['plugin_a']);
+        // #184: nothing reuses a cached plugin's intermediates.
+        final build = p.join(
+          data,
+          'raccoon',
+          'apps',
+          'app',
+          'plugins',
+          'build',
+        );
+        for (final root in ['obj', 'out']) {
+          expect(
+            Directory(p.join(build, root, 'plugin_a')).existsSync(),
+            isFalse,
+          );
+        }
         configure(['plugin_a', 'plugin_b']);
         final second = await install();
         expect(second['status'], isEmpty);

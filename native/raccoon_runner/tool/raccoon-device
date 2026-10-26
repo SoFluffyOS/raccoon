@@ -668,6 +668,13 @@ import hashlib, json, os, re, shutil, subprocess, sys, tarfile, tempfile, time
 started = time.time()
 from urllib.parse import unquote, urlparse
 
+def drop(*paths):
+    """A plugin's build intermediates, once it is cached or has failed: the
+    next install starts from an empty folder, and Firestore's are 1.7 GB
+    (#184)."""
+    for path in paths:
+        shutil.rmtree(path, ignore_errors=True)
+
 def settle(staging, cached, good):
     """Renames [staging] into place as [cached], each install staging on
     its own: an install that finished the same entry first keeps it (#136)."""
@@ -1160,19 +1167,21 @@ if misses:
             broken[name] = toolchain
             continue
         symroot = os.path.join(pods, 'out', name)
+        objroot = os.path.join(pods, 'obj', name)
         build_log = os.path.join(pods, name + '.log')
         with open(build_log, 'w') as log:
             ok = subprocess.run(
                 ['xcodebuild', '-project', os.path.join(pods, 'Pods', 'Pods.xcodeproj'),
                  '-target', name, '-configuration', 'Release',
                  'ARCHS=' + arch, 'ONLY_ACTIVE_ARCH=YES',
-                 'SYMROOT=' + symroot, 'OBJROOT=' + os.path.join(pods, 'obj', name),
+                 'SYMROOT=' + symroot, 'OBJROOT=' + objroot,
                  'LD_RUNPATH_SEARCH_PATHS=@loader_path/../../..',
                  'CODE_SIGNING_ALLOWED=NO', 'build'],
                 env=env, stdout=log, stderr=subprocess.STDOUT).returncode == 0
         if not ok:
             broken[name] = 'did not build; see ' + build_log
             keep_failure(plugin, broken[name], build_log)
+            drop(symroot, objroot)
             continue
         cached = os.path.join(cache, plugin['key'])
         release = os.path.join(symroot, 'Release')
@@ -1196,6 +1205,7 @@ if misses:
             empty.append(name)
             status.append({'name': name, 'state': 'built_nothing', 'detail': 'built and made no framework'})
             broken[name] = None
+            drop(symroot, objroot)
             continue
         # A fresh entry: one built again replaces what an older helper left.
         # Copied aside, then renamed into place: an interrupted copy leaves
@@ -1213,6 +1223,7 @@ if misses:
             else:
                 shutil.copy2(path, target)
         settle(staging, cached, lambda: in_cache(plugin))
+        drop(symroot, objroot)
         built.append(name)
 
 entries = []
