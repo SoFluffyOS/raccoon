@@ -92,4 +92,18 @@ void main() {
     );
     expect(await stubs.handleVibration(call('somethingNew')), isNull);
   });
+
+  test('sensors are listened to and stay quiet', () async {
+    final stubs = PluginStubs();
+    expect(
+      reply(
+        await stubs.handleSensors(
+          call('setAccelerationSamplingPeriod', 200000),
+        ),
+      ),
+      isNull,
+    );
+    expect(reply(await stubs.handleSensors(call('listen'))), isNull);
+    expect(await stubs.handleSensors(call('somethingNew')), isNull);
+  });
 }

@@ -8,7 +8,7 @@ enum StubPermission { granted, denied, permanentlyDenied }
 /// runner's host, as a phone would, so the app goes on as it would there
 /// (#195): permissions granted (or as [permission] says), a foreground
 /// service that starts and stops, ads that initialize and never fill, a
-/// vibration that does nothing.
+/// vibration that does nothing, sensors at rest.
 /// Only messages no native plugin took reach the client, so a plugin the
 /// runner loaded is never answered here. A method not listed stays "no
 /// plugin", as before.
@@ -25,6 +25,7 @@ final class PluginStubs {
     'google_mobile_ads',
     'flutter_foreground_task',
     'vibration',
+    'sensors_plus',
   };
 
   /// Told the first time each plugin is answered here.
@@ -46,6 +47,18 @@ final class PluginStubs {
   /// `vibration`'s channel (Android and iOS only).
   static const String vibrationChannel = 'vibration';
 
+  /// `sensors_plus`'s method channel and its sensors' event channels
+  /// (Android, iOS and the web only).
+  static const String sensorsChannel =
+      'dev.fluttercommunity.plus/sensors/method';
+  static const List<String> sensorEventChannels = [
+    'dev.fluttercommunity.plus/sensors/accelerometer',
+    'dev.fluttercommunity.plus/sensors/user_accel',
+    'dev.fluttercommunity.plus/sensors/gyroscope',
+    'dev.fluttercommunity.plus/sensors/magnetometer',
+    'dev.fluttercommunity.plus/sensors/barometer',
+  ];
+
   static const MethodCodec _codec = StandardMethodCodec();
 
   final _answered = <String>{};
@@ -58,7 +71,11 @@ final class PluginStubs {
       ..registerChannel(mobileAdsChannel, handleMobileAds)
       ..registerChannel(foregroundTaskChannel, handleForegroundTask)
       ..registerChannel(foregroundTaskBackgroundChannel, handleForegroundTask)
-      ..registerChannel(vibrationChannel, handleVibration);
+      ..registerChannel(vibrationChannel, handleVibration)
+      ..registerChannel(sensorsChannel, handleSensors);
+    for (final channel in sensorEventChannels) {
+      client.registerChannel(channel, handleSensors);
+    }
   }
 
   /// permission_handler sends a permission's int and reads a
@@ -177,6 +194,22 @@ final class PluginStubs {
       'vibrate' || 'cancel' => _success('vibration', null),
       'hasCustomVibrationsSupport' ||
       'hasAmplitudeControl' => _success('vibration', false),
+      _ => null,
+    };
+  }
+
+  /// sensors_plus sets its sampling periods without awaiting them, and
+  /// listens to a sensor through its event channel. Both succeed; the
+  /// client can only answer, never send events, so the device reads as at
+  /// rest, its streams quiet.
+  Future<Uint8List?> handleSensors(Uint8List data) async {
+    final call = _codec.decodeMethodCall(ByteData.sublistView(data));
+    return switch (call.method) {
+      'listen' || 'cancel' => _success('sensors_plus', null),
+      final String method when method.endsWith('SamplingPeriod') => _success(
+        'sensors_plus',
+        null,
+      ),
       _ => null,
     };
   }
