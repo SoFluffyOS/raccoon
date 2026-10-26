@@ -5662,6 +5662,51 @@ class Report extends StatelessWidget {
   }
 
   test(
+    'a call before the first client waits for it, and the client answers',
+    () async {
+      // #196: example/no_plugin calls its channel at once in main(); the
+      // client comes 400 ms later, as an IDE that polls for runners may.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: noPluginAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      final client = await RunnerClient.connect(endpoint);
+      // A string, as the standard codec writes 'ok'.
+      client.registerChannel(
+        pigeonChannel,
+        (_) async => Uint8List.fromList([7, 2, 0x6f, 0x6b]),
+      );
+      try {
+        await client.frames.first.timeout(const Duration(seconds: 15));
+        expect(
+          output.where((line) => line.startsWith('NO_PLUGIN:')).single,
+          startsWith('NO_PLUGIN:ok after'),
+        );
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready && Directory(noPluginAssets).existsSync()
+            ? false
+            : 'build the runner and example/no_plugin first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'a plugin nobody serves before runApp gets no reply at once, and the '
     'client is told why the app stopped',
     () async {

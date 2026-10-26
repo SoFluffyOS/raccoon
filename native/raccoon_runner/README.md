@@ -298,8 +298,12 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   each reason, stderr says `🦝 nothing answered CHANNEL (WHY); the app
   sees no plugin`. The engine's own `flutter/` channels are
   left out: a null reply there is normal. A message the client takes and
-  does not answer within 5 seconds gets the same empty reply. No plugin is
-  faked: a made-up success would break Pigeon plugins worse.
+  does not answer within 5 seconds gets the same empty reply. One sent
+  before any client has come waits up to 1 second for the first, which an
+  IDE polling for runners may be later than an app's first call in
+  `main()` (#196). The runner fakes no plugin: a made-up success would
+  break Pigeon plugins worse. The answers a phone gives come from the
+  client, typed per plugin (`PluginStubs` in `raccoon_view`, #195).
 - `serve` relays the app's log to the client as `LogLine` messages: the
   engine's lines, and stderr, where the engine prints what `main()` died of
   (`Unhandled Exception: ...`). Stderr passes through a pipe the runner

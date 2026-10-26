@@ -81,6 +81,10 @@ struct Options {
 constexpr auto kReplyTimeout = std::chrono::seconds(5);
 const std::string kNoReplyWhy =
     "the client did not answer in " + std::to_string(kReplyTimeout.count()) + " s";
+// How long a platform message the app sends before any client came waits
+// for the first one (#196): an IDE finds a new runner by polling its
+// socket directory, and an app calls its plugins from the top of main().
+constexpr auto kFirstClientWait = std::chrono::seconds(1);
 
 // The log lines kept from before the first frame, the latest, for a client
 // that arrives after them: an app that dies in main() has said why by then.
@@ -737,15 +741,21 @@ int Serve(const Options& options) {
   std::unordered_map<uint64_t, Pending> pending;
   uint64_t next_response_id = 1;
 
+  // What the app sent before any client came, for the first one, until
+  // its wait is over.
+  struct Early {
+    std::string channel;
+    std::string data;
+    const FlutterPlatformMessageResponseHandle* handle;
+    std::chrono::steady_clock::time_point deadline;
+  };
+  std::deque<Early> early;
+  bool had_client = false;
+
   // The app's platform messages go to the first client, which serves them
   // for every view.
-  host.SetPlatformMessageCallback(
-      [&](const std::string& channel, const uint8_t* data, size_t size,
-          const FlutterPlatformMessageResponseHandle* handle) {
-        if (!first.server->has_client()) {
-          host.RespondNoPlugin(channel, handle, "no client");
-          return;
-        }
+  auto Forward = [&](const std::string& channel, const uint8_t* data, size_t size,
+                     const FlutterPlatformMessageResponseHandle* handle) {
         raccoon::v1::RunnerMessage message;
         raccoon::v1::PlatformMessage* out = message.mutable_platform_message();
         out->set_channel(channel);
@@ -762,12 +772,34 @@ int Serve(const Options& options) {
             pending.erase(out->response_id()) == 1) {
           host.RespondNoPlugin(channel, handle, "no client");
         }
+  };
+  host.SetPlatformMessageCallback(
+      [&](const std::string& channel, const uint8_t* data, size_t size,
+          const FlutterPlatformMessageResponseHandle* handle) {
+        if (first.server->has_client()) {
+          Forward(channel, data, size, handle);
+          return;
+        }
+        if (had_client || handle == nullptr) {
+          host.RespondNoPlugin(channel, handle, "no client");
+          return;
+        }
+        early.push_back({channel, std::string(reinterpret_cast<const char*>(data), size),
+                         handle, std::chrono::steady_clock::now() + kFirstClientWait});
       });
   // Answers what the client left too long; how long the loop may sleep
   // before the next one is due, at most |cap|.
   auto ExpireReplies = [&](int cap) {
     const auto now = std::chrono::steady_clock::now();
     int wait = cap;
+    while (!early.empty() && early.front().deadline <= now) {
+      host.RespondNoPlugin(early.front().channel, early.front().handle, "no client");
+      early.pop_front();
+    }
+    if (!early.empty()) {
+      const long left = MillisBetween(now, early.front().deadline) + 1;
+      if (left < wait) wait = static_cast<int>(left);
+    }
     for (auto it = pending.begin(); it != pending.end();) {
       if (it->second.deadline <= now) {
         host.RespondNoPlugin(it->second.channel, it->second.handle, kNoReplyWhy.c_str());
@@ -1076,6 +1108,13 @@ int Serve(const Options& options) {
     // What the app said before it drew anything, why it stopped if it did.
     for (const auto& line : startup_lines) first.server->Send(line);
     std::fprintf(stderr, "🦝 client connected\n");
+    had_client = true;
+    while (!early.empty()) {
+      const Early waiting = std::move(early.front());
+      early.pop_front();
+      Forward(waiting.channel, reinterpret_cast<const uint8_t*>(waiting.data.data()),
+              waiting.data.size(), waiting.handle);
+    }
   };
   handler.on_client_disconnected = [&, disconnected = handler.on_client_disconnected] {
     // Nobody will answer these now; let the app see "no plugin".
