@@ -37,6 +37,11 @@ at rest). Only calls no native plugin took reach the client, so a loaded
 plugin is never answered by them; `PluginStubs.plugins` names them, for a
 host that warns about plugins whose calls fail.
 
+`RemoteMessages.send` sends the app a push notification the way
+firebase_messaging's native half delivers one: its
+`FirebaseMessaging.onMessage`, or `onMessageOpenedApp` for one the user
+tapped, gets a `RemoteMessage`. No Firebase project is involved.
+
 Uses no Material or Cupertino widgets.
 
 ## Issues
