@@ -797,12 +797,20 @@ def dependencies(pubspec):
     if not found:
         return set()
     names = set()
+    # The entries sit at the indentation of the first, two spaces, four or
+    # a tab; deeper lines are an entry's own keys (path:, git:).
+    level = None
     for line in pubspec[found.end():].splitlines():
         if not line.strip() or line.lstrip().startswith('#'):
             continue
         if not line.startswith((' ', '\t')):
             break
-        named = re.match(r'^  (\w+):', line)
+        indent = line[:len(line) - len(line.lstrip())]
+        if level is None:
+            level = indent
+        if indent != level:
+            continue
+        named = re.match(r'[ \t]*(\w+):', line)
         if named:
             names.add(named.group(1))
     return names

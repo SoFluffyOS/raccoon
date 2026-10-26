@@ -982,7 +982,8 @@ void main() {
           write(
             '$name/pubspec.yaml',
             'name: $name\nversion: 1.0.0\n'
-                '${needs == null ? '' : 'dependencies:\n  $needs:\n'}'
+                // Four spaces, as some pubspecs have them (#203).
+                '${needs == null ? '' : 'dependencies:\n    $needs:\n'}'
                 'flutter:\n  plugin:\n    platforms:\n'
                 '      macos:\n        pluginClass: $className\n',
           );
