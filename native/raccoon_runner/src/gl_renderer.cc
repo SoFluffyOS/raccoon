@@ -442,7 +442,10 @@ void GlRenderer::WaitFence(int fence_fd) {
   if (has_wait_sync_) {
     wait_sync_(display_, sync, 0);
   } else {
-    client_wait_sync_(display_, sync, 0, EGL_FOREVER_KHR);
+    // On the CPU, so bounded: a host whose GPU hangs reading the buffer
+    // must not hold the app's raster thread for good (raccoon#157).
+    constexpr EGLTimeKHR kFenceWaitNs = 100 * 1000 * 1000;
+    client_wait_sync_(display_, sync, 0, kFenceWaitNs);
   }
   destroy_sync_(display_, sync);
 }
