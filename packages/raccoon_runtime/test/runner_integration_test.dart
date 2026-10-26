@@ -3978,6 +3978,65 @@ class Report extends StatelessWidget {
   // #153: a frame that went by readback for want of a ring buffer was the
   // last an idle app drew, and a client drawing the ring drops it.
   test(
+    'a GPU client takes pixel frames while it wants them, then buffers again',
+    () async {
+      // #202: a capture reads pixels; a GPU buffer frame has none.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint, gpuBuffers: true);
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        final first = await client.frames
+            .firstWhere((frame) => frame.inGpuBuffer)
+            .then<Frame?>((frame) => frame)
+            .timeout(const Duration(seconds: 15), onTimeout: () => null);
+        // Without a GPU (a CI machine) every frame has pixels already.
+        if (first == null) {
+          printOnFailure('no GPU ring on this host');
+          return;
+        }
+        client.releaseGpuBuffer(first.gpuGeneration, first.bufferIndex);
+        // Two captures at once: pixels until both are done.
+        client
+          ..wantPixels(true)
+          ..wantPixels(true);
+        final pixels = await client.frames
+            .firstWhere((frame) => !frame.inGpuBuffer)
+            .timeout(const Duration(seconds: 15));
+        expect(pixels.pixels, isNotEmpty);
+        client.wantPixels(false);
+        // One is still capturing: no ring yet. A redraw shows which.
+        client.resize(810, 600, 1);
+        final still = await client.frames.first.timeout(
+          const Duration(seconds: 15),
+        );
+        expect(still.inGpuBuffer, isFalse);
+        client.wantPixels(false);
+        final again = await client.frames
+            .firstWhere((frame) => frame.inGpuBuffer)
+            .timeout(const Duration(seconds: 15));
+        expect(again.inGpuBuffer, isTrue);
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'a GPU client gets the frame it missed once it gives a buffer back',
     () async {
       final temp = Directory.systemTemp.createTempSync('raccoon_test');

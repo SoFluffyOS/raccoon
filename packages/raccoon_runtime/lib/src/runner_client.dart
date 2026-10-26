@@ -32,21 +32,45 @@ final class RunnerClient
       onDone: _onDone,
       onError: _onError,
     );
-    _sayHello(sharedBuffers: _transport.receivesHandles);
+    _sharedBuffers = _transport.receivesHandles;
+    _sayHello();
   }
 
-  void _sayHello({required bool sharedBuffers}) => send(
+  /// Whether the runner fills shared buffers for this client: until a set
+  /// came short of its descriptors.
+  late bool _sharedBuffers;
+
+  /// How many captures want pixel frames now (#202).
+  var _pixelWants = 0;
+
+  void _sayHello() => send(
     ClientMessage(
       hello: ClientHello(
         pid: io.pid,
         composes: composes,
-        gpuBuffers: gpuBuffers,
+        gpuBuffers: gpuBuffers && _pixelWants == 0,
         protocolVersion: RaccoonProtocol.version,
         clientName: 'raccoon_runtime',
-        sharedBuffers: sharedBuffers,
+        sharedBuffers: _sharedBuffers,
       ),
     ),
   );
+
+  /// Frames with pixels in place of GPU buffers while a capture wants them
+  /// (#202): a screenshot or a recording reads pixels, which a GPU buffer
+  /// frame has none of. Each [on] is undone by an [on] false, and pixels go
+  /// on until the last. The runner reads them back meanwhile, and a view
+  /// goes on showing its ring. Nothing for a client without GPU buffers.
+  void wantPixels(bool on) {
+    if (!gpuBuffers) return;
+    final before = _pixelWants;
+    _pixelWants = switch (on) {
+      true => _pixelWants + 1,
+      false when _pixelWants > 0 => _pixelWants - 1,
+      false => 0,
+    };
+    if ((before == 0) != (_pixelWants == 0)) _sayHello();
+  }
 
   /// Connects to the runner at [endpoint] and sends the client hello. With
   /// [composes] the client promises to mirror the app's active text field in
@@ -505,7 +529,10 @@ final class RunnerClient
       // numbers its sets drops its pool for that; an older one would keep
       // filling it and never send another set, so it is left to the next
       // resize, as before (#148).
-      if (buffers.generation != 0) _sayHello(sharedBuffers: false);
+      if (buffers.generation != 0) {
+        _sharedBuffers = false;
+        _sayHello();
+      }
       return;
     }
     _buffers = _handles.sublist(0, count);
