@@ -1174,21 +1174,25 @@ void main() {
         'plugin_f/macos/Classes/PluginF.h',
         '@import FlutterMacOS;\n@interface PluginF : NSObject <FlutterPlugin>\n@end\n',
       );
-      void source({required bool compiles}) => write(
+      void source({
+        required bool compiles,
+        String broken = 'not code;',
+      }) => write(
         'plugin_f/macos/Classes/PluginF.m',
         '#import "PluginF.h"\n@implementation PluginF\n'
             '+ (void)registerWithRegistrar:(id<FlutterPluginRegistrar>)registrar {\n'
-            '  ${compiles ? '' : 'not code;'}\n}\n@end\n',
+            '  ${compiles ? '' : broken}\n}\n@end\n',
       );
       write(
         'plugin_f/linux/CMakeLists.txt',
         'cmake_minimum_required(VERSION 3.14)\n'
             'add_library(plugin_f_plugin SHARED plugin_f.cc)\n',
       );
-      void linuxSource({required bool compiles}) => write(
-        'plugin_f/linux/plugin_f.cc',
-        compiles ? 'int plugin_f_value() { return 1; }\n' : 'not code;\n',
-      );
+      void linuxSource({required bool compiles, String broken = 'not code;'}) =>
+          write(
+            'plugin_f/linux/plugin_f.cc',
+            compiles ? 'int plugin_f_value() { return 1; }\n' : '$broken\n',
+          );
       source(compiles: false);
       linuxSource(compiles: false);
       write('app/pubspec.yaml', 'name: app\ndependencies:\n  plugin_f:\n');
@@ -1259,6 +1263,13 @@ void main() {
         source(compiles: true);
         linuxSource(compiles: true);
         expect(await install(), isNull);
+        // A build the machine stopped (a full disk) is not the plugin's
+        // fault, and is not kept.
+        const full = '#error No space left on device';
+        source(compiles: false, broken: full);
+        linuxSource(compiles: false, broken: full);
+        expect(await install(), startsWith('did not build'));
+        expect(await install(), isNot(contains('kept')));
       } finally {
         temp.deleteSync(recursive: true);
       }

@@ -546,9 +546,19 @@ def kept_failure(plugin):
         kept.get('why', 'failed'), time.strftime('%Y-%m-%d %H:%M', time.localtime(kept['at'])))
 
 
+def machine_stopped(log):
+    text = open(log, errors='replace').read()
+    return any(sign in text for sign in
+               ('No space left on device', 'disk I/O error', '** BUILD INTERRUPTED **'))
+
+
 def keep_failure(plugin, why, log):
     """Keeps [plugin]'s failure, with a copy of [log] beside it, which the
-    reason names: the install's own is written over by the next."""
+    reason names: the install's own is written over by the next. Not one
+    the machine stopped (a full disk, an interrupted build): the plugin
+    would be held back for nothing."""
+    if os.path.isfile(log) and machine_stopped(log):
+        return
     record = failure_path(plugin)
     os.makedirs(os.path.dirname(record), exist_ok=True)
     if os.path.isfile(log):
@@ -937,9 +947,19 @@ def kept_failure(plugin):
         kept.get('why', 'failed'), time.strftime('%Y-%m-%d %H:%M', time.localtime(kept['at'])))
 
 
+def machine_stopped(log):
+    text = open(log, errors='replace').read()
+    return any(sign in text for sign in
+               ('No space left on device', 'disk I/O error', '** BUILD INTERRUPTED **'))
+
+
 def keep_failure(plugin, why, log):
     """Keeps [plugin]'s failure, with a copy of [log] beside it, which the
-    reason names: the install's own is written over by the next."""
+    reason names: the install's own is written over by the next. Not one
+    the machine stopped (a full disk, an interrupted build): the plugin
+    would be held back for nothing."""
+    if log and os.path.isfile(log) and machine_stopped(log):
+        return
     record = failure_path(plugin)
     os.makedirs(os.path.dirname(record), exist_ok=True)
     if log and os.path.isfile(log):

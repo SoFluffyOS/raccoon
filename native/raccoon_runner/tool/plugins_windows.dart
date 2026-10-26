@@ -293,6 +293,12 @@ String? _keptFailure(
       'RACCOON_RETRY_PLUGINS=1 builds it again)';
 }
 
+bool _machineStopped(File log) {
+  final text = log.readAsStringSync(encoding: latin1);
+  return text.contains('There is not enough space on the disk') ||
+      text.contains('No space left on device');
+}
+
 /// Keeps [plugin]'s failure, [why], with a copy of [log] beside it, and
 /// returns [why] naming that copy: the install's own is written over by
 /// the next.
@@ -303,6 +309,8 @@ String _keepFailure(
   String why,
   File log,
 ) {
+  // Not one the machine stopped: a full disk holds no plugin back.
+  if (log.existsSync() && _machineStopped(log)) return why;
   final record = _failureFile(cache, plugin);
   record.parent.createSync(recursive: true);
   var kept = why;
