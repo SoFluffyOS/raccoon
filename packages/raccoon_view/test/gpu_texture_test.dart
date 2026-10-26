@@ -84,6 +84,12 @@ class _GatedTextures extends _FakeTextures {
   }
 }
 
+/// A connection whose client asked for pixel frames for a capture (#204).
+class _CapturingConnection extends _GpuConnection implements CaptureConnection {
+  @override
+  bool get pixelsWanted => true;
+}
+
 rc.GpuBuffers _set(String socket) => rc.GpuBuffers(
   generation: 1,
   count: 3,
@@ -441,6 +447,47 @@ void main() {
     );
     expect(first.released, [(1, 0)]);
     expect(second.released, isEmpty);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('pixel frames a capture asked for show at once', (tester) async {
+    final connection = _CapturingConnection();
+    final textures = _FakeTextures(releases: true);
+    await tester.pumpWidget(
+      RaccoonView(connection: connection, gpuTextures: textures),
+    );
+    connection.sets.add(_set('/run/r.gpu'));
+    await tester.pump();
+    connection.frameController.add(
+      rc.Frame(
+        sequence: Int64(1),
+        inGpuBuffer: true,
+        bufferIndex: 0,
+        gpuGeneration: 1,
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(Texture), findsOneWidget);
+
+    // The ring is live, but the client traded it for pixels: shown, not
+    // dropped for half a second.
+    connection.frameController.add(
+      rc.Frame(
+        sequence: Int64(2),
+        width: 8,
+        height: 8,
+        rowBytes: 32,
+        format: rc.PixelFormat.PIXEL_FORMAT_BGRA8888,
+        pixels: List.filled(8 * 8 * 4, 0xFF),
+      ),
+    );
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(RaccoonFrameView), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 

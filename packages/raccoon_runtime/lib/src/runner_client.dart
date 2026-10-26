@@ -19,7 +19,8 @@ final class RunnerClient
         RunnerConnection,
         ComposingConnection,
         GpuBufferConnection,
-        ChannelConnection {
+        ChannelConnection,
+        CaptureConnection {
   RunnerClient._(
     this._transport, {
     required this.composes,
@@ -42,6 +43,9 @@ final class RunnerClient
 
   /// How many captures want pixel frames now (#202).
   var _pixelWants = 0;
+
+  @override
+  bool get pixelsWanted => _pixelWants > 0;
 
   void _sayHello() => send(
     ClientMessage(

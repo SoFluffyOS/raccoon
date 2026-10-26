@@ -71,3 +71,11 @@ abstract interface class ChannelConnection implements RunnerConnection {
   /// Stops serving [channel]; the app's calls on it get "no plugin" again.
   void unregisterChannel(String channel);
 }
+
+/// A connection whose client can ask for frames with pixels while it is on
+/// GPU buffers (#202): a view shows those at once rather than waiting for
+/// its ring to go quiet (#204).
+abstract interface class CaptureConnection implements RunnerConnection {
+  /// Whether a capture wants pixel frames now.
+  bool get pixelsWanted;
+}

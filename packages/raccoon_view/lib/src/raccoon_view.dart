@@ -13,6 +13,7 @@ import 'package:raccoon_view/src/frame_view.dart';
 import 'package:raccoon_runtime/raccoon_runtime.dart'
     show
         RunnerConnection,
+        CaptureConnection,
         ComposingConnection,
         GpuBufferConnection,
         ChannelConnection;
@@ -285,11 +286,18 @@ class _RaccoonViewState extends State<RaccoonView> {
     // While the texture is live the host draws the ring, not pixels: a
     // pixel frame is the runner going by readback for one frame, and
     // decoding it would be for nothing. A ring quiet for a while is given
-    // up on, so an app whose ring died still shows.
-    if (_gpuLive && !_ringQuietNow) return;
+    // up on, so an app whose ring died still shows; one a capture traded
+    // for pixel frames shows them at once (#204).
+    if (_gpuLive && !_ringQuietNow && !_capturing) return;
     _pending = frame;
     unawaited(_decodePending());
   }
+
+  /// Whether the client traded its ring for pixel frames, for a capture.
+  bool get _capturing => switch (widget.connection) {
+    final CaptureConnection connection => connection.pixelsWanted,
+    _ => false,
+  };
 
   bool get _ringQuietNow => switch (_lastGpuFrame) {
     final last? => DateTime.now().difference(last) >= _ringQuiet,
@@ -357,7 +365,9 @@ class _RaccoonViewState extends State<RaccoonView> {
         // The texture goes only once a frame has taken its place: before,
         // the view showed what it had decoded before the ring came, or
         // nothing, until the next frame (#143).
-        if (_gpuLive && _ringQuietNow) setState(() => _gpuLive = false);
+        if (_gpuLive && (_ringQuietNow || _capturing)) {
+          setState(() => _gpuLive = false);
+        }
       }
     } finally {
       _decoding = false;
