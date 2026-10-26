@@ -1,6 +1,7 @@
 name: native_assets_app
 description: The runner's example of a code asset from a build hook.
 publish_to: "none"
+version: 1.2.3+4
 
 environment:
   sdk: ^3.10.0

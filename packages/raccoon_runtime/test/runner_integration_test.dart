@@ -535,6 +535,31 @@ void main() {
           await Future<void>.delayed(const Duration(milliseconds: 100));
         }
         expect(lines, contains(contains('NATIVE:42')));
+        // The app's bundle carries the pubspec's version: 1.2.3+4 (#186).
+        if (Platform.isMacOS) {
+          final plist =
+              File(
+                p.join(
+                  data,
+                  'raccoon',
+                  'apps',
+                  'native_assets_app',
+                  'native_assets_app.app',
+                  'Contents',
+                  'Info.plist',
+                ),
+              ).readAsStringSync();
+          expect(
+            plist,
+            contains(
+              '<key>CFBundleShortVersionString</key><string>1.2.3</string>',
+            ),
+          );
+          expect(
+            plist,
+            contains('<key>CFBundleVersion</key><string>4</string>'),
+          );
+        }
       } finally {
         run.kill();
         await run.exitCode;

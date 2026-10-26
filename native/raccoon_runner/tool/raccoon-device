@@ -132,8 +132,15 @@ package_config() {
 # are named after it). For an app with native plugins or native assets.
 # Prints the path to run.
 app_bundle() {
-  local key="$1" bundle id
+  local key="$1" bundle id version="" versions=""
   bundle="$APPS/$key/$key.app/Contents"
+  # The pubspec's version, as Flutter's macOS build gives it: package_info_plus
+  # reads it here (#186).
+  [ -f "$APPS/$key/version" ] && version="$(cat "$APPS/$key/version")"
+  if [ -n "$version" ]; then
+    versions="  <key>CFBundleShortVersionString</key><string>${version%%+*}</string>
+  <key>CFBundleVersion</key><string>${version#*+}</string>"
+  fi
   id="dev.raccoon.app.$(printf '%s' "$key" | tr -c 'A-Za-z0-9.\n' '-')"
   mkdir -p "$bundle/MacOS"
   ln -sfn "$RUNNER" "$bundle/MacOS/raccoon_runner"
@@ -146,11 +153,19 @@ app_bundle() {
   <key>CFBundleName</key><string>$key</string>
   <key>CFBundleExecutable</key><string>raccoon_runner</string>
   <key>CFBundlePackageType</key><string>APPL</string>
+$versions
   <key>LSUIElement</key><true/>
 </dict>
 </plist>
 PLIST
   echo "$bundle/MacOS/raccoon_runner"
+}
+
+# The pubspec's version: (1.2.3+4), without quotes or a comment, kept to the
+# characters a version has. Nothing when there is none.
+pubspec_version() {
+  sed -n 's/^version:[[:space:]]*//p' "$1/pubspec.yaml" 2>/dev/null | head -n 1 |
+    sed 's/[[:space:]]*#.*//' | tr -cd 'A-Za-z0-9.+-'
 }
 
 # The key an app's socket, store and data are named by: the app name, with
@@ -1541,6 +1556,7 @@ case "$verb" in
     # The project is two levels above its bundle; its native plugins are
     # built for this host and loaded into the runner.
     project="$(cd "$local_path/../.." && pwd)"
+    pubspec_version "$project" > "$APPS/$key/version"
     # A workspace member's config is written into build/raccoon.
     [ -f "$project/.dart_tool/package_config.json" ] || lock_build "$project"
     # Worked out once: for a pub workspace member it runs package_scope.
