@@ -4275,20 +4275,20 @@ class Report extends StatelessWidget {
             .timeout(const Duration(seconds: 15));
         expect(field.text, '');
         expect(field.multiline, isFalse);
+        // Waits for the whole list: 'TEXT:tiếng' contains 'TEXT:tiến', so
+        // waiting for a line with the last one ended before it came.
         Future<void> texts(List<String> expected) async {
+          List<String> seen() => [
+            for (final line in output)
+              if (line.contains('TEXT:')) line.substring(line.indexOf('TEXT:')),
+          ];
+          final wanted = [for (final text in expected) 'TEXT:$text'];
           final deadline = DateTime.now().add(const Duration(seconds: 10));
-          while (!output.any(
-                (line) => line.contains('TEXT:${expected.last}'),
-              ) &&
+          while (seen().length < wanted.length &&
               DateTime.now().isBefore(deadline)) {
             await Future<void>.delayed(const Duration(milliseconds: 100));
           }
-          expect(
-            output
-                .where((line) => line.contains('TEXT:'))
-                .map((line) => line.substring(line.indexOf('TEXT:'))),
-            [for (final text in expected) 'TEXT:$text'],
-          );
+          expect(seen(), wanted);
         }
 
         // The host's input method composes "tiế", then commits "tiếng".
