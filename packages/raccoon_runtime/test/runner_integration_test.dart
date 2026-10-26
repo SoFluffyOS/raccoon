@@ -1089,7 +1089,9 @@ void main() {
       (_, false) => 'CocoaPods plugins are macOS',
       _ => false,
     },
-    timeout: const Timeout(Duration(minutes: 5)),
+    // Pods, Swift packages, their culprits and a version conflict, each
+    // built cold: past 5 minutes on an Intel CI runner.
+    timeout: const Timeout(Duration(minutes: 10)),
   );
   // #122: one failed download turned prebuilts off for good, and an
   // interrupted unpack left half entries that counted as cached.
