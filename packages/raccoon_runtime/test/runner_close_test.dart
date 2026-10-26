@@ -17,11 +17,13 @@ import 'package:test/test.dart';
 Future<void> _busyRunner((String, SendPort) args) async {
   final (path, report) = args;
   final commands = ReceivePort();
-  report.send(commands.sendPort);
   final server = await ServerSocket.bind(
     InternetAddress(path, type: InternetAddressType.unix),
     0,
   );
+  // Bound and listening: the socket's file appears at bind, before listen,
+  // so it is no sign to connect on (#190).
+  report.send(commands.sendPort);
   final socket = await server.first;
   final unframer = MessageUnframer();
   var shutdown = false;
@@ -81,9 +83,6 @@ void main() {
       await Isolate.spawn(_busyRunner, (path, reports.sendPort));
       await messages.moveNext();
       final commands = messages.current as SendPort;
-      while (!File(path).existsSync()) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
 
       final client = await RunnerClient.connect(UnixSocketEndpoint(path));
       await messages.moveNext();
@@ -111,9 +110,6 @@ void main() {
     await Isolate.spawn(_exitingRunner, (path, reports.sendPort));
     await messages.moveNext();
     final commands = messages.current as SendPort;
-    while (!File(path).existsSync()) {
-      await Future<void>.delayed(const Duration(milliseconds: 10));
-    }
 
     final client = await RunnerClient.connect(UnixSocketEndpoint(path));
     // As a host listens: an error here would go uncaught and fail the test.
@@ -136,11 +132,13 @@ void main() {
 Future<void> _exitingRunner((String, SendPort) args) async {
   final (path, report) = args;
   final commands = ReceivePort();
-  report.send(commands.sendPort);
   final server = await ServerSocket.bind(
     InternetAddress(path, type: InternetAddressType.unix),
     0,
   );
+  // Bound and listening: the socket's file appears at bind, before listen,
+  // so it is no sign to connect on (#190).
+  report.send(commands.sendPort);
   final socket = await server.first;
   socket.done.ignore();
   socket.listen((_) {}, onError: (Object _) {});
