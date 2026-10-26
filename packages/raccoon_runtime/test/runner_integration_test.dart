@@ -4507,6 +4507,14 @@ class Report extends StatelessWidget {
           ),
           isNot(contains('de_DE')),
         );
+        // #201: a keyboard past the view is the whole view, not a size the
+        // engine refuses.
+        client.resize(400, 300, 1);
+        client.setViewInsets(bottom: 900);
+        expect(
+          await device((line) => line.endsWith(';300.0')),
+          endsWith(';300.0'),
+        );
       } finally {
         client.shutdown();
         await client.close();
@@ -4575,6 +4583,63 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready && Directory(channelsAssets).existsSync()
+            ? false
+            : 'build the runner and example/channels first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'an app a client put in the background is resumed when it goes',
+    () async {
+      // #201: the next client would find its frames off.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: channelsAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      Future<void> until(bool Function() done) async {
+        final deadline = DateTime.now().add(const Duration(seconds: 15));
+        while (!done() && DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+      }
+
+      final first = await RunnerClient.connect(endpoint);
+      RunnerClient? second;
+      try {
+        await first.hello.timeout(const Duration(seconds: 10));
+        await until(() => output.any((line) => line.startsWith('DEVICE:')));
+        first.setLifecycle('paused');
+        await until(() => output.contains('LIFECYCLE:paused'));
+        await first.close();
+        await until(
+          () =>
+              output.lastIndexOf('LIFECYCLE:resumed') >
+              output.indexOf('LIFECYCLE:paused'),
+        );
+        expect(
+          output.lastIndexOf('LIFECYCLE:resumed'),
+          greaterThan(output.indexOf('LIFECYCLE:paused')),
+        );
+        second = await RunnerClient.connect(endpoint);
+        await second.hello.timeout(const Duration(seconds: 10));
+      } finally {
+        (second ?? await RunnerClient.connect(endpoint)).shutdown();
+        await second?.close();
         expect(await _exitCode(runner), 0);
         temp.deleteSync(recursive: true);
       }
@@ -5060,6 +5125,66 @@ class Report extends StatelessWidget {
     skip:
         !Platform.isMacOS
             ? 'Objective-C classes are macOS'
+            : ready &&
+                flutterFramework != null &&
+                Directory(pluginsAppAssets).existsSync()
+            ? false
+            : 'build the runner with plugins and example/plugins_app first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'a plugin library that dies as it loads still says why',
+    () async {
+      // #201: stderr is held while a library maps (#198); a fatal signal
+      // writes back what was held before the runner dies.
+      final temp = Directory.systemTemp.createTempSync('raccoon_boom');
+      final source = File(p.join(temp.path, 'boom.c'))..writeAsStringSync(
+        '#include <stdio.h>\n#include <stdlib.h>\n'
+        '__attribute__((constructor)) static void boom(void) {\n'
+        '  fprintf(stderr, "RACCOON_BOOM: the reason\\n");\n'
+        '  abort();\n}\n',
+      );
+      final library = p.join(temp.path, 'libboom.dylib');
+      final built = await Process.run('clang', [
+        '-dynamiclib',
+        source.path,
+        '-o',
+        library,
+      ]);
+      expect(built.exitCode, 0, reason: '${built.stderr}');
+      final manifest = File(p.join(temp.path, 'plugins.json'))
+        ..writeAsStringSync(
+          jsonEncode({
+            'flutter_framework': flutterFramework,
+            'plugins': [
+              {'name': 'boom', 'library': library, 'class': 'Boom'},
+            ],
+          }),
+        );
+      try {
+        final render = await Process.run(binary!, [
+          'render',
+          '--engine-dir',
+          engineDir!,
+          '--assets',
+          pluginsAppAssets,
+          '--icu',
+          icu!,
+          '--plugins',
+          manifest.path,
+          '--out',
+          p.join(temp.path, 'frame.ppm'),
+        ]);
+        expect(render.exitCode, isNot(0));
+        expect('${render.stderr}', contains('RACCOON_BOOM: the reason'));
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        !Platform.isMacOS
+            ? 'held stderr is macOS'
             : ready &&
                 flutterFramework != null &&
                 Directory(pluginsAppAssets).existsSync()

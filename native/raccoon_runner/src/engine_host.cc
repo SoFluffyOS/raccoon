@@ -231,10 +231,16 @@ FlutterWindowMetricsEvent FitMetrics(size_t width, size_t height, double pixel_r
   metrics.width = width;
   metrics.height = height;
   metrics.pixel_ratio = pixel_ratio;
-  metrics.physical_view_inset_top = insets.top * *scale;
-  metrics.physical_view_inset_right = insets.right * *scale;
-  metrics.physical_view_inset_bottom = insets.bottom * *scale;
-  metrics.physical_view_inset_left = insets.left * *scale;
+  // The engine refuses metrics whose insets are negative or past the view
+  // (#201): a keyboard the client sized for a taller view, say.
+  auto Bounded = [&](double inset, size_t side) {
+    if (!std::isfinite(inset) || inset <= 0) return 0.0;
+    return std::min(inset * *scale, static_cast<double>(side));
+  };
+  metrics.physical_view_inset_top = Bounded(insets.top, height);
+  metrics.physical_view_inset_right = Bounded(insets.right, width);
+  metrics.physical_view_inset_bottom = Bounded(insets.bottom, height);
+  metrics.physical_view_inset_left = Bounded(insets.left, width);
   metrics.display_id = kDisplayId;
   return metrics;
 }
@@ -248,6 +254,11 @@ struct ViewBaton {
 }  // namespace
 
 void EngineHost::ApplySettings(SettingsOverride settings) {
+  auto Empty = [](const SettingsOverride& device) {
+    return device.locales.empty() && !device.text_scale && !device.dark &&
+           !device.always_24_hour;
+  };
+  if (Empty(settings) && Empty(settings_override_)) return;
   settings_override_ = std::move(settings);
   if (engine_ != nullptr) SendHostSettings();
 }

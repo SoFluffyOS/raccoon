@@ -106,6 +106,7 @@ class _RaccoonDeviceState extends State<_RaccoonDevice>
   );
 
   static bool _overriding = false;
+  static TargetPlatform? _appsOwn;
 
   int? _viewId;
   EdgeInsets? _padding;
@@ -142,17 +143,9 @@ class _RaccoonDeviceState extends State<_RaccoonDevice>
       return;
     }
     if (!mounted || reply is! Map) return;
-    final platform = reply['platform'];
-    final wanted = TargetPlatform.values
-        .where((value) => value.name == platform)
-        .firstOrNull;
-    // An override the app set itself stays, unless the client names one.
-    if ((wanted != null || _overriding) &&
-        wanted != debugDefaultTargetPlatformOverride) {
-      debugDefaultTargetPlatformOverride = wanted;
-      _overriding = wanted != null;
-      WidgetsBinding.instance.reassembleApplication();
-    }
+    // The platform is one for the whole app: view 0's says it, or views
+    // that differ would flip it, a reassemble each time (#201).
+    if (_viewId == 0) _target(reply['platform']);
     final padding = switch (reply['padding']) {
       [final num top, final num right, final num bottom, final num left] =>
         EdgeInsets.fromLTRB(
@@ -164,6 +157,21 @@ class _RaccoonDeviceState extends State<_RaccoonDevice>
       _ => null,
     };
     if (padding != _padding) setState(() => _padding = padding);
+  }
+
+  // What the client names, in place of what the app set itself, which is
+  // put back once the client names none.
+  static void _target(Object? platform) {
+    final named = TargetPlatform.values
+        .where((value) => value.name == platform)
+        .firstOrNull;
+    if (named == null && !_overriding) return;
+    if (named != null && !_overriding) _appsOwn = debugDefaultTargetPlatformOverride;
+    final wanted = named ?? _appsOwn;
+    _overriding = named != null;
+    if (wanted == debugDefaultTargetPlatformOverride) return;
+    debugDefaultTargetPlatformOverride = wanted;
+    WidgetsBinding.instance.reassembleApplication();
   }
 
   @override

@@ -15,8 +15,10 @@
 
 #include <unistd.h>
 
+#include <csignal>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <mutex>
@@ -518,6 +520,28 @@ struct TextureFrame {
 
 namespace {
 
+// While stderr is held, a fatal signal writes back what was held first, so
+// a library that dies as it loads (an uncaught exception in a static
+// initializer, a Swift fatalError) still says why (#201).
+int g_saved_stderr = -1;
+int g_held_stderr = -1;
+constexpr int kFatalSignals[] = {SIGABRT, SIGSEGV, SIGBUS, SIGILL, SIGTRAP};
+struct sigaction g_previous[std::size(kFatalSignals)];
+
+void ReplayHeldStderr(int signal_number) {
+  if (g_saved_stderr >= 0 && g_held_stderr >= 0) {
+    dup2(g_saved_stderr, STDERR_FILENO);
+    lseek(g_held_stderr, 0, SEEK_SET);
+    char buffer[4096];
+    ssize_t got;
+    while ((got = read(g_held_stderr, buffer, sizeof(buffer))) > 0) {
+      if (write(STDERR_FILENO, buffer, static_cast<size_t>(got)) < 0) break;
+    }
+  }
+  signal(signal_number, SIG_DFL);
+  raise(signal_number);
+}
+
 // Runs |open| with stderr held, then hands each line it printed meanwhile
 // to |line|: the runtime reports a duplicate class as an image maps.
 template <typename Open, typename Line>
@@ -525,9 +549,27 @@ void HoldingStderr(Open open, Line line) {
   fflush(stderr);
   const int saved = dup(STDERR_FILENO);
   FILE* held = tmpfile();
-  if (saved >= 0 && held != nullptr) dup2(fileno(held), STDERR_FILENO);
+  const bool holding = saved >= 0 && held != nullptr;
+  if (holding) {
+    dup2(fileno(held), STDERR_FILENO);
+    g_saved_stderr = saved;
+    g_held_stderr = fileno(held);
+    struct sigaction replay {};
+    replay.sa_handler = ReplayHeldStderr;
+    sigemptyset(&replay.sa_mask);
+    for (size_t i = 0; i < std::size(kFatalSignals); ++i) {
+      sigaction(kFatalSignals[i], &replay, &g_previous[i]);
+    }
+  }
   open();
-  if (saved >= 0 && held != nullptr) {
+  if (holding) {
+    // Put back what was there, unless the library set a handler of its own.
+    for (size_t i = 0; i < std::size(kFatalSignals); ++i) {
+      struct sigaction now {};
+      sigaction(kFatalSignals[i], nullptr, &now);
+      if (now.sa_handler == ReplayHeldStderr) sigaction(kFatalSignals[i], &g_previous[i], nullptr);
+    }
+    g_saved_stderr = g_held_stderr = -1;
     fflush(stderr);
     dup2(saved, STDERR_FILENO);
     rewind(held);

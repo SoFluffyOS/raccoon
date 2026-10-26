@@ -751,6 +751,9 @@ int Serve(const Options& options) {
   };
   std::vector<Early> early;
   bool had_client = false;
+  // A client put the app in the background or back (#199): the next one
+  // must not find it with its frames off (#201).
+  bool lifecycle_from_client = false;
 
   // The app's platform messages go to the first client, which serves them
   // for every view.
@@ -921,7 +924,9 @@ int Serve(const Options& options) {
                   {resize.view_inset_top(), resize.view_inset_right(),
                    resize.view_inset_bottom(), resize.view_inset_left()});
     };
-    handler.on_app_message = [&host](const raccoon::v1::AppMessage& message) {
+    handler.on_app_message = [&host, &lifecycle_from_client](
+                                 const raccoon::v1::AppMessage& message) {
+      if (message.channel() == "flutter/lifecycle") lifecycle_from_client = true;
       host.SendPlatformMessage(message.channel(),
                                reinterpret_cast<const uint8_t*>(message.data().data()),
                                message.data().size());
@@ -1126,6 +1131,14 @@ int Serve(const Options& options) {
       host.RespondNoPlugin(waiting.channel, waiting.handle, "the client went away");
     }
     pending.clear();
+    // What it showed the app as goes with it (#201).
+    host.ApplySettings({});
+    if (lifecycle_from_client) {
+      static constexpr char kResumed[] = "AppLifecycleState.resumed";
+      host.SendPlatformMessage("flutter/lifecycle", reinterpret_cast<const uint8_t*>(kResumed),
+                               sizeof(kResumed) - 1);
+      lifecycle_from_client = false;
+    }
     disconnected();
     if (focus == &first) host.text_input().SetComposer(false);
     std::fprintf(stderr, "🦝 client disconnected\n");
