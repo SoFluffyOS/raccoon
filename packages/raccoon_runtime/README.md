@@ -12,7 +12,9 @@ imports the buffers rides a second socket for a native host side: file
 descriptors on Linux, which Dart cannot hold, IOSurfaces by Mach port (or
 ID) on macOS, and D3D11 shared handles on Windows. `raccoon_view` has the
 host sides. A frame the runner cannot put in a buffer still comes with
-pixels.
+pixels. A GPU buffer frame has none, so a capture (a screenshot, a GIF)
+calls `wantPixels(true)` for read-back pixel frames while it takes them,
+and `wantPixels(false)` after; the view goes on showing its ring.
 
 Pixel frames come through shared memory where the socket carries file
 descriptors (Linux and macOS), and the client reads each into a new buffer.
