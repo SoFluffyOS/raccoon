@@ -4,7 +4,7 @@
 // turns the main run loop. The `texture` method registers a pixel-buffer
 // texture of one colour, so a texture's way through the host's renderer can
 // be seen too, and the `modal` method runs a modal loop for a while.
-#import "RaccoonEchoPlugin.h"
+#import "./include/raccoon_echo/RaccoonEchoPlugin.h"
 
 #import <CoreVideo/CoreVideo.h>
 

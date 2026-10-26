@@ -956,6 +956,19 @@ void main() {
           ],
           ['plugin_e'],
         );
+
+        // #187: a Swift package that does not build leaves the plugin to
+        // its podspec.
+        plugin('plugin_g', 'PluginG');
+        write('plugin_g/macos/plugin_g/Package.swift', 'not a manifest\n');
+        configure(['plugin_g']);
+        final fallback = await install();
+        expect(log, contains('CocoaPods instead'));
+        expect(loaded(fallback), ['plugin_g']);
+        expect(
+          '${((fallback['plugins'] as List).single as Map)['library']}',
+          endsWith('plugin_g.framework/plugin_g'),
+        );
       } finally {
         temp.deleteSync(recursive: true);
       }
@@ -4313,6 +4326,107 @@ void main() {
     'plugins_app',
     'build',
     'flutter_assets',
+  );
+  test(
+    'on macOS a plugin with a Swift package is built through it and answers',
+    () async {
+      // #187: example/plugins/echo has a Package.swift beside its podspec,
+      // as Flutter's plugin template makes one; the helper builds it with
+      // the app's other Swift packages into one framework.
+      final temp = Directory.systemTemp.createTempSync('raccoon_swiftpm');
+      final helper = p.join(runnerDir, 'tool', 'raccoon-device');
+      final data = p.join(temp.path, 'data');
+      Map<String, String> environment({bool pods = false}) => {
+        'RACCOON_RUNNER': binary!,
+        if (sdk != null) 'FLUTTER_ROOT': sdk,
+        'XDG_DATA_HOME': data,
+        'XDG_RUNTIME_DIR': temp.path,
+        'TMPDIR': '${temp.path}/',
+        'RACCOON_PLUGIN_CACHE': p.join(temp.path, 'cache'),
+        'RACCOON_NO_PREBUILT': '1',
+        if (pods) 'RACCOON_NO_SWIFT_PACKAGES': '1',
+      };
+      Future<(String, String)> install({bool pods = false}) async {
+        final result = await Process.run(helper, [
+          'install',
+          pluginsAppAssets,
+          'plugins_app',
+        ], environment: environment(pods: pods));
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        final manifest =
+            jsonDecode(
+                  File(
+                    p.join(
+                      data,
+                      'raccoon',
+                      'apps',
+                      'plugins_app',
+                      'plugins',
+                      'manifest.json',
+                    ),
+                  ).readAsStringSync(),
+                )
+                as Map;
+        final echo = (manifest['plugins'] as List).cast<Map>().singleWhere(
+          (entry) => entry['name'] == 'raccoon_echo',
+        );
+        return ('${result.stderr}', '${echo['library']}');
+      }
+
+      try {
+        final (built, library) = await install();
+        expect(built, contains('1 built: raccoon_echo'));
+        expect(library, endsWith('RaccoonPlugins.framework/RaccoonPlugins'));
+        final run = await Process.start(helper, [
+          'run',
+          'plugins_app',
+        ], environment: environment());
+        final lines = <String>[];
+        run.stdout
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .listen(lines.add);
+        run.stderr.drain<void>().ignore();
+        try {
+          final deadline = DateTime.now().add(const Duration(seconds: 30));
+          while (!lines.any((line) => line.contains('ECHO:')) &&
+              DateTime.now().isBefore(deadline)) {
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+          }
+          expect(lines, contains('ECHO:echo: hello'));
+        } finally {
+          run.kill();
+          await run.exitCode;
+        }
+
+        final (again, _) = await install();
+        expect(again, contains('1 from the cache: raccoon_echo'));
+        // Turned off, the podspec builds it as before.
+        final (_, pods) = await install(pods: true);
+        expect(pods, endsWith('raccoon_echo.framework/raccoon_echo'));
+        // Every one of them a pod in the cache (the release's prebuilt
+        // plugins): those, rather than a build.
+        for (final entry in Directory(p.join(temp.path, 'cache')).listSync()) {
+          if (p.basename(entry.path).startsWith('swiftpm-')) {
+            entry.deleteSync(recursive: true);
+          }
+        }
+        final (cached, podLibrary) = await install();
+        expect(cached, contains('1 from the cache: raccoon_echo'));
+        expect(podLibrary, endsWith('raccoon_echo.framework/raccoon_echo'));
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((
+      binary != null && sdk != null && Directory(pluginsAppAssets).existsSync(),
+      Platform.isMacOS,
+    )) {
+      (false, _) => 'build the runner and example/plugins_app first',
+      (_, false) => 'Swift packages are a macOS build',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 5)),
   );
   test(
     'a native plugin loaded into the runner answers the app',

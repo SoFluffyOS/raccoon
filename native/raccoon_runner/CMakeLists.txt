@@ -235,7 +235,7 @@ if(APPLE)
   if(RACCOON_FLUTTER_MACOS_DIR AND EXISTS ${RACCOON_FLUTTER_MACOS_DIR}/FlutterMacOS.framework)
     enable_language(OBJC)
     add_library(raccoon_echo SHARED
-      example/plugins/echo/macos/Classes/RaccoonEchoPlugin.m)
+      example/plugins/echo/macos/raccoon_echo/Sources/raccoon_echo/RaccoonEchoPlugin.m)
     set_target_properties(raccoon_echo PROPERTIES
       FRAMEWORK TRUE
       INSTALL_NAME_DIR "@rpath"

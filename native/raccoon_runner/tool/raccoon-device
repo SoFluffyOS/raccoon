@@ -1007,7 +1007,113 @@ def in_cache(plugin):
     return True
 
 
+SWIFT_FRAMEWORK = 'RaccoonPlugins'
+
+
+def can_build_packages():
+    if shutil.which('xcodebuild') is None or subprocess.run(
+            ['xcodebuild', '-version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+        return 'no Xcode (xcodebuild)'
+    if not os.path.isfile(flutter_framework):
+        return 'no FlutterMacOS in the SDK (flutter precache --macos)'
+    return None
+
+
+def build_packages(plugins, entry):
+    """Builds [plugins]' Swift packages into one framework, cached as
+    [entry]; None, or why not. Laid out as Flutter lays them out: each
+    plugin by its name beside an empty FlutterFramework package, so their
+    ../firebase_core and ../FlutterFramework resolve, and a package of our
+    own whose dynamic library depends on every plugin's product. Built with
+    xcodebuild: swift build compiles Objective-C that imports a Swift
+    module (Firestore's) before that module's -Swift.h exists."""
+    work = os.path.join(out, 'build', 'swiftpm')
+    shutil.rmtree(work, ignore_errors=True)
+    packages_dir = os.path.join(work, 'packages')
+    for package in ('FlutterFramework', SWIFT_FRAMEWORK):
+        os.makedirs(os.path.join(packages_dir, package, 'Sources', package))
+        open(os.path.join(packages_dir, package, 'Sources', package, package + '.swift'), 'w').close()
+    for plugin in plugins:
+        os.symlink(plugin['package'], os.path.join(packages_dir, plugin['name']))
+    with open(os.path.join(packages_dir, 'FlutterFramework', 'Package.swift'), 'w') as f:
+        f.write('// swift-tools-version: 5.9\nimport PackageDescription\n\n'
+                'let package = Package(\n  name: "FlutterFramework",\n'
+                '  products: [.library(name: "FlutterFramework", targets: ["FlutterFramework"])],\n'
+                '  targets: [.target(name: "FlutterFramework")]\n)\n')
+    macos = subprocess.run(['sw_vers', '-productVersion'], capture_output=True, text=True).stdout.strip()
+    with open(os.path.join(packages_dir, SWIFT_FRAMEWORK, 'Package.swift'), 'w') as f:
+        f.write('// swift-tools-version: 5.9\nimport PackageDescription\n\n'
+                'let package = Package(\n  name: "%s",\n  platforms: [.macOS("%s.0")],\n'
+                '  products: [.library(name: "%s", type: .dynamic, targets: ["%s"])],\n'
+                '  dependencies: [\n%s  ],\n'
+                '  targets: [.target(name: "%s", dependencies: [\n%s  ])]\n)\n' % (
+                    SWIFT_FRAMEWORK, macos.split('.')[0] or '11', SWIFT_FRAMEWORK, SWIFT_FRAMEWORK,
+                    ''.join('    .package(name: %s, path: %s),\n' % (json.dumps(p['name']), json.dumps('../' + p['name']))
+                            for p in plugins),
+                    SWIFT_FRAMEWORK,
+                    # A plugin's product is its name with hyphens, as Flutter
+                    # names it.
+                    ''.join('    .product(name: %s, package: %s),\n' % (json.dumps(p['name'].replace('_', '-')), json.dumps(p['name']))
+                            for p in plugins)))
+    products = os.path.join(work, 'products')
+    log_path = os.path.join(work, 'xcodebuild.log')
+    with open(log_path, 'w') as log:
+        ok = subprocess.run(
+            ['xcodebuild', '-scheme', SWIFT_FRAMEWORK, '-configuration', 'Release',
+             '-destination', 'platform=macOS,arch=' + arch,
+             '-derivedDataPath', os.path.join(work, 'derived'),
+             'SYMROOT=' + products,
+             'FRAMEWORK_SEARCH_PATHS=' + os.path.realpath(os.path.dirname(os.path.dirname(flutter_framework))),
+             'LD_RUNPATH_SEARCH_PATHS=@loader_path/../../..',
+             'CODE_SIGNING_ALLOWED=NO', 'build'],
+            cwd=os.path.join(packages_dir, SWIFT_FRAMEWORK), env=env,
+            stdout=log, stderr=subprocess.STDOUT).returncode == 0
+    release = os.path.join(products, 'Release')
+    made_in = os.path.join(release, 'PackageFrameworks')
+    framework = os.path.join(made_in, SWIFT_FRAMEWORK + '.framework')
+    if not ok or not os.path.isdir(framework):
+        # The log outlives the work folder, which goes.
+        kept = os.path.join(out, 'build', 'swiftpm.log')
+        shutil.copyfile(log_path, kept)
+        why = 'swift packages did not build; see ' + kept
+        keep_failure(entry, why, kept)
+        drop(work)
+        return why
+    os.makedirs(cache, exist_ok=True)
+    staging = tempfile.mkdtemp(prefix=entry['key'] + '.partial-', dir=cache)
+    shutil.copytree(framework, os.path.join(staging, SWIFT_FRAMEWORK + '.framework'), symlinks=True)
+    # The packages' resource bundles, where Bundle.module looks: in the
+    # framework that holds their code.
+    resources = os.path.join(staging, SWIFT_FRAMEWORK + '.framework', 'Versions', 'A', 'Resources')
+    os.makedirs(resources, exist_ok=True)
+    for bundle in sorted(os.listdir(release)):
+        if bundle.endswith('.bundle'):
+            shutil.copytree(os.path.join(release, bundle), os.path.join(resources, bundle), symlinks=True)
+    # Dynamic frameworks the packages bring sit beside it; static ones are
+    # linked in already.
+    made = [framework]
+    for f in frameworks(made_in):
+        path = os.path.join(made_in, f)
+        if path == framework:
+            continue
+        kind = subprocess.run(['file', '-bL', binary_of(path)], capture_output=True, text=True).stdout
+        if 'dynamically linked shared library' in kind:
+            shutil.copytree(path, os.path.join(staging, f), symlinks=True)
+            made.append(path)
+    for path in vendored(made, [release]):
+        target = os.path.join(staging, os.path.basename(path))
+        if os.path.isdir(path):
+            shutil.copytree(path, target, symlinks=True, dirs_exist_ok=True)
+        else:
+            shutil.copy2(path, target)
+    settle(staging, os.path.join(cache, entry['key']), lambda: in_cache(entry))
+    drop(work)
+    return None
+
+
 wanted = []
+swift = []  # the plugins built through their Swift packages
+swift_packages = os.environ.get('RACCOON_NO_SWIFT_PACKAGES') != '1'
 status = []  # what never gets as far as a library, for the runner to relay
 packages = []
 for package in json.load(open(config)).get('packages', []):
@@ -1058,18 +1164,46 @@ for name, root, pubspec in packages:
             status.append({'name': name, 'state': 'no_host', 'detail': 'no macOS implementation'})
         continue
     sources = os.path.join(root, 'darwin' if re.search(r'sharedDarwinSource:\s*true', block) else 'macos')
-    if not os.path.isfile(os.path.join(sources, name + '.podspec')):
+    podspec = os.path.isfile(os.path.join(sources, name + '.podspec'))
+    package = os.path.join(sources, name)
+    # A plugin with a Swift package builds through it, as Flutter builds it
+    # (#187); the rest, and FFI plugins, through CocoaPods.
+    if cls and swift_packages and os.path.isfile(os.path.join(package, 'Package.swift')):
+        swift.append({'name': name, 'root': root, 'sources': sources, 'package': package,
+                      'class': cls.group(1), 'podspec': podspec,
+                      'key': '%s-%s-%s' % (version_key(name, root, sources), runner_version, arch)})
+        continue
+    if not podspec:
         continue
     # An FFI plugin has no class: its framework is opened for Dart to find.
     wanted.append({'name': name, 'root': root, 'sources': sources,
                    'class': cls.group(1) if cls else None,
                    'key': '%s-%s-%s' % (version_key(name, root, sources), runner_version, arch)})
 
-if not wanted and not status:
+if not wanted and not swift and not status:
     sys.exit(0)
 
 os.makedirs(os.path.join(out, 'frameworks'), exist_ok=True)
 built, failed, empty, from_cache = [], [], [], []
+# The Swift packages, in one cache entry by the keys of them all: what
+# they share is built once and loaded once (#187).
+swift_entry = {'name': 'swift packages', 'key': 'swiftpm-%s' % hashlib.sha256(
+    '\n'.join(sorted(p['key'] for p in swift)).encode('utf-8', 'surrogateescape')).hexdigest()[:16]}
+swift_why, swift_built = None, False
+# Every one of them a pod in the cache already (the release's prebuilt
+# plugins, or an install before #187): those, rather than a build.
+if swift and not in_cache(swift_entry) and all(in_cache(p) for p in swift):
+    wanted.extend(swift)
+    swift = []
+if swift and not in_cache(swift_entry):
+    swift_why = can_build_packages() or kept_failure(swift_entry)
+    if swift_why is None:
+        swift_why = build_packages(swift, swift_entry)
+        swift_built = swift_why is None
+    if swift_why is not None and any(p['podspec'] for p in swift):
+        # The ones with a podspec as well get their pods instead.
+        wanted.extend(p for p in swift if p['podspec'])
+        print('🦝 %s; CocoaPods instead where there is a podspec' % swift_why, file=sys.stderr)
 misses = [p for p in wanted if not in_cache(p)]
 if misses:
     fetch_prebuilt()
@@ -1282,6 +1416,22 @@ for plugin in wanted:
         entries.append({'name': name, 'library': library, 'ffi': True})
     else:
         entries.append({'name': name, 'library': library, 'class': plugin['class'], 'module': name})
+
+for plugin in swift:
+    name = plugin['name']
+    if swift_why is not None:
+        if not plugin['podspec']:
+            failed.append('%s (%s)' % (name, swift_why))
+            status.append({'name': name, 'state': 'failed', 'detail': swift_why})
+        continue
+    cached = os.path.join(cache, swift_entry['key'])
+    (built if swift_built else from_cache).append(name)
+    for f in binaries(cached):
+        target = os.path.join(out, 'frameworks', f)
+        if not os.path.exists(target):
+            clone(os.path.join(cached, f), target)
+    entries.append({'name': name, 'class': plugin['class'], 'module': name,
+                    'library': os.path.join(out, 'frameworks', SWIFT_FRAMEWORK + '.framework', SWIFT_FRAMEWORK)})
 
 json.dump({'flutter_framework': flutter_framework, 'plugins': entries, 'status': status},
           open(os.path.join(out, 'manifest.json'), 'w'), indent=1)

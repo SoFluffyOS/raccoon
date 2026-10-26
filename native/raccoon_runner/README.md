@@ -182,6 +182,21 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   and a release's archive of the common plugins (both Mac architectures)
   drops into that cache on the first install: the fifteen of `tool/plugins`
   in under a second instead of 2 min.
+  A plugin with a Swift package (`macos/<name>/Package.swift`, or under
+  `darwin/`) builds through it instead, as Flutter builds it (#187). All
+  of an app's Swift packages go into one framework, `RaccoonPlugins`, so
+  what they share (FirebaseCore) is loaded once. The helper lays the
+  packages out as Flutter does (each plugin by its name beside an empty
+  `FlutterFramework` package) and builds a package of its own, a dynamic
+  library depending on every plugin's product, with `xcodebuild`. Needs
+  Xcode only. It is cached by the plugins' keys together and kept failed
+  like a pod; when it fails, the plugins that have a podspec too go
+  through CocoaPods. When every one of them is a pod in the cache already
+  (the release's prebuilt plugins), those load instead of a build. `RACCOON_NO_SWIFT_PACKAGES=1` builds them all through
+  CocoaPods. On an M1 Pro: FlutterFire's core, Auth, Firestore and
+  Analytics in 89 s cold into one 33 MB framework (13 min and 266 MB
+  through CocoaPods, whose trunk lacks the Analytics SDK they pin), and
+  0.1 s from the cache.
   `run` starts the runner of an app with plugins through a bundle of the
   app's own (`<app>.app`, identifier `dev.raccoon.app.<app>`, a symlink to
   the runner), because some of Apple's APIs throw without one. While

@@ -6,7 +6,8 @@ Pod::Spec.new do |s|
   s.license          = { :type => 'BSD', :file => '../../../../LICENSE' }
   s.author           = 'Simon Pham'
   s.source           = { :path => '.' }
-  s.source_files     = 'Classes/**/*'
+  s.source_files     = 'raccoon_echo/Sources/raccoon_echo/**/*.{h,m}'
+  s.public_header_files = 'raccoon_echo/Sources/raccoon_echo/include/**/*.h'
   s.dependency 'FlutterMacOS'
   s.platform = :osx, '10.15'
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
