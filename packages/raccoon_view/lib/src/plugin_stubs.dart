@@ -17,6 +17,14 @@ final class PluginStubs {
   /// What permission checks and requests answer, for every permission.
   StubPermission permission;
 
+  /// The plugins answered here, by package name: what a runner reports
+  /// with no implementation for its host and the app can still call.
+  static const Set<String> plugins = {
+    'permission_handler',
+    'google_mobile_ads',
+    'flutter_foreground_task',
+  };
+
   /// Told the first time each plugin is answered here.
   final void Function(String plugin)? onAnswered;
 
