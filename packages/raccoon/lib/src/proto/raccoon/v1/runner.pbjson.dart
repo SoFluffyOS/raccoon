@@ -159,38 +159,23 @@ const Resize$json = {
     {'1': 'width', '3': 1, '4': 1, '5': 13, '10': 'width'},
     {'1': 'height', '3': 2, '4': 1, '5': 13, '10': 'height'},
     {'1': 'pixel_ratio', '3': 3, '4': 1, '5': 1, '10': 'pixelRatio'},
-    {
-      '1': 'view_insets',
-      '3': 4,
-      '4': 1,
-      '5': 11,
-      '6': '.raccoon.v1.Insets',
-      '10': 'viewInsets'
-    },
+    {'1': 'view_inset_top', '3': 5, '4': 1, '5': 1, '10': 'viewInsetTop'},
+    {'1': 'view_inset_right', '3': 6, '4': 1, '5': 1, '10': 'viewInsetRight'},
+    {'1': 'view_inset_bottom', '3': 7, '4': 1, '5': 1, '10': 'viewInsetBottom'},
+    {'1': 'view_inset_left', '3': 8, '4': 1, '5': 1, '10': 'viewInsetLeft'},
+  ],
+  '9': [
+    {'1': 4, '2': 5},
   ],
 };
 
 /// Descriptor for `Resize`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List resizeDescriptor = $convert.base64Decode(
     'CgZSZXNpemUSFAoFd2lkdGgYASABKA1SBXdpZHRoEhYKBmhlaWdodBgCIAEoDVIGaGVpZ2h0Eh'
-    '8KC3BpeGVsX3JhdGlvGAMgASgBUgpwaXhlbFJhdGlvEjMKC3ZpZXdfaW5zZXRzGAQgASgLMhIu'
-    'cmFjY29vbi52MS5JbnNldHNSCnZpZXdJbnNldHM=');
-
-@$core.Deprecated('Use insetsDescriptor instead')
-const Insets$json = {
-  '1': 'Insets',
-  '2': [
-    {'1': 'top', '3': 1, '4': 1, '5': 1, '10': 'top'},
-    {'1': 'right', '3': 2, '4': 1, '5': 1, '10': 'right'},
-    {'1': 'bottom', '3': 3, '4': 1, '5': 1, '10': 'bottom'},
-    {'1': 'left', '3': 4, '4': 1, '5': 1, '10': 'left'},
-  ],
-};
-
-/// Descriptor for `Insets`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List insetsDescriptor = $convert.base64Decode(
-    'CgZJbnNldHMSEAoDdG9wGAEgASgBUgN0b3ASFAoFcmlnaHQYAiABKAFSBXJpZ2h0EhYKBmJvdH'
-    'RvbRgDIAEoAVIGYm90dG9tEhIKBGxlZnQYBCABKAFSBGxlZnQ=');
+    '8KC3BpeGVsX3JhdGlvGAMgASgBUgpwaXhlbFJhdGlvEiQKDnZpZXdfaW5zZXRfdG9wGAUgASgB'
+    'Ugx2aWV3SW5zZXRUb3ASKAoQdmlld19pbnNldF9yaWdodBgGIAEoAVIOdmlld0luc2V0UmlnaH'
+    'QSKgoRdmlld19pbnNldF9ib3R0b20YByABKAFSD3ZpZXdJbnNldEJvdHRvbRImCg92aWV3X2lu'
+    'c2V0X2xlZnQYCCABKAFSDXZpZXdJbnNldExlZnRKBAgEEAU=');
 
 @$core.Deprecated('Use settingsDescriptor instead')
 const Settings$json = {

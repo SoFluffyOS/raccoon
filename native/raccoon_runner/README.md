@@ -103,7 +103,7 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   (`flutter/lifecycle`), as desktop embeddings do once the engine runs;
   before, `lifecycleState` stayed null. A client shows the app as a device
   rather than the host: its `Settings` replace the locales, text scale
-  (otherwise 1), dark mode and hour format it sets, and `Resize.view_insets`
+  (otherwise 1), dark mode and hour format it sets, and `Resize.view_inset_*`
   is what covers the view's edges, an on-screen keyboard, as the app's
   `viewInsets` (#193). An `AppMessage` goes to the app as a platform
   message, as a device's own controls send one: the background and back

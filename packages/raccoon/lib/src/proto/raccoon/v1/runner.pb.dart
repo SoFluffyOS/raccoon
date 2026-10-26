@@ -241,13 +241,19 @@ class Resize extends $pb.GeneratedMessage {
     $core.int? width,
     $core.int? height,
     $core.double? pixelRatio,
-    Insets? viewInsets,
+    $core.double? viewInsetTop,
+    $core.double? viewInsetRight,
+    $core.double? viewInsetBottom,
+    $core.double? viewInsetLeft,
   }) {
     final result = Resize._();
     if (width != null) result.width = width;
     if (height != null) result.height = height;
     if (pixelRatio != null) result.pixelRatio = pixelRatio;
-    if (viewInsets != null) result.viewInsets = viewInsets;
+    if (viewInsetTop != null) result.viewInsetTop = viewInsetTop;
+    if (viewInsetRight != null) result.viewInsetRight = viewInsetRight;
+    if (viewInsetBottom != null) result.viewInsetBottom = viewInsetBottom;
+    if (viewInsetLeft != null) result.viewInsetLeft = viewInsetLeft;
     return result;
   }
 
@@ -267,8 +273,10 @@ class Resize extends $pb.GeneratedMessage {
     ..aI(1, _omitFieldNames ? '' : 'width', fieldType: $pb.PbFieldType.OU3)
     ..aI(2, _omitFieldNames ? '' : 'height', fieldType: $pb.PbFieldType.OU3)
     ..aD(3, _omitFieldNames ? '' : 'pixelRatio')
-    ..aOM<Insets>(4, _omitFieldNames ? '' : 'viewInsets',
-        subBuilder: Insets.$_createMessage)
+    ..aD(5, _omitFieldNames ? '' : 'viewInsetTop')
+    ..aD(6, _omitFieldNames ? '' : 'viewInsetRight')
+    ..aD(7, _omitFieldNames ? '' : 'viewInsetBottom')
+    ..aD(8, _omitFieldNames ? '' : 'viewInsetLeft')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -318,109 +326,41 @@ class Resize extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   void clearPixelRatio() => $_clearField(3);
 
-  /// What covers the view's edges, as the app sees MediaQuery.viewInsets: an
-  /// on-screen keyboard (#193). Physical pixels, like width and height.
-  @$pb.TagNumber(4)
-  Insets get viewInsets => $_getN(3);
-  @$pb.TagNumber(4)
-  set viewInsets(Insets value) => $_setField(4, value);
-  @$pb.TagNumber(4)
-  $core.bool hasViewInsets() => $_has(3);
-  @$pb.TagNumber(4)
-  void clearViewInsets() => $_clearField(4);
-  @$pb.TagNumber(4)
-  Insets ensureViewInsets() => $_ensure(3);
-}
+  @$pb.TagNumber(5)
+  $core.double get viewInsetTop => $_getN(3);
+  @$pb.TagNumber(5)
+  set viewInsetTop($core.double value) => $_setDouble(3, value);
+  @$pb.TagNumber(5)
+  $core.bool hasViewInsetTop() => $_has(3);
+  @$pb.TagNumber(5)
+  void clearViewInsetTop() => $_clearField(5);
 
-class Insets extends $pb.GeneratedMessage {
-  factory Insets({
-    $core.double? top,
-    $core.double? right,
-    $core.double? bottom,
-    $core.double? left,
-  }) {
-    final result = Insets._();
-    if (top != null) result.top = top;
-    if (right != null) result.right = right;
-    if (bottom != null) result.bottom = bottom;
-    if (left != null) result.left = left;
-    return result;
-  }
+  @$pb.TagNumber(6)
+  $core.double get viewInsetRight => $_getN(4);
+  @$pb.TagNumber(6)
+  set viewInsetRight($core.double value) => $_setDouble(4, value);
+  @$pb.TagNumber(6)
+  $core.bool hasViewInsetRight() => $_has(4);
+  @$pb.TagNumber(6)
+  void clearViewInsetRight() => $_clearField(6);
 
-  Insets._();
+  @$pb.TagNumber(7)
+  $core.double get viewInsetBottom => $_getN(5);
+  @$pb.TagNumber(7)
+  set viewInsetBottom($core.double value) => $_setDouble(5, value);
+  @$pb.TagNumber(7)
+  $core.bool hasViewInsetBottom() => $_has(5);
+  @$pb.TagNumber(7)
+  void clearViewInsetBottom() => $_clearField(7);
 
-  factory Insets.fromBuffer($core.List<$core.int> data,
-          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      Insets()..mergeFromBuffer(data, registry);
-  factory Insets.fromJson($core.String json,
-          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      Insets()..mergeFromJson(json, registry);
-
-  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
-      _omitMessageNames ? '' : 'Insets',
-      package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
-      createEmptyInstance: Insets.$_createMessage)
-    ..aD(1, _omitFieldNames ? '' : 'top')
-    ..aD(2, _omitFieldNames ? '' : 'right')
-    ..aD(3, _omitFieldNames ? '' : 'bottom')
-    ..aD(4, _omitFieldNames ? '' : 'left')
-    ..hasRequiredFields = false;
-
-  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  Insets clone() => deepCopy();
-  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  Insets copyWith(void Function(Insets) updates) =>
-      super.copyWith((message) => updates(message as Insets)) as Insets;
-
-  @$core.override
-  $pb.BuilderInfo get info_ => _i;
-
-  @$core.pragma('dart2js:noInline')
-  @$core.Deprecated('Use Insets() / Insets.new instead')
-  static Insets create() => Insets._();
-  static $pb.GeneratedMessage $_createMessage() => Insets._();
-  @$core.override
-  Insets createEmptyInstance() => Insets._();
-  @$core.pragma('dart2js:noInline')
-  static Insets getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<Insets>(Insets.$_createMessage);
-  static Insets? _defaultInstance;
-
-  @$pb.TagNumber(1)
-  $core.double get top => $_getN(0);
-  @$pb.TagNumber(1)
-  set top($core.double value) => $_setDouble(0, value);
-  @$pb.TagNumber(1)
-  $core.bool hasTop() => $_has(0);
-  @$pb.TagNumber(1)
-  void clearTop() => $_clearField(1);
-
-  @$pb.TagNumber(2)
-  $core.double get right => $_getN(1);
-  @$pb.TagNumber(2)
-  set right($core.double value) => $_setDouble(1, value);
-  @$pb.TagNumber(2)
-  $core.bool hasRight() => $_has(1);
-  @$pb.TagNumber(2)
-  void clearRight() => $_clearField(2);
-
-  @$pb.TagNumber(3)
-  $core.double get bottom => $_getN(2);
-  @$pb.TagNumber(3)
-  set bottom($core.double value) => $_setDouble(2, value);
-  @$pb.TagNumber(3)
-  $core.bool hasBottom() => $_has(2);
-  @$pb.TagNumber(3)
-  void clearBottom() => $_clearField(3);
-
-  @$pb.TagNumber(4)
-  $core.double get left => $_getN(3);
-  @$pb.TagNumber(4)
-  set left($core.double value) => $_setDouble(3, value);
-  @$pb.TagNumber(4)
-  $core.bool hasLeft() => $_has(3);
-  @$pb.TagNumber(4)
-  void clearLeft() => $_clearField(4);
+  @$pb.TagNumber(8)
+  $core.double get viewInsetLeft => $_getN(6);
+  @$pb.TagNumber(8)
+  set viewInsetLeft($core.double value) => $_setDouble(6, value);
+  @$pb.TagNumber(8)
+  $core.bool hasViewInsetLeft() => $_has(6);
+  @$pb.TagNumber(8)
+  void clearViewInsetLeft() => $_clearField(8);
 }
 
 /// The device the app is shown as, in place of the host's (#193). What it

@@ -916,10 +916,10 @@ int Serve(const Options& options) {
                      static_cast<long long>(client->view), resize.width(), resize.height(),
                      resize.pixel_ratio());
       }
-      const raccoon::v1::Insets& insets = resize.view_insets();
       host.Resize(client->view, resize.width(), resize.height(),
                   resize.pixel_ratio() > 0 ? resize.pixel_ratio() : 1.0,
-                  {insets.top(), insets.right(), insets.bottom(), insets.left()});
+                  {resize.view_inset_top(), resize.view_inset_right(),
+                   resize.view_inset_bottom(), resize.view_inset_left()});
     };
     handler.on_app_message = [&host](const raccoon::v1::AppMessage& message) {
       host.SendPlatformMessage(message.channel(),

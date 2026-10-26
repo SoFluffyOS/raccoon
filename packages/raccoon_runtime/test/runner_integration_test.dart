@@ -2448,7 +2448,7 @@ class Report extends StatelessWidget {
         await laidOut('DEVICE:iOS;47.0;34.0;34.0');
         // A keyboard 300 high covers the home indicator: no padding left
         // below, the view's padding the same.
-        client.setViewInsets(Insets(bottom: 900));
+        client.setViewInsets(bottom: 900);
         await laidOut('DEVICE:iOS;47.0;0.0;34.0');
       } finally {
         client?.shutdown();
@@ -4482,7 +4482,7 @@ class Report extends StatelessWidget {
       try {
         await client.hello.timeout(const Duration(seconds: 10));
         client.resize(800, 600, 1);
-        client.setViewInsets(Insets(bottom: 300));
+        client.setViewInsets(bottom: 300);
         client.sendSettings(
           Settings(
             locales: ['de-DE', 'zh-Hans-CN'],
@@ -4500,7 +4500,7 @@ class Report extends StatelessWidget {
         // A later one replaces it whole: what it leaves unset is the
         // host's again, and the insets go with the size.
         client.sendSettings(Settings(textScaleFactor: 2));
-        client.setViewInsets(Insets());
+        client.setViewInsets();
         expect(
           await device(
             (line) => line.contains(';2.0;') && line.endsWith(';0.0'),

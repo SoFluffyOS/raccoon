@@ -203,7 +203,7 @@ final class RunnerClient
   Future<void> get closed => _closed.future;
 
   ({int width, int height, double pixelRatio})? _size;
-  Insets? _viewInsets;
+  var _viewInsets = (top: 0.0, right: 0.0, bottom: 0.0, left: 0.0);
 
   @override
   void resize(int width, int height, double pixelRatio) {
@@ -214,7 +214,10 @@ final class RunnerClient
           width: width,
           height: height,
           pixelRatio: pixelRatio,
-          viewInsets: _viewInsets,
+          viewInsetTop: _viewInsets.top,
+          viewInsetRight: _viewInsets.right,
+          viewInsetBottom: _viewInsets.bottom,
+          viewInsetLeft: _viewInsets.left,
         ),
       ),
     );
@@ -223,8 +226,13 @@ final class RunnerClient
   /// What covers the view's edges from now on, in physical pixels, as the
   /// app sees `MediaQuery.viewInsets`: an on-screen keyboard (#193). Goes
   /// with every size, the one the view has already too.
-  void setViewInsets(Insets insets) {
-    _viewInsets = insets;
+  void setViewInsets({
+    double top = 0,
+    double right = 0,
+    double bottom = 0,
+    double left = 0,
+  }) {
+    _viewInsets = (top: top, right: right, bottom: bottom, left: left);
     if (_size case final size?) {
       resize(size.width, size.height, size.pixelRatio);
     }

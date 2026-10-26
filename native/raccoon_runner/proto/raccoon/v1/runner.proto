@@ -50,14 +50,13 @@ message Resize {
   double pixel_ratio = 3;
   // What covers the view's edges, as the app sees MediaQuery.viewInsets: an
   // on-screen keyboard (#193). Physical pixels, like width and height.
-  Insets view_insets = 4;
-}
-
-message Insets {
-  double top = 1;
-  double right = 2;
-  double bottom = 3;
-  double left = 4;
+  // Four numbers, not a message of its own: each message adds code to the
+  // runner. 4 held such a message before any release.
+  reserved 4;
+  double view_inset_top = 5;
+  double view_inset_right = 6;
+  double view_inset_bottom = 7;
+  double view_inset_left = 8;
 }
 
 // The device the app is shown as, in place of the host's (#193). What it
