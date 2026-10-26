@@ -144,6 +144,14 @@ message PlatformResponse {
   bytes data = 3;
 }
 
+// A platform message for the app from the client, as a device's own
+// controls send one: flutter/lifecycle to put it in the background,
+// flutter/navigation to open a link (#199). No reply comes back.
+message AppMessage {
+  string channel = 1;
+  bytes data = 2;
+}
+
 message ClientMessage {
   oneof message {
     ClientHello hello = 1;
@@ -155,6 +163,7 @@ message ClientMessage {
     ReleaseBuffer release_buffer = 7;
     TextEditing text_editing = 8;
     Settings settings = 9;
+    AppMessage app_message = 10;
   }
 }
 

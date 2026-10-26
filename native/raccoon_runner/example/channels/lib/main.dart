@@ -14,8 +14,9 @@ import 'package:flutter/widgets.dart';
 /// view at a pixel ratio of 1 and an empty data directory, if any. Prints
 /// XDG_DATA_HOME: and what the app sees, for the data directory test,
 /// RACCOON_ENDPOINT: for package:raccoon, then LOCALES:, BRIGHTNESS: and
-/// LIFECYCLE:, as the runner told the engine, and DEVICE: whenever the
-/// metrics or settings change.
+/// LIFECYCLE:, as the runner told the engine, DEVICE: whenever the
+/// metrics or settings change, and LIFECYCLE: and ROUTE: for what a client
+/// sends it.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Where the Dart-only Linux plugins would put the app's files: the runner
@@ -235,6 +236,17 @@ class _Device with WidgetsBindingObserver {
 
   @override
   void didChangeTextScaleFactor() => changed();
+
+  // What a client sends the app as a device's controls do (#199).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) =>
+      print('LIFECYCLE:${state.name}');
+
+  @override
+  Future<bool> didPushRouteInformation(RouteInformation routeInformation) {
+    print('ROUTE:${routeInformation.uri}');
+    return Future.value(true);
+  }
 }
 
 /// SharedPreferencesPigeonOptions as Pigeon sends it: type 129, then its

@@ -4522,6 +4522,71 @@ class Report extends StatelessWidget {
   );
 
   test(
+    'a client puts the app in the background and back, and opens a link',
+    () async {
+      // #199: what a device's own controls send the app. example/channels
+      // prints LIFECYCLE: and ROUTE: as they come.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: channelsAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      final client = await RunnerClient.connect(endpoint);
+      Future<void> printed(String line) async {
+        final deadline = DateTime.now().add(const Duration(seconds: 15));
+        while (!output.contains(line) && DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        expect(output, contains(line));
+      }
+
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        // The app's observer is in once it said what it is shown with.
+        final deadline = DateTime.now().add(const Duration(seconds: 15));
+        while (!output.any((line) => line.startsWith('DEVICE:')) &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        client.setLifecycle('paused');
+        await printed('LIFECYCLE:paused');
+        client.setLifecycle('resumed');
+        // Back in front: resumed again, after the pause.
+        final deadline2 = DateTime.now().add(const Duration(seconds: 15));
+        while (output.lastIndexOf('LIFECYCLE:resumed') <
+                output.indexOf('LIFECYCLE:paused') &&
+            DateTime.now().isBefore(deadline2)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        expect(
+          output.lastIndexOf('LIFECYCLE:resumed'),
+          greaterThan(output.indexOf('LIFECYCLE:paused')),
+        );
+        client.openLink(Uri.parse('myapp://item/42?tab=reviews'));
+        await printed('ROUTE:myapp://item/42?tab=reviews');
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready && Directory(channelsAssets).existsSync()
+            ? false
+            : 'build the runner and example/channels first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'a data directory keeps the app\'s files apart from other apps\'',
     () async {
       // On Linux, path_provider and shared_preferences are Dart only and put

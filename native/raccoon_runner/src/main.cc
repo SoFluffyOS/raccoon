@@ -921,6 +921,11 @@ int Serve(const Options& options) {
                   resize.pixel_ratio() > 0 ? resize.pixel_ratio() : 1.0,
                   {insets.top(), insets.right(), insets.bottom(), insets.left()});
     };
+    handler.on_app_message = [&host](const raccoon::v1::AppMessage& message) {
+      host.SendPlatformMessage(message.channel(),
+                               reinterpret_cast<const uint8_t*>(message.data().data()),
+                               message.data().size());
+    };
     handler.on_settings = [&host](const raccoon::v1::Settings& settings) {
       raccoon::SettingsOverride device;
       for (const std::string& tag : settings.locales()) {

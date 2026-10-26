@@ -105,7 +105,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   rather than the host: its `Settings` replace the locales, text scale
   (otherwise 1), dark mode and hour format it sets, and `Resize.view_insets`
   is what covers the view's edges, an on-screen keyboard, as the app's
-  `viewInsets` (#193).
+  `viewInsets` (#193). An `AppMessage` goes to the app as a platform
+  message, as a device's own controls send one: the background and back
+  (`flutter/lifecycle`), a link opened (`flutter/navigation`) (#199).
 - Delivers keys the way the framework expects: the key data, then the
   legacy `flutter/keyevent` message it waits for before dispatching. Without
   the second, no key ever reaches the app.

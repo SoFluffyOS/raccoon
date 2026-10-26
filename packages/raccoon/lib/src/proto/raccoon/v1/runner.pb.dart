@@ -967,6 +967,77 @@ class PlatformResponse extends $pb.GeneratedMessage {
   void clearData() => $_clearField(3);
 }
 
+/// A platform message for the app from the client, as a device's own
+/// controls send one: flutter/lifecycle to put it in the background,
+/// flutter/navigation to open a link (#199). No reply comes back.
+class AppMessage extends $pb.GeneratedMessage {
+  factory AppMessage({
+    $core.String? channel,
+    $core.List<$core.int>? data,
+  }) {
+    final result = AppMessage._();
+    if (channel != null) result.channel = channel;
+    if (data != null) result.data = data;
+    return result;
+  }
+
+  AppMessage._();
+
+  factory AppMessage.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      AppMessage()..mergeFromBuffer(data, registry);
+  factory AppMessage.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      AppMessage()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'AppMessage',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
+      createEmptyInstance: AppMessage.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'channel')
+    ..a<$core.List<$core.int>>(
+        2, _omitFieldNames ? '' : 'data', $pb.PbFieldType.OY)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  AppMessage clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  AppMessage copyWith(void Function(AppMessage) updates) =>
+      super.copyWith((message) => updates(message as AppMessage)) as AppMessage;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use AppMessage() / AppMessage.new instead')
+  static AppMessage create() => AppMessage._();
+  static $pb.GeneratedMessage $_createMessage() => AppMessage._();
+  @$core.override
+  AppMessage createEmptyInstance() => AppMessage._();
+  @$core.pragma('dart2js:noInline')
+  static AppMessage getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<AppMessage>(AppMessage.$_createMessage);
+  static AppMessage? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get channel => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set channel($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasChannel() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearChannel() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.List<$core.int> get data => $_getN(1);
+  @$pb.TagNumber(2)
+  set data($core.List<$core.int> value) => $_setBytes(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasData() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearData() => $_clearField(2);
+}
+
 enum ClientMessage_Message {
   hello,
   resize,
@@ -977,6 +1048,7 @@ enum ClientMessage_Message {
   releaseBuffer,
   textEditing,
   settings,
+  appMessage,
   notSet
 }
 
@@ -991,6 +1063,7 @@ class ClientMessage extends $pb.GeneratedMessage {
     ReleaseBuffer? releaseBuffer,
     TextEditing? textEditing,
     Settings? settings,
+    AppMessage? appMessage,
   }) {
     final result = ClientMessage._();
     if (hello != null) result.hello = hello;
@@ -1002,6 +1075,7 @@ class ClientMessage extends $pb.GeneratedMessage {
     if (releaseBuffer != null) result.releaseBuffer = releaseBuffer;
     if (textEditing != null) result.textEditing = textEditing;
     if (settings != null) result.settings = settings;
+    if (appMessage != null) result.appMessage = appMessage;
     return result;
   }
 
@@ -1025,13 +1099,14 @@ class ClientMessage extends $pb.GeneratedMessage {
     7: ClientMessage_Message.releaseBuffer,
     8: ClientMessage_Message.textEditing,
     9: ClientMessage_Message.settings,
+    10: ClientMessage_Message.appMessage,
     0: ClientMessage_Message.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'ClientMessage',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
       createEmptyInstance: ClientMessage.$_createMessage)
-    ..oo(0, [1, 2, 3, 4, 5, 6, 7, 8, 9])
+    ..oo(0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
     ..aOM<ClientHello>(1, _omitFieldNames ? '' : 'hello',
         subBuilder: ClientHello.$_createMessage)
     ..aOM<Resize>(2, _omitFieldNames ? '' : 'resize',
@@ -1050,6 +1125,8 @@ class ClientMessage extends $pb.GeneratedMessage {
         subBuilder: TextEditing.$_createMessage)
     ..aOM<Settings>(9, _omitFieldNames ? '' : 'settings',
         subBuilder: Settings.$_createMessage)
+    ..aOM<AppMessage>(10, _omitFieldNames ? '' : 'appMessage',
+        subBuilder: AppMessage.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1083,6 +1160,7 @@ class ClientMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(7)
   @$pb.TagNumber(8)
   @$pb.TagNumber(9)
+  @$pb.TagNumber(10)
   ClientMessage_Message whichMessage() =>
       _ClientMessage_MessageByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(1)
@@ -1094,6 +1172,7 @@ class ClientMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(7)
   @$pb.TagNumber(8)
   @$pb.TagNumber(9)
+  @$pb.TagNumber(10)
   void clearMessage() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -1194,6 +1273,17 @@ class ClientMessage extends $pb.GeneratedMessage {
   void clearSettings() => $_clearField(9);
   @$pb.TagNumber(9)
   Settings ensureSettings() => $_ensure(8);
+
+  @$pb.TagNumber(10)
+  AppMessage get appMessage => $_getN(9);
+  @$pb.TagNumber(10)
+  set appMessage(AppMessage value) => $_setField(10, value);
+  @$pb.TagNumber(10)
+  $core.bool hasAppMessage() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearAppMessage() => $_clearField(10);
+  @$pb.TagNumber(10)
+  AppMessage ensureAppMessage() => $_ensure(9);
 }
 
 /// The client's input method produced a value for the active text field:

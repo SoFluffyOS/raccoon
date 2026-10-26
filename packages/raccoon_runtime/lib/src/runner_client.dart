@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:io' as io show pid;
 import 'dart:typed_data';
@@ -233,6 +234,29 @@ final class RunnerClient
   /// of the host's, where [settings] has them (#193).
   void sendSettings(Settings settings) =>
       send(ClientMessage(settings: settings));
+
+  /// Sends the app a platform message on [channel], as a device's own
+  /// controls do (#199). No reply comes back.
+  void sendToApp(String channel, List<int> data) =>
+      send(ClientMessage(appMessage: AppMessage(channel: channel, data: data)));
+
+  /// Puts the app in [state] (`resumed`, `inactive`, `hidden` or
+  /// `paused`), as a phone does going to the background and back. The
+  /// framework passes through the states between.
+  void setLifecycle(String state) =>
+      sendToApp('flutter/lifecycle', utf8.encode('AppLifecycleState.$state'));
+
+  /// Opens [link] in the app, as tapping a link to it on a phone does: its
+  /// router gets the route.
+  void openLink(Uri link) => sendToApp(
+    'flutter/navigation',
+    utf8.encode(
+      jsonEncode({
+        'method': 'pushRouteInformation',
+        'args': {'location': '$link', 'state': null},
+      }),
+    ),
+  );
 
   @override
   void sendPointer(PointerEvent event) => send(ClientMessage(pointer: event));

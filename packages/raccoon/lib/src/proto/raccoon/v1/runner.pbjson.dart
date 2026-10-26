@@ -328,6 +328,20 @@ final $typed_data.Uint8List platformResponseDescriptor = $convert.base64Decode(
     'ChBQbGF0Zm9ybVJlc3BvbnNlEh8KC3Jlc3BvbnNlX2lkGAEgASgEUgpyZXNwb25zZUlkEhgKB2'
     'hhbmRsZWQYAiABKAhSB2hhbmRsZWQSEgoEZGF0YRgDIAEoDFIEZGF0YQ==');
 
+@$core.Deprecated('Use appMessageDescriptor instead')
+const AppMessage$json = {
+  '1': 'AppMessage',
+  '2': [
+    {'1': 'channel', '3': 1, '4': 1, '5': 9, '10': 'channel'},
+    {'1': 'data', '3': 2, '4': 1, '5': 12, '10': 'data'},
+  ],
+};
+
+/// Descriptor for `AppMessage`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List appMessageDescriptor = $convert.base64Decode(
+    'CgpBcHBNZXNzYWdlEhgKB2NoYW5uZWwYASABKAlSB2NoYW5uZWwSEgoEZGF0YRgCIAEoDFIEZG'
+    'F0YQ==');
+
 @$core.Deprecated('Use clientMessageDescriptor instead')
 const ClientMessage$json = {
   '1': 'ClientMessage',
@@ -413,6 +427,15 @@ const ClientMessage$json = {
       '9': 0,
       '10': 'settings'
     },
+    {
+      '1': 'app_message',
+      '3': 10,
+      '4': 1,
+      '5': 11,
+      '6': '.raccoon.v1.AppMessage',
+      '9': 0,
+      '10': 'appMessage'
+    },
   ],
   '8': [
     {'1': 'message'},
@@ -430,7 +453,8 @@ final $typed_data.Uint8List clientMessageDescriptor = $convert.base64Decode(
     'c2USQgoOcmVsZWFzZV9idWZmZXIYByABKAsyGS5yYWNjb29uLnYxLlJlbGVhc2VCdWZmZXJIAF'
     'INcmVsZWFzZUJ1ZmZlchI8Cgx0ZXh0X2VkaXRpbmcYCCABKAsyFy5yYWNjb29uLnYxLlRleHRF'
     'ZGl0aW5nSABSC3RleHRFZGl0aW5nEjIKCHNldHRpbmdzGAkgASgLMhQucmFjY29vbi52MS5TZX'
-    'R0aW5nc0gAUghzZXR0aW5nc0IJCgdtZXNzYWdl');
+    'R0aW5nc0gAUghzZXR0aW5ncxI5CgthcHBfbWVzc2FnZRgKIAEoCzIWLnJhY2Nvb24udjEuQXBw'
+    'TWVzc2FnZUgAUgphcHBNZXNzYWdlQgkKB21lc3NhZ2U=');
 
 @$core.Deprecated('Use textEditingDescriptor instead')
 const TextEditing$json = {

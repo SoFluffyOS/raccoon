@@ -386,6 +386,9 @@ void RunnerServer::Dispatch(const v1::ClientMessage& message) {
         handler_.on_text_editing(message.text_editing());
       }
       break;
+    case v1::ClientMessage::kAppMessage:
+      if (handler_.on_app_message) handler_.on_app_message(message.app_message());
+      break;
     case v1::ClientMessage::kSettings:
       if (handler_.on_settings) handler_.on_settings(message.settings());
       break;
