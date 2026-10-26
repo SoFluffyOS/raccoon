@@ -4962,32 +4962,24 @@ class Report extends StatelessWidget {
             ],
           }),
         );
-      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
-      final runner = await RunnerProcess.start(
-        RunnerLaunch(
-          runnerBinary: binary ?? '',
-          engineDir: engineDir ?? '',
-          assets: pluginsAppAssets,
-          icuData: icu ?? '',
-          endpoint: endpoint,
-          plugins: manifest.path,
-        ),
-      );
-      final stderr = <String>[];
-      runner.stderr.listen(stderr.add);
-      final client = await RunnerClient.connect(endpoint);
+      // Rendered once: its stderr whole, the lines from loading the
+      // plugins, which come before a served runner listens, included.
       try {
-        await client.hello.timeout(const Duration(seconds: 10));
-        await client.plugins.first.timeout(const Duration(seconds: 10));
-        final deadline = DateTime.now().add(const Duration(seconds: 10));
-        while (!stderr.any((line) => line.contains('Objective-C classes')) &&
-            DateTime.now().isBefore(deadline)) {
-          await Future<void>.delayed(const Duration(milliseconds: 100));
-        }
-        expect(
-          stderr.where((line) => line.contains('is implemented in both')),
-          isEmpty,
-        );
+        final render = await Process.run(binary!, [
+          'render',
+          '--engine-dir',
+          engineDir!,
+          '--assets',
+          pluginsAppAssets,
+          '--icu',
+          icu!,
+          '--plugins',
+          manifest.path,
+          '--out',
+          p.join(temp.path, 'frame.ppm'),
+        ]);
+        final stderr = '${render.stderr}';
+        expect(stderr, isNot(contains('is implemented in both')));
         expect(
           stderr,
           contains(
@@ -4997,9 +4989,6 @@ class Report extends StatelessWidget {
           ),
         );
       } finally {
-        client.shutdown();
-        await client.close();
-        expect(await _exitCode(runner), 0);
         temp.deleteSync(recursive: true);
       }
     },
