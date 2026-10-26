@@ -1080,6 +1080,7 @@ if misses:
         # log kept, and the rest are installed again without it (#82).
         podded = [p for p in wanted if p['name'] not in broken]
         miss_names = {p['name'] for p in misses}
+        update = []
         while True:
             with open(os.path.join(pods, 'Podfile'), 'w') as f:
                 f.write("platform :osx, '%s.0'\n" % (macos.split('.')[0] or '11'))
@@ -1126,12 +1127,22 @@ if misses:
                     f.write("  pod %s, :path => %s\n" % (json.dumps(plugin['name']), json.dumps(linked)))
                 f.write("end\n")
             with open(log_path, 'w') as log:
-                installed = subprocess.run(['pod', 'install'], cwd=pods, env=env,
+                installed = subprocess.run(['pod', 'install'] + update, cwd=pods, env=env,
                                            stdout=log, stderr=subprocess.STDOUT).returncode == 0
             if installed:
                 break
-            errors = ' '.join(line for line in open(log_path, errors='replace') if line.startswith('[!]'))
-            culprits = miss_names & set(re.findall(r'`([\w-]+)`', errors)) & {p['name'] for p in podded}
+            logged = open(log_path, errors='replace').read()
+            # A spec index behind the plugins' pins: CocoaPods says so
+            # until it is updated, once (#183).
+            if not update and 'out-of-date source repos' in logged:
+                update = ['--repo-update']
+                continue
+            errors = logged[logged.find('[!]'):]
+            # The pod it stops on is named in the [!] lines; below them, the
+            # plugins whose pods depend on a version no source has (#183).
+            named = re.findall(r'`([\w-]+)`', ' '.join(re.findall(r'^\[!\].*$', errors, re.M)))
+            named += re.findall(r'^\s+([\w-]+) \(from `\.symlinks/plugins/[^`]*`\) was resolved to .*, which depends on', errors, re.M)
+            culprits = miss_names & set(named) & {p['name'] for p in podded}
             if not culprits:
                 toolchain = 'pod install failed; see ' + log_path
                 break

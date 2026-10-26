@@ -91,7 +91,12 @@ bool PluginHost::LoadManifest(const std::string& path, std::string* error) {
   // The ones that never got as far as a library: the helper's word.
   for (const auto& item : List(manifest, "status")) {
     if (!item.is_object()) continue;
-    statuses_.push_back({Str(item, "name"), Str(item, "state"), Str(item, "detail")});
+    PluginStatus status{Str(item, "name"), Str(item, "state"), Str(item, "detail")};
+    if (status.state == "failed") {
+      std::fprintf(stderr, "🦝 plugin %s not built\n     %s\n", status.name.c_str(),
+                   ShortReason(status.detail).c_str());
+    }
+    statuses_.push_back(std::move(status));
   }
   return true;
 }

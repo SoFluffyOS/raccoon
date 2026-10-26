@@ -802,7 +802,12 @@ void main() {
           File(p.join(temp.path, path))
             ..createSync(recursive: true)
             ..writeAsStringSync(text);
-      void plugin(String name, String className, {String? needs}) {
+      void plugin(
+        String name,
+        String className, {
+        String? needs,
+        String? version,
+      }) {
         write(
           '$name/pubspec.yaml',
           'name: $name\nversion: 1.0.0\nflutter:\n  plugin:\n    platforms:\n'
@@ -815,7 +820,7 @@ void main() {
               "  s.license = { :type => 'BSD' }\n  s.author = 'Raccoon'\n"
               "  s.source = { :path => '.' }\n  s.source_files = 'Classes/**/*'\n"
               "  s.dependency 'FlutterMacOS'\n"
-              "${needs == null ? '' : "  s.dependency '$needs'\n"}"
+              "${needs == null ? '' : "  s.dependency '$needs'${version == null ? '' : ", '$version'"}\n"}"
               "  s.platform = :osx, '10.15'\nend\n",
         );
         write(
@@ -896,6 +901,21 @@ void main() {
         write('plugin_a/src/extra.c', 'int extra(void) { return 1; }\n');
         await install();
         expect(log, contains('built: plugin_a'));
+
+        // #183: a pod that wants a version no source has drops its plugin
+        // only; CocoaPods lists both, the one it names still builds.
+        plugin('plugin_d', 'PluginD');
+        plugin('plugin_e', 'PluginE', needs: 'plugin_d', version: '9.9.9');
+        configure(['plugin_d', 'plugin_e']);
+        final missing = await install();
+        expect(loaded(missing), ['plugin_d']);
+        expect(
+          [
+            for (final entry in missing['status'] as List)
+              '${(entry as Map)['name']}',
+          ],
+          ['plugin_e'],
+        );
       } finally {
         temp.deleteSync(recursive: true);
       }
