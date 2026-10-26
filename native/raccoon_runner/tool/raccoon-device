@@ -236,30 +236,6 @@ plugin_headers() {
   fi
 }
 
-# The plugin cache keeps a folder per engine revision, and each Flutter
-# upgrade starts a new one (#197). Each install marks its own as used; the
-# others, unused for a month, go. Only folders named as a revision, and
-# not under RACCOON_PLUGIN_CACHE, which names one cache.
-tidy_plugin_caches() {
-  [ -z "${RACCOON_PLUGIN_CACHE:-}" ] || return 0
-  local root engine dir name
-  root="${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins"
-  engine="$(engine_revision 2>/dev/null)" || return 0
-  [ -n "$engine" ] || return 0
-  mkdir -p "$root/$engine" && touch "$root/$engine/.used"
-  for dir in "$root"/*/; do
-    dir="${dir%/}"
-    name="$(basename "$dir")"
-    [ "$name" != "$engine" ] || continue
-    [ "${#name}" -eq 40 ] || continue
-    case "$name" in *[!0-9a-f]*) continue ;; esac
-    # Used within the month: by its mark, or by its folder from before.
-    [ -z "$(find "$dir/.used" -mtime -30 2>/dev/null)" ] || continue
-    [ -z "$(find "$dir" -maxdepth 0 -mtime -30 2>/dev/null)" ] || continue
-    rm -rf "$dir"
-  done
-}
-
 # Builds a project's native plugins into |out| and writes |out|/manifest.json
 # for the runner's --plugins: the Linux half, the macOS half or the Windows
 # half below. When there is nothing it can do, says why and leaves no
@@ -267,7 +243,6 @@ tidy_plugin_caches() {
 build_plugins() {
   local project="$1" out="$2" config
   rm -rf "$out"
-  tidy_plugin_caches
   # None, as package_scope says why: no plugins rather than a failed install.
   # Install passes it, worked out once for both steps.
   if [ $# -ge 3 ]; then config="$3"; else config="$(package_config "$project")" || config=""; fi
