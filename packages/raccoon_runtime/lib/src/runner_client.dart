@@ -201,12 +201,38 @@ final class RunnerClient
   /// Completes when the runner closed the connection.
   Future<void> get closed => _closed.future;
 
+  ({int width, int height, double pixelRatio})? _size;
+  Insets? _viewInsets;
+
   @override
-  void resize(int width, int height, double pixelRatio) => send(
-    ClientMessage(
-      resize: Resize(width: width, height: height, pixelRatio: pixelRatio),
-    ),
-  );
+  void resize(int width, int height, double pixelRatio) {
+    _size = (width: width, height: height, pixelRatio: pixelRatio);
+    send(
+      ClientMessage(
+        resize: Resize(
+          width: width,
+          height: height,
+          pixelRatio: pixelRatio,
+          viewInsets: _viewInsets,
+        ),
+      ),
+    );
+  }
+
+  /// What covers the view's edges from now on, in physical pixels, as the
+  /// app sees `MediaQuery.viewInsets`: an on-screen keyboard (#193). Goes
+  /// with every size, the one the view has already too.
+  void setViewInsets(Insets insets) {
+    _viewInsets = insets;
+    if (_size case final size?) {
+      resize(size.width, size.height, size.pixelRatio);
+    }
+  }
+
+  /// The device's locales, text scale, dark mode and hour format in place
+  /// of the host's, where [settings] has them (#193).
+  void sendSettings(Settings settings) =>
+      send(ClientMessage(settings: settings));
 
   @override
   void sendPointer(PointerEvent event) => send(ClientMessage(pointer: event));

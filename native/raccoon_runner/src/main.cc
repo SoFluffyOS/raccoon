@@ -884,8 +884,25 @@ int Serve(const Options& options) {
                      static_cast<long long>(client->view), resize.width(), resize.height(),
                      resize.pixel_ratio());
       }
+      const raccoon::v1::Insets& insets = resize.view_insets();
       host.Resize(client->view, resize.width(), resize.height(),
-                  resize.pixel_ratio() > 0 ? resize.pixel_ratio() : 1.0);
+                  resize.pixel_ratio() > 0 ? resize.pixel_ratio() : 1.0,
+                  {insets.top(), insets.right(), insets.bottom(), insets.left()});
+    };
+    handler.on_settings = [&host](const raccoon::v1::Settings& settings) {
+      raccoon::SettingsOverride device;
+      for (const std::string& tag : settings.locales()) {
+        raccoon::HostLocale locale = raccoon::ParseLocale(tag);
+        if (!locale.language.empty()) device.locales.push_back(std::move(locale));
+      }
+      if (settings.has_text_scale_factor() && settings.text_scale_factor() > 0) {
+        device.text_scale = settings.text_scale_factor();
+      }
+      if (settings.has_dark()) device.dark = settings.dark();
+      if (settings.has_always_use_24_hour_format()) {
+        device.always_24_hour = settings.always_use_24_hour_format();
+      }
+      host.ApplySettings(std::move(device));
     };
     handler.on_pointer = [&host, client, &Focus, trace](const raccoon::v1::PointerEvent& pointer) {
       if (trace) {

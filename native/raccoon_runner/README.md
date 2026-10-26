@@ -101,7 +101,11 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   `LANGUAGE`, `LC_ALL`, `LC_MESSAGES` and `LANG`. Without it an app saw no
   locales and a light host. It also says the app is resumed
   (`flutter/lifecycle`), as desktop embeddings do once the engine runs;
-  before, `lifecycleState` stayed null.
+  before, `lifecycleState` stayed null. A client shows the app as a device
+  rather than the host: its `Settings` replace the locales, text scale
+  (otherwise 1), dark mode and hour format it sets, and `Resize.view_insets`
+  is what covers the view's edges, an on-screen keyboard, as the app's
+  `viewInsets` (#193).
 - Delivers keys the way the framework expects: the key data, then the
   legacy `flutter/keyevent` message it waits for before dispatching. Without
   the second, no key ever reaches the app.

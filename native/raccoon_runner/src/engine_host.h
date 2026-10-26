@@ -28,6 +28,7 @@
 #endif
 #include "platform_task_runner.h"
 #include "software_frame.h"
+#include "host_settings.h"
 #include "text_input.h"
 #include "user_defaults_channels.h"
 #include "window_channels.h"
@@ -57,6 +58,11 @@ struct EngineOptions {
   // the app more views than its own (#182). Off, the engine draws its one
   // view as it always did.
   bool views = false;
+};
+
+// What covers a view's edges (an on-screen keyboard), physical pixels.
+struct ViewInsets {
+  double top = 0, right = 0, bottom = 0, left = 0;
 };
 
 // One engine: start, metrics, input, shutdown. Rasterizes on the GPU where
@@ -116,7 +122,10 @@ class EngineHost {
 
   // The calls below name a view: 0 is the app's own, which every host has.
   // A view not (or no longer) there is let be.
-  void Resize(FlutterViewId view, size_t width, size_t height, double pixel_ratio);
+  void Resize(FlutterViewId view, size_t width, size_t height, double pixel_ratio,
+              ViewInsets insets = {});
+  // The device's settings in place of the host's, where it has them (#193).
+  void ApplySettings(SettingsOverride settings);
   // Draws the app again at the size it has: a client that arrives at an
   // idle app gets a frame of its own, whatever the one before took them
   // as (#138). Nothing before the first Resize.
@@ -195,6 +204,7 @@ class EngineHost {
  private:
   // The host's locales and settings, for the app (see host_settings.h).
   void SendHostSettings();
+  SettingsOverride settings_override_;
   static bool OnPresent(void* user_data, const void* allocation,
                         size_t row_bytes, size_t height);
   // Picks the renderer |wanted| names and fills |renderer| for the engine.

@@ -14,7 +14,8 @@ import 'package:flutter/widgets.dart';
 /// view at a pixel ratio of 1 and an empty data directory, if any. Prints
 /// XDG_DATA_HOME: and what the app sees, for the data directory test,
 /// RACCOON_ENDPOINT: for package:raccoon, then LOCALES:, BRIGHTNESS: and
-/// LIFECYCLE:, as the runner told the engine.
+/// LIFECYCLE:, as the runner told the engine, and DEVICE: whenever the
+/// metrics or settings change.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Where the Dart-only Linux plugins would put the app's files: the runner
@@ -200,7 +201,40 @@ Future<void> main() async {
   print('LOCALES:${dispatcher.locales.join(',')}');
   print('BRIGHTNESS:${dispatcher.platformBrightness.name}');
   print('LIFECYCLE:${WidgetsBinding.instance.lifecycleState?.name}');
+  // And what a client sets in their place: now and each time it does
+  // (#193).
+  void device() {
+    final view = dispatcher.implicitView;
+    print(
+      'DEVICE:${dispatcher.locales.join(',')};'
+      '${dispatcher.platformBrightness.name};'
+      '${dispatcher.textScaleFactor};'
+      '${dispatcher.alwaysUse24HourFormat};'
+      '${view?.viewInsets.bottom}',
+    );
+  }
+
+  device();
+  WidgetsBinding.instance.addObserver(_Device(device));
   runApp(ChannelsApp(ok: failures.isEmpty));
+}
+
+class _Device with WidgetsBindingObserver {
+  _Device(this.changed);
+
+  final VoidCallback changed;
+
+  @override
+  void didChangeMetrics() => changed();
+
+  @override
+  void didChangeLocales(List<Locale>? locales) => changed();
+
+  @override
+  void didChangePlatformBrightness() => changed();
+
+  @override
+  void didChangeTextScaleFactor() => changed();
 }
 
 /// SharedPreferencesPigeonOptions as Pigeon sends it: type 129, then its

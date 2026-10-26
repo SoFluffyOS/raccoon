@@ -48,6 +48,27 @@ message Resize {
   uint32 width = 1;
   uint32 height = 2;
   double pixel_ratio = 3;
+  // What covers the view's edges, as the app sees MediaQuery.viewInsets: an
+  // on-screen keyboard (#193). Physical pixels, like width and height.
+  Insets view_insets = 4;
+}
+
+message Insets {
+  double top = 1;
+  double right = 2;
+  double bottom = 3;
+  double left = 4;
+}
+
+// The device the app is shown as, in place of the host's (#193). What it
+// sets replaces the host's setting; what it leaves unset stays the host's.
+// A later Settings replaces the whole of an earlier one.
+message Settings {
+  // BCP 47 tags, preferred first ("en-US", "zh-Hans-CN").
+  repeated string locales = 1;
+  optional double text_scale_factor = 2;
+  optional bool dark = 3;
+  optional bool always_use_24_hour_format = 4;
 }
 
 enum PointerPhase {
@@ -133,6 +154,7 @@ message ClientMessage {
     PlatformResponse platform_response = 6;
     ReleaseBuffer release_buffer = 7;
     TextEditing text_editing = 8;
+    Settings settings = 9;
   }
 }
 

@@ -241,11 +241,13 @@ class Resize extends $pb.GeneratedMessage {
     $core.int? width,
     $core.int? height,
     $core.double? pixelRatio,
+    Insets? viewInsets,
   }) {
     final result = Resize._();
     if (width != null) result.width = width;
     if (height != null) result.height = height;
     if (pixelRatio != null) result.pixelRatio = pixelRatio;
+    if (viewInsets != null) result.viewInsets = viewInsets;
     return result;
   }
 
@@ -265,6 +267,8 @@ class Resize extends $pb.GeneratedMessage {
     ..aI(1, _omitFieldNames ? '' : 'width', fieldType: $pb.PbFieldType.OU3)
     ..aI(2, _omitFieldNames ? '' : 'height', fieldType: $pb.PbFieldType.OU3)
     ..aD(3, _omitFieldNames ? '' : 'pixelRatio')
+    ..aOM<Insets>(4, _omitFieldNames ? '' : 'viewInsets',
+        subBuilder: Insets.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -313,6 +317,201 @@ class Resize extends $pb.GeneratedMessage {
   $core.bool hasPixelRatio() => $_has(2);
   @$pb.TagNumber(3)
   void clearPixelRatio() => $_clearField(3);
+
+  /// What covers the view's edges, as the app sees MediaQuery.viewInsets: an
+  /// on-screen keyboard (#193). Physical pixels, like width and height.
+  @$pb.TagNumber(4)
+  Insets get viewInsets => $_getN(3);
+  @$pb.TagNumber(4)
+  set viewInsets(Insets value) => $_setField(4, value);
+  @$pb.TagNumber(4)
+  $core.bool hasViewInsets() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearViewInsets() => $_clearField(4);
+  @$pb.TagNumber(4)
+  Insets ensureViewInsets() => $_ensure(3);
+}
+
+class Insets extends $pb.GeneratedMessage {
+  factory Insets({
+    $core.double? top,
+    $core.double? right,
+    $core.double? bottom,
+    $core.double? left,
+  }) {
+    final result = Insets._();
+    if (top != null) result.top = top;
+    if (right != null) result.right = right;
+    if (bottom != null) result.bottom = bottom;
+    if (left != null) result.left = left;
+    return result;
+  }
+
+  Insets._();
+
+  factory Insets.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      Insets()..mergeFromBuffer(data, registry);
+  factory Insets.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      Insets()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'Insets',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
+      createEmptyInstance: Insets.$_createMessage)
+    ..aD(1, _omitFieldNames ? '' : 'top')
+    ..aD(2, _omitFieldNames ? '' : 'right')
+    ..aD(3, _omitFieldNames ? '' : 'bottom')
+    ..aD(4, _omitFieldNames ? '' : 'left')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Insets clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Insets copyWith(void Function(Insets) updates) =>
+      super.copyWith((message) => updates(message as Insets)) as Insets;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Insets() / Insets.new instead')
+  static Insets create() => Insets._();
+  static $pb.GeneratedMessage $_createMessage() => Insets._();
+  @$core.override
+  Insets createEmptyInstance() => Insets._();
+  @$core.pragma('dart2js:noInline')
+  static Insets getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Insets>(Insets.$_createMessage);
+  static Insets? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.double get top => $_getN(0);
+  @$pb.TagNumber(1)
+  set top($core.double value) => $_setDouble(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasTop() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearTop() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.double get right => $_getN(1);
+  @$pb.TagNumber(2)
+  set right($core.double value) => $_setDouble(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasRight() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearRight() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.double get bottom => $_getN(2);
+  @$pb.TagNumber(3)
+  set bottom($core.double value) => $_setDouble(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasBottom() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearBottom() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.double get left => $_getN(3);
+  @$pb.TagNumber(4)
+  set left($core.double value) => $_setDouble(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasLeft() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearLeft() => $_clearField(4);
+}
+
+/// The device the app is shown as, in place of the host's (#193). What it
+/// sets replaces the host's setting; what it leaves unset stays the host's.
+/// A later Settings replaces the whole of an earlier one.
+class Settings extends $pb.GeneratedMessage {
+  factory Settings({
+    $core.Iterable<$core.String>? locales,
+    $core.double? textScaleFactor,
+    $core.bool? dark,
+    $core.bool? alwaysUse24HourFormat,
+  }) {
+    final result = Settings._();
+    if (locales != null) result.locales.addAll(locales);
+    if (textScaleFactor != null) result.textScaleFactor = textScaleFactor;
+    if (dark != null) result.dark = dark;
+    if (alwaysUse24HourFormat != null)
+      result.alwaysUse24HourFormat = alwaysUse24HourFormat;
+    return result;
+  }
+
+  Settings._();
+
+  factory Settings.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      Settings()..mergeFromBuffer(data, registry);
+  factory Settings.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      Settings()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'Settings',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
+      createEmptyInstance: Settings.$_createMessage)
+    ..pPS(1, _omitFieldNames ? '' : 'locales')
+    ..aD(2, _omitFieldNames ? '' : 'textScaleFactor')
+    ..aOB(3, _omitFieldNames ? '' : 'dark')
+    ..aOB(4, _omitFieldNames ? '' : 'alwaysUse24HourFormat',
+        protoName: 'always_use_24_hour_format')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Settings clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Settings copyWith(void Function(Settings) updates) =>
+      super.copyWith((message) => updates(message as Settings)) as Settings;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Settings() / Settings.new instead')
+  static Settings create() => Settings._();
+  static $pb.GeneratedMessage $_createMessage() => Settings._();
+  @$core.override
+  Settings createEmptyInstance() => Settings._();
+  @$core.pragma('dart2js:noInline')
+  static Settings getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Settings>(Settings.$_createMessage);
+  static Settings? _defaultInstance;
+
+  /// BCP 47 tags, preferred first ("en-US", "zh-Hans-CN").
+  @$pb.TagNumber(1)
+  $pb.PbList<$core.String> get locales => $_getList(0);
+
+  @$pb.TagNumber(2)
+  $core.double get textScaleFactor => $_getN(1);
+  @$pb.TagNumber(2)
+  set textScaleFactor($core.double value) => $_setDouble(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasTextScaleFactor() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearTextScaleFactor() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.bool get dark => $_getBF(2);
+  @$pb.TagNumber(3)
+  set dark($core.bool value) => $_setBool(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasDark() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearDark() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.bool get alwaysUse24HourFormat => $_getBF(3);
+  @$pb.TagNumber(4)
+  set alwaysUse24HourFormat($core.bool value) => $_setBool(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasAlwaysUse24HourFormat() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearAlwaysUse24HourFormat() => $_clearField(4);
 }
 
 class PointerEvent extends $pb.GeneratedMessage {
@@ -777,6 +976,7 @@ enum ClientMessage_Message {
   platformResponse,
   releaseBuffer,
   textEditing,
+  settings,
   notSet
 }
 
@@ -790,6 +990,7 @@ class ClientMessage extends $pb.GeneratedMessage {
     PlatformResponse? platformResponse,
     ReleaseBuffer? releaseBuffer,
     TextEditing? textEditing,
+    Settings? settings,
   }) {
     final result = ClientMessage._();
     if (hello != null) result.hello = hello;
@@ -800,6 +1001,7 @@ class ClientMessage extends $pb.GeneratedMessage {
     if (platformResponse != null) result.platformResponse = platformResponse;
     if (releaseBuffer != null) result.releaseBuffer = releaseBuffer;
     if (textEditing != null) result.textEditing = textEditing;
+    if (settings != null) result.settings = settings;
     return result;
   }
 
@@ -822,13 +1024,14 @@ class ClientMessage extends $pb.GeneratedMessage {
     6: ClientMessage_Message.platformResponse,
     7: ClientMessage_Message.releaseBuffer,
     8: ClientMessage_Message.textEditing,
+    9: ClientMessage_Message.settings,
     0: ClientMessage_Message.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'ClientMessage',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
       createEmptyInstance: ClientMessage.$_createMessage)
-    ..oo(0, [1, 2, 3, 4, 5, 6, 7, 8])
+    ..oo(0, [1, 2, 3, 4, 5, 6, 7, 8, 9])
     ..aOM<ClientHello>(1, _omitFieldNames ? '' : 'hello',
         subBuilder: ClientHello.$_createMessage)
     ..aOM<Resize>(2, _omitFieldNames ? '' : 'resize',
@@ -845,6 +1048,8 @@ class ClientMessage extends $pb.GeneratedMessage {
         subBuilder: ReleaseBuffer.$_createMessage)
     ..aOM<TextEditing>(8, _omitFieldNames ? '' : 'textEditing',
         subBuilder: TextEditing.$_createMessage)
+    ..aOM<Settings>(9, _omitFieldNames ? '' : 'settings',
+        subBuilder: Settings.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -877,6 +1082,7 @@ class ClientMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(6)
   @$pb.TagNumber(7)
   @$pb.TagNumber(8)
+  @$pb.TagNumber(9)
   ClientMessage_Message whichMessage() =>
       _ClientMessage_MessageByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(1)
@@ -887,6 +1093,7 @@ class ClientMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(6)
   @$pb.TagNumber(7)
   @$pb.TagNumber(8)
+  @$pb.TagNumber(9)
   void clearMessage() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -976,6 +1183,17 @@ class ClientMessage extends $pb.GeneratedMessage {
   void clearTextEditing() => $_clearField(8);
   @$pb.TagNumber(8)
   TextEditing ensureTextEditing() => $_ensure(7);
+
+  @$pb.TagNumber(9)
+  Settings get settings => $_getN(8);
+  @$pb.TagNumber(9)
+  set settings(Settings value) => $_setField(9, value);
+  @$pb.TagNumber(9)
+  $core.bool hasSettings() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearSettings() => $_clearField(9);
+  @$pb.TagNumber(9)
+  Settings ensureSettings() => $_ensure(8);
 }
 
 /// The client's input method produced a value for the active text field:

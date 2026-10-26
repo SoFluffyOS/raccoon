@@ -3,6 +3,7 @@
 // gets them from its embedding: the preferred languages, light or dark, and
 // 24-hour time. The engine knows none of these unless told.
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -18,6 +19,15 @@ struct HostSettings {
   std::vector<HostLocale> locales;
   bool dark = false;
   bool always_24_hour = false;
+};
+
+// What a client says the device it shows the app as has (#193): each one
+// set replaces the host's.
+struct SettingsOverride {
+  std::vector<HostLocale> locales;  // none: the host's
+  std::optional<double> text_scale;
+  std::optional<bool> dark;
+  std::optional<bool> always_24_hour;
 };
 
 // The host's settings now: on macOS NSLocale's preferred languages, the

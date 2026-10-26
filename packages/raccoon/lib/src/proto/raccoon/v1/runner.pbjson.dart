@@ -159,13 +159,78 @@ const Resize$json = {
     {'1': 'width', '3': 1, '4': 1, '5': 13, '10': 'width'},
     {'1': 'height', '3': 2, '4': 1, '5': 13, '10': 'height'},
     {'1': 'pixel_ratio', '3': 3, '4': 1, '5': 1, '10': 'pixelRatio'},
+    {
+      '1': 'view_insets',
+      '3': 4,
+      '4': 1,
+      '5': 11,
+      '6': '.raccoon.v1.Insets',
+      '10': 'viewInsets'
+    },
   ],
 };
 
 /// Descriptor for `Resize`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List resizeDescriptor = $convert.base64Decode(
     'CgZSZXNpemUSFAoFd2lkdGgYASABKA1SBXdpZHRoEhYKBmhlaWdodBgCIAEoDVIGaGVpZ2h0Eh'
-    '8KC3BpeGVsX3JhdGlvGAMgASgBUgpwaXhlbFJhdGlv');
+    '8KC3BpeGVsX3JhdGlvGAMgASgBUgpwaXhlbFJhdGlvEjMKC3ZpZXdfaW5zZXRzGAQgASgLMhIu'
+    'cmFjY29vbi52MS5JbnNldHNSCnZpZXdJbnNldHM=');
+
+@$core.Deprecated('Use insetsDescriptor instead')
+const Insets$json = {
+  '1': 'Insets',
+  '2': [
+    {'1': 'top', '3': 1, '4': 1, '5': 1, '10': 'top'},
+    {'1': 'right', '3': 2, '4': 1, '5': 1, '10': 'right'},
+    {'1': 'bottom', '3': 3, '4': 1, '5': 1, '10': 'bottom'},
+    {'1': 'left', '3': 4, '4': 1, '5': 1, '10': 'left'},
+  ],
+};
+
+/// Descriptor for `Insets`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List insetsDescriptor = $convert.base64Decode(
+    'CgZJbnNldHMSEAoDdG9wGAEgASgBUgN0b3ASFAoFcmlnaHQYAiABKAFSBXJpZ2h0EhYKBmJvdH'
+    'RvbRgDIAEoAVIGYm90dG9tEhIKBGxlZnQYBCABKAFSBGxlZnQ=');
+
+@$core.Deprecated('Use settingsDescriptor instead')
+const Settings$json = {
+  '1': 'Settings',
+  '2': [
+    {'1': 'locales', '3': 1, '4': 3, '5': 9, '10': 'locales'},
+    {
+      '1': 'text_scale_factor',
+      '3': 2,
+      '4': 1,
+      '5': 1,
+      '9': 0,
+      '10': 'textScaleFactor',
+      '17': true
+    },
+    {'1': 'dark', '3': 3, '4': 1, '5': 8, '9': 1, '10': 'dark', '17': true},
+    {
+      '1': 'always_use_24_hour_format',
+      '3': 4,
+      '4': 1,
+      '5': 8,
+      '9': 2,
+      '10': 'alwaysUse24HourFormat',
+      '17': true
+    },
+  ],
+  '8': [
+    {'1': '_text_scale_factor'},
+    {'1': '_dark'},
+    {'1': '_always_use_24_hour_format'},
+  ],
+};
+
+/// Descriptor for `Settings`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List settingsDescriptor = $convert.base64Decode(
+    'CghTZXR0aW5ncxIYCgdsb2NhbGVzGAEgAygJUgdsb2NhbGVzEi8KEXRleHRfc2NhbGVfZmFjdG'
+    '9yGAIgASgBSABSD3RleHRTY2FsZUZhY3RvcogBARIXCgRkYXJrGAMgASgISAFSBGRhcmuIAQES'
+    'PQoZYWx3YXlzX3VzZV8yNF9ob3VyX2Zvcm1hdBgEIAEoCEgCUhVhbHdheXNVc2UyNEhvdXJGb3'
+    'JtYXSIAQFCFAoSX3RleHRfc2NhbGVfZmFjdG9yQgcKBV9kYXJrQhwKGl9hbHdheXNfdXNlXzI0'
+    'X2hvdXJfZm9ybWF0');
 
 @$core.Deprecated('Use pointerEventDescriptor instead')
 const PointerEvent$json = {
@@ -339,6 +404,15 @@ const ClientMessage$json = {
       '9': 0,
       '10': 'textEditing'
     },
+    {
+      '1': 'settings',
+      '3': 9,
+      '4': 1,
+      '5': 11,
+      '6': '.raccoon.v1.Settings',
+      '9': 0,
+      '10': 'settings'
+    },
   ],
   '8': [
     {'1': 'message'},
@@ -355,7 +429,8 @@ final $typed_data.Uint8List clientMessageDescriptor = $convert.base64Decode(
     'NlGAYgASgLMhwucmFjY29vbi52MS5QbGF0Zm9ybVJlc3BvbnNlSABSEHBsYXRmb3JtUmVzcG9u'
     'c2USQgoOcmVsZWFzZV9idWZmZXIYByABKAsyGS5yYWNjb29uLnYxLlJlbGVhc2VCdWZmZXJIAF'
     'INcmVsZWFzZUJ1ZmZlchI8Cgx0ZXh0X2VkaXRpbmcYCCABKAsyFy5yYWNjb29uLnYxLlRleHRF'
-    'ZGl0aW5nSABSC3RleHRFZGl0aW5nQgkKB21lc3NhZ2U=');
+    'ZGl0aW5nSABSC3RleHRFZGl0aW5nEjIKCHNldHRpbmdzGAkgASgLMhQucmFjY29vbi52MS5TZX'
+    'R0aW5nc0gAUghzZXR0aW5nc0IJCgdtZXNzYWdl');
 
 @$core.Deprecated('Use textEditingDescriptor instead')
 const TextEditing$json = {

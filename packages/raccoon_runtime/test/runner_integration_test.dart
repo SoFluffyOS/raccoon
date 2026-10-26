@@ -4351,6 +4351,79 @@ void main() {
   );
 
   test(
+    'a client sets the device\'s locales, text scale, dark mode, hour format '
+    'and keyboard insets',
+    () async {
+      // #193: in place of the host's. example/channels prints DEVICE:
+      // whenever they change.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: channelsAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      final client = await RunnerClient.connect(endpoint);
+      Future<String> device(bool Function(String line) wanted) async {
+        final deadline = DateTime.now().add(const Duration(seconds: 15));
+        while (DateTime.now().isBefore(deadline)) {
+          for (final line in output) {
+            if (line.startsWith('DEVICE:') && wanted(line)) return line;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        return 'no DEVICE: line as wanted in $output';
+      }
+
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        client.resize(800, 600, 1);
+        client.setViewInsets(Insets(bottom: 300));
+        client.sendSettings(
+          Settings(
+            locales: ['de-DE', 'zh-Hans-CN'],
+            textScaleFactor: 1.5,
+            dark: true,
+            alwaysUse24HourFormat: true,
+          ),
+        );
+        expect(
+          await device(
+            (line) => line.contains('de_DE') && line.contains('1.5'),
+          ),
+          'DEVICE:de_DE,zh_Hans_CN;dark;1.5;true;300.0',
+        );
+        // A later one replaces it whole: what it leaves unset is the
+        // host's again, and the insets go with the size.
+        client.sendSettings(Settings(textScaleFactor: 2));
+        client.setViewInsets(Insets());
+        expect(
+          await device(
+            (line) => line.contains(';2.0;') && line.endsWith(';0.0'),
+          ),
+          isNot(contains('de_DE')),
+        );
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready && Directory(channelsAssets).existsSync()
+            ? false
+            : 'build the runner and example/channels first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'a data directory keeps the app\'s files apart from other apps\'',
     () async {
       // On Linux, path_provider and shared_preferences are Dart only and put

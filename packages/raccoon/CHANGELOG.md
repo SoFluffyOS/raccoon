@@ -1,5 +1,6 @@
 ## Unreleased
 
+- `Resize.view_insets` and `Settings`: the client sets what covers the view's edges (an on-screen keyboard), and the device's locales, text scale, dark mode and hour format in place of the host's. A runner that predates them ignores both.
 - `PointerPhase` gains `CANCEL`: the host took a press away, and the app drops it with no tap. A runner that predates it already took an unknown phase as a cancel.
 - `SharedBuffers.generation` and `ReleaseBuffer.shared_generation`: a shared buffer goes back named by its set, so a release meant for a set since replaced frees nothing in the new one. 0 on either side keeps the old behaviour.
 

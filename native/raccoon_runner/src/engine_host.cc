@@ -175,7 +175,11 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
 void EngineHost::SendHostSettings() {
   // What a desktop embedding tells its app at start: without it the app
   // sees no locales and a light, 12-hour host.
-  const HostSettings settings = ReadHostSettings();
+  HostSettings settings = ReadHostSettings();
+  const SettingsOverride& device = settings_override_;
+  if (!device.locales.empty()) settings.locales = device.locales;
+  if (device.dark) settings.dark = *device.dark;
+  if (device.always_24_hour) settings.always_24_hour = *device.always_24_hour;
   std::vector<FlutterLocale> locales;
   for (const HostLocale& locale : settings.locales) {
     FlutterLocale entry{};
@@ -191,7 +195,7 @@ void EngineHost::SendHostSettings() {
     loader_.procs().UpdateLocales(engine_, pointers.data(), pointers.size());
   }
   const std::string json = nlohmann::json{
-      {"textScaleFactor", 1.0},
+      {"textScaleFactor", device.text_scale.value_or(1.0)},
       {"alwaysUse24HourFormat", settings.always_24_hour},
       {"platformBrightness", settings.dark ? "dark" : "light"},
   }.dump();
@@ -208,7 +212,7 @@ namespace {
 // as it does any (#117). 8,192 is wider than any display. |scale| is what
 // it was scaled by.
 FlutterWindowMetricsEvent FitMetrics(size_t width, size_t height, double pixel_ratio,
-                                     double* scale) {
+                                     const ViewInsets& insets, double* scale) {
   constexpr size_t kMaxSide = 8192;
   const size_t longest = std::max(width, height);
   *scale = 1.0;
@@ -223,6 +227,10 @@ FlutterWindowMetricsEvent FitMetrics(size_t width, size_t height, double pixel_r
   metrics.width = width;
   metrics.height = height;
   metrics.pixel_ratio = pixel_ratio;
+  metrics.physical_view_inset_top = insets.top * *scale;
+  metrics.physical_view_inset_right = insets.right * *scale;
+  metrics.physical_view_inset_bottom = insets.bottom * *scale;
+  metrics.physical_view_inset_left = insets.left * *scale;
   metrics.display_id = kDisplayId;
   return metrics;
 }
@@ -235,10 +243,15 @@ struct ViewBaton {
 
 }  // namespace
 
+void EngineHost::ApplySettings(SettingsOverride settings) {
+  settings_override_ = std::move(settings);
+  if (engine_ != nullptr) SendHostSettings();
+}
+
 void EngineHost::Resize(FlutterViewId view, size_t width, size_t height,
-                        double pixel_ratio) {
+                        double pixel_ratio, ViewInsets insets) {
   double scale = 1.0;
-  FlutterWindowMetricsEvent metrics = FitMetrics(width, height, pixel_ratio, &scale);
+  FlutterWindowMetricsEvent metrics = FitMetrics(width, height, pixel_ratio, insets, &scale);
   if (view == 0) {
     input_scale_ = scale;
     metrics_ = metrics;
