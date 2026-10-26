@@ -32,6 +32,17 @@ each channel belongs to when the plugin report says it cannot work here.
 It waits a moment for a frame (`startupGrace`), and once a frame arrives it
 stays null: from then on the app's own error handling rules.
 
+A host shows the app as a device rather than itself.
+`RunnerClient.sendSettings` replaces the host's locales, text scale, dark
+mode and hour format, and `setViewInsets` covers the view's bottom with an
+on-screen keyboard, as the app's `viewInsets`. The engine has no way to say
+a safe area or a target platform. A run started from the entry
+`RaccoonEntrypoint.write` generates gets both: the entry asks the client,
+and `DeviceChannel` answers per view with a `DeviceProfile` (its padding
+and a `TargetPlatform` name). Calls the app makes before any client
+connects wait up to a second for the first, so a client that registers its
+channels as soon as it connects, before the hello, answers them.
+
 `raccoon_device setup` registers one device with the Flutter tool,
 `raccoon`. The size belongs to the run, not the device: a host's board
 picks it (Phone, Tablet, Desktop, or the frame dragged to any size), the

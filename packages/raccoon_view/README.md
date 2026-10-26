@@ -28,6 +28,15 @@ nothing beyond the plugin registration the Flutter tool generates for any
 app depending on it; the macOS plugin comes as a Swift package and a
 podspec, for either way of integrating plugins.
 
+`PluginStubs` answers, on the client, the plugins with no implementation
+for the runner's host the way a phone would: `permission_handler`
+(granted, denied or permanently denied, as the host says),
+`google_mobile_ads` (initialized, never filled), `flutter_foreground_task`
+(a service that starts and stops), `vibration` and `sensors_plus` (a device
+at rest). Only calls no native plugin took reach the client, so a loaded
+plugin is never answered by them; `PluginStubs.plugins` names them, for a
+host that warns about plugins whose calls fail.
+
 Uses no Material or Cupertino widgets.
 
 ## Issues
