@@ -4419,6 +4419,20 @@ void main() {
         final (cached, podLibrary) = await install();
         expect(cached, contains('1 from the cache: raccoon_echo'));
         expect(podLibrary, endsWith('raccoon_echo.framework/raccoon_echo'));
+
+        // The release's prebuilt plugins are one pod each, which an install
+        // can take; never a build of a whole set (#189).
+        final archive = p.join(temp.path, 'prebuilt.tar.gz');
+        final prebuild = await Process.run(helper, [
+          'prebuild',
+          p.dirname(p.dirname(pluginsAppAssets)),
+          archive,
+        ], environment: environment());
+        expect(prebuild.exitCode, 0, reason: '${prebuild.stderr}');
+        final listing =
+            '${(await Process.run('tar', ['tzf', archive])).stdout}';
+        expect(listing, contains('raccoon_echo.framework/'));
+        expect(listing, isNot(contains('swiftpm-')));
       } finally {
         temp.deleteSync(recursive: true);
       }

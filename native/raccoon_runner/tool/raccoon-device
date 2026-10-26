@@ -1689,7 +1689,11 @@ case "$verb" in
     project="$1"; archive="$2"
     (cd "$project" && flutter pub get > /dev/null)
     stage="$(mktemp -d)"
-    RACCOON_PLUGIN_CACHE="$stage/cache" RACCOON_NO_PREBUILT=1 build_plugins "$(cd "$project" && pwd)" "$stage/out"
+    # One pod per plugin, which an install takes when every one of its
+    # Swift package plugins has one: a Swift package build is cached by
+    # the whole set, which no other app's matches (#189).
+    RACCOON_PLUGIN_CACHE="$stage/cache" RACCOON_NO_PREBUILT=1 RACCOON_NO_SWIFT_PACKAGES=1 \
+      build_plugins "$(cd "$project" && pwd)" "$stage/out"
     mkdir -p "$(dirname "$archive")"
     if [ -d "$stage/cache" ]; then
       # No AppleDouble ._ files for extended attributes: macOS's tar adds
