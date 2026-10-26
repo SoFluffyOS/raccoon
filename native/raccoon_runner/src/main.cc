@@ -749,7 +749,7 @@ int Serve(const Options& options) {
     const FlutterPlatformMessageResponseHandle* handle;
     std::chrono::steady_clock::time_point deadline;
   };
-  std::deque<Early> early;
+  std::vector<Early> early;
   bool had_client = false;
 
   // The app's platform messages go to the first client, which serves them
@@ -794,7 +794,7 @@ int Serve(const Options& options) {
     int wait = cap;
     while (!early.empty() && early.front().deadline <= now) {
       host.RespondNoPlugin(early.front().channel, early.front().handle, "no client");
-      early.pop_front();
+      early.erase(early.begin());
     }
     if (!early.empty()) {
       const long left = MillisBetween(now, early.front().deadline) + 1;
@@ -1114,12 +1114,11 @@ int Serve(const Options& options) {
     for (const auto& line : startup_lines) first.server->Send(line);
     std::fprintf(stderr, "🦝 client connected\n");
     had_client = true;
-    while (!early.empty()) {
-      const Early waiting = std::move(early.front());
-      early.pop_front();
+    for (const Early& waiting : early) {
       Forward(waiting.channel, reinterpret_cast<const uint8_t*>(waiting.data.data()),
               waiting.data.size(), waiting.handle);
     }
+    early.clear();
   };
   handler.on_client_disconnected = [&, disconnected = handler.on_client_disconnected] {
     // Nobody will answer these now; let the app see "no plugin".
