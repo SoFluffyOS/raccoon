@@ -2362,6 +2362,102 @@ void main() {
     skip: ready && sdk != null ? false : 'build the runner and example first',
     timeout: const Timeout(Duration(minutes: 3)),
   );
+  test(
+    'the generated entry shows the app with the device\'s safe area and '
+    'platform',
+    () async {
+      // #194: example/hello's packages, a main that prints what it is laid
+      // out with each build.
+      final temp = Directory.systemTemp.createTempSync('raccoon_device');
+      final app = Directory(p.join(temp.path, 'hello'))..createSync();
+      final hello = p.join(runnerDir, 'example', 'hello');
+      for (final file in [
+        'pubspec.yaml',
+        'pubspec.lock',
+        p.join('.dart_tool', 'package_config.json'),
+      ]) {
+        final copy = File(p.join(app.path, file))
+          ..parent.createSync(recursive: true);
+        File(p.join(hello, file)).copySync(copy.path);
+      }
+      File(p.join(app.path, 'lib', 'main.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('''
+import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
+
+void main() => runApp(const Report());
+
+class Report extends StatelessWidget {
+  const Report({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final padding = MediaQuery.paddingOf(context);
+    final viewPadding = MediaQuery.viewPaddingOf(context);
+    print('DEVICE:\${defaultTargetPlatform.name};\${padding.top};'
+        '\${padding.bottom};\${viewPadding.bottom}');
+    return const SizedBox();
+  }
+}
+''');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      RunnerProcess? runner;
+      RunnerClient? client;
+      try {
+        final entry = RaccoonEntrypoint.write(app.path);
+        expect(entry, p.join(app.path, RaccoonEntrypoint.path));
+        final build = await Process.run(
+          p.join(sdk!, 'bin', Platform.isWindows ? 'flutter.bat' : 'flutter'),
+          ['build', 'bundle', '-t', entry!],
+          workingDirectory: app.path,
+          runInShell: Platform.isWindows,
+        );
+        expect(build.exitCode, 0, reason: '${build.stdout}${build.stderr}');
+        runner = await RunnerProcess.start(
+          RunnerLaunch(
+            runnerBinary: binary!,
+            engineDir: engineDir!,
+            assets: p.join(app.path, 'build', 'flutter_assets'),
+            icuData: icu!,
+            endpoint: endpoint,
+          ),
+        );
+        final output = <String>[];
+        runner.stdout.listen(output.add);
+        client = await RunnerClient.connect(endpoint);
+        final device =
+            DeviceChannel()
+              ..fallback = const DeviceProfile(
+                padding: (top: 47, right: 0, bottom: 34, left: 0),
+                platform: 'iOS',
+              );
+        device.attach(client);
+        await client.hello.timeout(const Duration(seconds: 10));
+        Future<void> laidOut(String line) async {
+          final deadline = DateTime.now().add(const Duration(seconds: 15));
+          while (!output.contains(line) && DateTime.now().isBefore(deadline)) {
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+          }
+          expect(output, contains(line));
+        }
+
+        client.resize(1170, 2532, 3);
+        await laidOut('DEVICE:iOS;47.0;34.0;34.0');
+        // A keyboard 300 high covers the home indicator: no padding left
+        // below, the view's padding the same.
+        client.setViewInsets(Insets(bottom: 900));
+        await laidOut('DEVICE:iOS;47.0;0.0;34.0');
+      } finally {
+        client?.shutdown();
+        await client?.close();
+        if (runner != null) expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready && sdk != null ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
   final channelsAssets = p.join(
     runnerDir,
     'example',
