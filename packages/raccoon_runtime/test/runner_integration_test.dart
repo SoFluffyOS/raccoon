@@ -4377,6 +4377,11 @@ void main() {
         final (built, library) = await install();
         expect(built, contains('1 built: raccoon_echo'));
         expect(library, endsWith('RaccoonPlugins.framework/RaccoonPlugins'));
+        // Checkouts stay for the next build (#188).
+        expect(
+          Directory(p.join(temp.path, 'cache', 'swiftpm-sources')).existsSync(),
+          isTrue,
+        );
         final run = await Process.start(helper, [
           'run',
           'plugins_app',

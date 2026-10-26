@@ -1062,6 +1062,9 @@ def build_packages(plugins, entry):
             ['xcodebuild', '-scheme', SWIFT_FRAMEWORK, '-configuration', 'Release',
              '-destination', 'platform=macOS,arch=' + arch,
              '-derivedDataPath', os.path.join(work, 'derived'),
+             # Checkouts and binary artifacts, kept for every app's next
+             # build as Xcode keeps a project's (#188): most of the time.
+             '-clonedSourcePackagesDirPath', os.path.join(cache, 'swiftpm-sources'),
              'SYMROOT=' + products,
              'FRAMEWORK_SEARCH_PATHS=' + os.path.realpath(os.path.dirname(os.path.dirname(flutter_framework))),
              'LD_RUNPATH_SEARCH_PATHS=@loader_path/../../..',
