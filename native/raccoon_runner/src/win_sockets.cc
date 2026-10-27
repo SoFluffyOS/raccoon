@@ -54,33 +54,22 @@ int AcceptSocket(int listen_fd) {
   return static_cast<int>(socket);
 }
 
-bool SocketPair(int fds[2]) {
-  fds[0] = fds[1] = -1;
-  char temp[MAX_PATH];
-  const DWORD length = GetTempPathA(sizeof(temp), temp);
-  if (length == 0 || length >= sizeof(temp)) return false;
-  static std::atomic<unsigned> serial{0};
-  const std::string path = std::string(temp) + "raccoon-wake-" +
-                           std::to_string(GetCurrentProcessId()) + "-" +
-                           std::to_string(serial++) + ".sock";
-  sockaddr_un address{};
-  address.sun_family = AF_UNIX;
-  if (path.size() >= sizeof(address.sun_path)) return false;
-  std::strncpy(address.sun_path, path.c_str(), sizeof(address.sun_path) - 1);
+namespace {
 
-  const int listener = OpenSocket(AF_UNIX);
+// A connected pair through a listener at |address|: the listener goes once
+// its one connection is accepted.
+bool ConnectedPair(int family, sockaddr* address, int length, int fds[2]) {
+  const int listener = OpenSocket(family);
   if (listener < 0) return false;
-  DeleteFileA(path.c_str());
-  bool ok = bind(AsSocket(listener), reinterpret_cast<sockaddr*>(&address),
-                 sizeof(address)) == 0 &&
-            listen(AsSocket(listener), 1) == 0;
-  int client = ok ? OpenSocket(AF_UNIX) : -1;
+  bool ok = bind(AsSocket(listener), address, length) == 0 &&
+            listen(AsSocket(listener), 1) == 0 &&
+            getsockname(AsSocket(listener), address, &length) == 0;
+  int client = ok ? OpenSocket(family) : -1;
   int server = -1;
   if (client >= 0) {
     // Non-blocking: the connect completes once the listener has it queued,
     // which on a local socket is at once.
-    if (connect(AsSocket(client), reinterpret_cast<sockaddr*>(&address),
-                sizeof(address)) != 0 &&
+    if (connect(AsSocket(client), address, length) != 0 &&
         WSAGetLastError() != WSAEWOULDBLOCK) {
       ok = false;
     }
@@ -88,7 +77,6 @@ bool SocketPair(int fds[2]) {
     if (ok && WSAPoll(&ready, 1, 5000) == 1) server = AcceptSocket(listener);
   }
   CloseSocket(listener);
-  DeleteFileA(path.c_str());
   if (client < 0 || server < 0) {
     CloseSocket(client);
     CloseSocket(server);
@@ -97,6 +85,38 @@ bool SocketPair(int fds[2]) {
   fds[0] = server;
   fds[1] = client;
   return true;
+}
+
+}  // namespace
+
+bool SocketPair(int fds[2]) {
+  fds[0] = fds[1] = -1;
+  char temp[MAX_PATH];
+  const DWORD length = GetTempPathA(sizeof(temp), temp);
+  if (length > 0 && length < sizeof(temp)) {
+    static std::atomic<unsigned> serial{0};
+    const std::string path = std::string(temp) + "raccoon-wake-" +
+                             std::to_string(GetCurrentProcessId()) + "-" +
+                             std::to_string(serial++) + ".sock";
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    if (path.size() < sizeof(address.sun_path)) {
+      std::strncpy(address.sun_path, path.c_str(), sizeof(address.sun_path) - 1);
+      DeleteFileA(path.c_str());
+      const bool made = ConnectedPair(AF_UNIX, reinterpret_cast<sockaddr*>(&address),
+                                      sizeof(address), fds);
+      DeleteFileA(path.c_str());
+      if (made) return true;
+    }
+  }
+  // A temp path too long for a socket's name, or one that takes none: the
+  // loopback instead, which only ever carries a wake's byte (#126).
+  sockaddr_in loopback{};
+  loopback.sin_family = AF_INET;
+  loopback.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  loopback.sin_port = 0;
+  return ConnectedPair(AF_INET, reinterpret_cast<sockaddr*>(&loopback),
+                       sizeof(loopback), fds);
 }
 
 void CloseSocket(int fd) {

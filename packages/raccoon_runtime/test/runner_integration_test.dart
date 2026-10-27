@@ -3731,6 +3731,61 @@ class Report extends StatelessWidget {
   );
 
   test(
+    'on Windows frames keep their pace with a temp path too long for a socket',
+    () async {
+      // #126: the event loop's wake is a pair of sockets named in the temp
+      // directory; a path past a socket name's 108 bytes made none, and
+      // the loop woke once a second. The loopback stands in.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final long = Directory(p.join(temp.path, 'x' * 60, 'y' * 60))
+        ..createSync(recursive: true);
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final spinAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'spin',
+        'build',
+        'flutter_assets',
+      );
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: spinAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+        startProcess:
+            (executable, arguments) => Process.start(
+              executable,
+              arguments,
+              environment: {'TEMP': long.path, 'TMP': long.path},
+            ),
+      );
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.frames.first.timeout(const Duration(seconds: 15));
+        final watch = Stopwatch()..start();
+        final frames = await client.frames
+            .takeWhile((_) => watch.elapsed < const Duration(seconds: 2))
+            .length
+            .timeout(const Duration(seconds: 10));
+        expect(frames, greaterThan(20));
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((ready, Platform.isWindows)) {
+      (false, _) => 'build the runner and example first',
+      (_, false) => 'the wake socket pair is Windows\' own',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
+  test(
     'a client that reuses its pixel buffers gets the frames all the same',
     () async {
       // With reusePixels, frames from shared buffers land in three buffers
