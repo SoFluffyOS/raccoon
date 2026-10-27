@@ -234,9 +234,11 @@ void main() {
     await tester.tapAt(const Offset(10, 20));
 
     final phases = connection.pointers.map((p) => p.phase).toList();
+    // A finger lifted is gone, as a touchscreen says (#207).
     expect(phases, [
       rc.PointerPhase.POINTER_PHASE_DOWN,
       rc.PointerPhase.POINTER_PHASE_UP,
+      rc.PointerPhase.POINTER_PHASE_REMOVE,
     ]);
     expect(connection.pointers.first.x, 20);
     expect(connection.pointers.first.y, 40);
@@ -381,5 +383,35 @@ void main() {
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
     expect(connection.keys, isNotEmpty);
+  });
+
+  testWidgets('with touch, a mouse press goes as a finger, then is gone', (
+    tester,
+  ) async {
+    // #207: a phone app's lists drag for a finger, not for a mouse.
+    final connection = _FakeConnection();
+    await tester.pumpWidget(
+      RaccoonView(connection: connection, pixelRatio: 1, touch: true),
+    );
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: const Offset(5, 5));
+    await gesture.moveTo(const Offset(10, 10));
+    await gesture.down(const Offset(10, 10));
+    await gesture.moveTo(const Offset(10, 60));
+    await gesture.up();
+    await tester.pump();
+    expect(
+      [
+        for (final event in connection.pointers)
+          (event.phase.name, event.device.name),
+      ],
+      [
+        ('POINTER_PHASE_DOWN', 'POINTER_DEVICE_TOUCH'),
+        ('POINTER_PHASE_MOVE', 'POINTER_DEVICE_TOUCH'),
+        ('POINTER_PHASE_UP', 'POINTER_DEVICE_TOUCH'),
+        ('POINTER_PHASE_REMOVE', 'POINTER_DEVICE_TOUCH'),
+      ],
+    );
+    await gesture.removePointer();
   });
 }

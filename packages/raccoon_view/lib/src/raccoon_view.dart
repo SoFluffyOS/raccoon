@@ -33,6 +33,7 @@ class RaccoonView extends StatefulWidget {
     this.pixelRatio,
     this.onDisconnected,
     this.gpuTextures,
+    this.touch = false,
   });
 
   /// The runner whose app to show. A [ComposingConnection] that composes
@@ -55,6 +56,10 @@ class RaccoonView extends StatefulWidget {
   /// The host's native side for GPU buffers, when the connection carries
   /// them; null uses the host's own ([HostGpuTextures.forHost]).
   final HostGpuTextures? gpuTextures;
+
+  /// Sends the mouse as a finger, as a phone app expects (#207): a list
+  /// drags and flings, and gestures tuned for touch behave as on a phone.
+  final bool touch;
 
   @override
   State<RaccoonView> createState() => _RaccoonViewState();
@@ -440,10 +445,22 @@ class _RaccoonViewState extends State<RaccoonView> {
   void _onPointer(PointerEvent event) {
     // A click into the app is a click into the app: the keys follow it.
     if (event is PointerDownEvent && !_focus.hasFocus) _focus.requestFocus();
-    final mapped = toRunnerPointer(event, _pixelRatio);
+    final mapped = toRunnerPointer(
+      event,
+      _pixelRatio,
+      mouseAsTouch: widget.touch,
+    );
     if (mapped == null) return;
     if (event.kind == PointerDeviceKind.mouse) _mouseIn = true;
     widget.connection.sendPointer(mapped);
+    // A finger lifted is gone, as a touchscreen says: each press is a
+    // pointer of its own, and the engine would keep every one (#207).
+    final lifted = event is PointerUpEvent || event is PointerCancelEvent;
+    if (lifted && mapped.device == rc.PointerDevice.POINTER_DEVICE_TOUCH) {
+      widget.connection.sendPointer(
+        mapped.deepCopy()..phase = rc.PointerPhase.POINTER_PHASE_REMOVE,
+      );
+    }
   }
 
   /// The mouse left the view; not while it drags, which goes on outside.

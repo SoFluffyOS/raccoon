@@ -2141,6 +2141,68 @@ void main() {
     'flutter_assets',
   );
   test(
+    'taps as a finger reach the app, each press a pointer of its own',
+    () async {
+      // #207: a view sends the mouse as a finger: down, up, then gone, a
+      // new pointer every press. example/views' box turns white on a tap,
+      // and red on the next.
+      final temp = Directory.systemTemp.createTempSync('raccoon_touch');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: viewsAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          width: 390,
+          height: 300,
+          views: true,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        await client.frames.first.timeout(const Duration(seconds: 15));
+        Future<void> tap(int pointer, ({int r, int g, int b}) colour) async {
+          for (final (phase, buttons) in [
+            (PointerPhase.POINTER_PHASE_DOWN, 1),
+            (PointerPhase.POINTER_PHASE_UP, 0),
+            (PointerPhase.POINTER_PHASE_REMOVE, 0),
+          ]) {
+            client.sendPointer(
+              PointerEvent(
+                phase: phase,
+                x: 195,
+                y: 150,
+                buttons: Int64(buttons),
+                device: PointerDevice.POINTER_DEVICE_TOUCH,
+                pointerId: pointer,
+              ),
+            );
+          }
+          await client.frames
+              .firstWhere((f) => _pixel(f, 195, 150) == colour)
+              .timeout(const Duration(seconds: 10));
+        }
+
+        await tap(1, _white);
+        await tap(2, _red);
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready && Directory(viewsAssets).existsSync()
+            ? false
+            : 'build the runner and example/views first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'one run shows the app in a view per client, each its size and its taps',
     () async {
       // #182: example/views draws its root in every view, coloured by the

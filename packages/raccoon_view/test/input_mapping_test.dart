@@ -82,4 +82,53 @@ void main() {
       rc.PointerPhase.POINTER_PHASE_REMOVE,
     );
   });
+
+  test('a mouse as a finger: a pointer a press, no hover, a wheel', () {
+    // #207: a phone app's lists drag for a finger, not for a mouse.
+    rc.PointerEvent? touch(PointerEvent event) =>
+        toRunnerPointer(event, 2, mouseAsTouch: true);
+    final down = touch(
+      const PointerDownEvent(
+        kind: PointerDeviceKind.mouse,
+        device: 3,
+        pointer: 7,
+        position: Offset(10, 10),
+      ),
+    );
+    expect(down?.device, rc.PointerDevice.POINTER_DEVICE_TOUCH);
+    expect(down?.pointerId, 7);
+    expect(
+      touch(
+        const PointerMoveEvent(
+          kind: PointerDeviceKind.mouse,
+          device: 3,
+          pointer: 7,
+          position: Offset(10, 40),
+        ),
+      )?.device,
+      rc.PointerDevice.POINTER_DEVICE_TOUCH,
+    );
+    expect(
+      touch(
+        const PointerHoverEvent(
+          kind: PointerDeviceKind.mouse,
+          device: 3,
+          pointer: 8,
+          position: Offset(30, 30),
+        ),
+      ),
+      isNull,
+    );
+    expect(
+      touch(
+        const PointerScrollEvent(
+          kind: PointerDeviceKind.mouse,
+          device: 3,
+          position: Offset(20, 20),
+          scrollDelta: Offset(0, 40),
+        ),
+      )?.device,
+      rc.PointerDevice.POINTER_DEVICE_MOUSE,
+    );
+  });
 }
