@@ -15,6 +15,9 @@ permissions:
 
 env:
   FLUTTER_VERSION: 3.47.7
+  # Other Flutter versions people are on, each its own engine: on macOS the
+  # common plugins are prebuilt for these too, an archive each (#211).
+  MORE_FLUTTER_VERSIONS: "3.47.8 3.44.9"
   PROTOC_VERSION: "21.12"
 
 jobs:
@@ -111,6 +114,30 @@ jobs:
           # would be remembered as having none (#149). At least one library
           # or framework, or the release fails.
           tar tzf "$archive" | grep -c -E '\.so$|\.framework/$'
+      # The same for the other Flutter versions, against each one's own
+      # FlutterMacOS. One that fails is a warning: the release goes on
+      # without its archive, and an install there builds its plugins.
+      - name: Prebuild the common plugins for other Flutter versions
+        if: runner.os == 'macOS'
+        run: |
+          for version in $MORE_FLUTTER_VERSIONS; do
+            sdk="$RUNNER_TEMP/flutter-$version"
+            if ! git clone --quiet --depth 1 --branch "$version" https://github.com/flutter/flutter.git "$sdk" ||
+               ! "$sdk/bin/flutter" precache --macos > /dev/null; then
+              echo "::warning::no Flutter $version"
+              continue
+            fi
+            engine="$(tr -d '[:space:]' < "$sdk/bin/cache/engine.stamp")"
+            archive="dist/plugins-$engine-macos-$(uname -m).tar.gz"
+            [ -f "$archive" ] && continue
+            FLUTTER_ROOT="$sdk" PATH="$sdk/bin:$PATH" tool/raccoon-device prebuild tool/plugins "$archive" ||
+              echo "::warning::prebuild for Flutter $version failed"
+            frameworks="$(tar tzf "$archive" 2> /dev/null | grep -c -E '\.framework/$' || true)"
+            if [ "${frameworks:-0}" -eq 0 ]; then
+              echo "::warning::no plugins prebuilt for Flutter $version"
+              rm -f "$archive"
+            fi
+          done
 
       - uses: actions/upload-artifact@v6
         with:
