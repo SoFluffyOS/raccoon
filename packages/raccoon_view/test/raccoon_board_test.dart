@@ -208,6 +208,42 @@ void main() {
       expect(viewOf('b'), same(before));
     });
 
+    testWidgets('a run still starting has its frame, which its app takes', (
+      tester,
+    ) async {
+      tester.view
+        ..physicalSize = const Size(2400, 1600)
+        ..devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      Widget board(RaccoonBoardSession session) => Directionality(
+        textDirection: TextDirection.ltr,
+        child: RaccoonBoard(sessions: [session], layout: layout),
+      );
+      await tester.pumpWidget(
+        board(
+          const RaccoonBoardSession.starting(
+            name: 'wonders@3',
+            status: 'Starting the app at this size…',
+          ),
+        ),
+      );
+      expect(find.text('Starting the app at this size…'), findsOneWidget);
+      expect(find.byType(RaccoonView), findsNothing);
+      final where = tester.getTopLeft(
+        find.text('Starting the app at this size…'),
+      );
+      final frame = layout.frameFor('wonders@3');
+
+      final connection = _FakeConnection();
+      await tester.pumpWidget(
+        board(RaccoonBoardSession(name: 'wonders@3', connection: connection)),
+      );
+      expect(find.text('Starting the app at this size…'), findsNothing);
+      expect(find.byType(RaccoonView), findsOneWidget);
+      expect(layout.frameFor('wonders@3'), frame);
+      expect(where, isNot(Offset.zero));
+    });
+
     testWidgets('each session gets a frame at its device size', (tester) async {
       final connections = await pumpBoard(tester, [
         'counter',

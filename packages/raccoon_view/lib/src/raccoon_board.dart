@@ -238,15 +238,27 @@ class RaccoonBoardLayout extends ChangeNotifier {
 final class RaccoonBoardSession {
   const RaccoonBoardSession({
     required this.name,
-    required this.connection,
+    required RunnerConnection this.connection,
     this.onClose,
-  });
+  }) : status = null;
+
+  /// A frame for a run that has no runner yet, still building: [status]
+  /// in place of the app. The session under [name] takes the frame when it
+  /// comes.
+  const RaccoonBoardSession.starting({
+    required this.name,
+    required String this.status,
+    this.onClose,
+  }) : connection = null;
 
   /// The app name, `wonders@tablet`, which keys its frame in the layout.
   final String name;
 
-  /// The runner the frame shows.
-  final RunnerConnection connection;
+  /// The runner the frame shows; null while the run is [status].
+  final RunnerConnection? connection;
+
+  /// What a run with no runner yet is doing.
+  final String? status;
 
   /// Asked to shut the session down; without it the frame has no close.
   final VoidCallback? onClose;
@@ -753,10 +765,22 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
                       color: widget.ink.withValues(alpha: 0.6),
                     ),
                   ),
-                  child: RaccoonView(
-                    connection: session.connection,
-                    pixelRatio: frame.pixelRatio,
-                  ),
+                  child: switch (session.connection) {
+                    final connection? => RaccoonView(
+                      connection: connection,
+                      pixelRatio: frame.pixelRatio,
+                    ),
+                    null => Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Text(
+                          session.status ?? '',
+                          style: titleStyle,
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                  },
                 ),
                 // Alt held: the whole frame is a handle, the app gets nothing.
                 if (_altHeld)
