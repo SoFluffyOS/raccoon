@@ -243,6 +243,12 @@ class _Device with WidgetsBindingObserver {
       print('LIFECYCLE:${state.name}');
 
   @override
+  Future<bool> didPopRoute() {
+    print('BACK');
+    return Future.value(true);
+  }
+
+  @override
   Future<bool> didPushRouteInformation(RouteInformation routeInformation) {
     print('ROUTE:${routeInformation.uri}');
     return Future.value(true);

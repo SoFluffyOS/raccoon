@@ -4713,6 +4713,9 @@ class Report extends StatelessWidget {
         );
         client.openLink(Uri.parse('myapp://item/42?tab=reviews'));
         await printed('ROUTE:myapp://item/42?tab=reviews');
+        // #209: the system back button.
+        client.popRoute();
+        await printed('BACK');
       } finally {
         client.shutdown();
         await client.close();

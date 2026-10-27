@@ -287,6 +287,13 @@ final class RunnerClient
   void setLifecycle(String state) =>
       sendToApp('flutter/lifecycle', utf8.encode('AppLifecycleState.$state'));
 
+  /// Presses the system back button, as on an Android phone (#209): the
+  /// app's routes and `PopScope`s get it as they would there.
+  void popRoute() => sendToApp(
+    'flutter/navigation',
+    utf8.encode(jsonEncode({'method': 'popRoute', 'args': null})),
+  );
+
   /// Opens [link] in the app, as tapping a link to it on a phone does: its
   /// router gets the route.
   void openLink(Uri link) => sendToApp(

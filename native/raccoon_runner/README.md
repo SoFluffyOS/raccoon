@@ -107,7 +107,8 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   is what covers the view's edges, an on-screen keyboard, as the app's
   `viewInsets` (#193). An `AppMessage` goes to the app as a platform
   message, as a device's own controls send one: the background and back
-  (`flutter/lifecycle`), a link opened (`flutter/navigation`) (#199).
+  (`flutter/lifecycle`), a link opened or the back button pressed
+  (`flutter/navigation`) (#199, #209).
 - Delivers keys the way the framework expects: the key data, then the
   legacy `flutter/keyevent` message it waits for before dispatching. Without
   the second, no key ever reaches the app.
