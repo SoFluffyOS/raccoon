@@ -72,6 +72,12 @@ class _RaccoonViewState extends State<RaccoonView> {
   /// The view that shows each connection's ring (#205).
   static final _ringHolders = Expando<Object>('raccoon view ring holders');
 
+  /// The views that wait on each connection's ring, first come first: the
+  /// first still there takes it when its holder goes (#206).
+  static final _ringWaiters = Expando<List<_RaccoonViewState>>(
+    'raccoon view ring waiters',
+  );
+
   /// Whether this view asked its connection for pixel frames, another view
   /// holding its ring.
   bool _askedPixels = false;
@@ -187,6 +193,7 @@ class _RaccoonViewState extends State<RaccoonView> {
       if (connection case final CaptureConnection capture) {
         capture.wantPixels(true);
         _askedPixels = true;
+        (_ringWaiters[connection] ??= []).add(this);
       }
       return;
     }
@@ -240,13 +247,14 @@ class _RaccoonViewState extends State<RaccoonView> {
   /// Lets go of the GPU texture and gives [connection], the one the
   /// buffers came from, back what the view still holds.
   void _unsubscribeGpu(RunnerConnection connection) {
-    if (identical(_ringHolders[connection], this)) {
-      _ringHolders[connection] = null;
-    }
+    _ringWaiters[connection]?.remove(this);
+    final heldRing = identical(_ringHolders[connection], this);
+    if (heldRing) _ringHolders[connection] = null;
     if (_askedPixels && connection is CaptureConnection) {
       connection.wantPixels(false);
     }
     _askedPixels = false;
+    if (heldRing) _passRing(connection);
     _gpuGeneration++;
     unawaited(_gpuSets?.cancel());
     _gpuSets = null;
@@ -268,6 +276,24 @@ class _RaccoonViewState extends State<RaccoonView> {
     _creatingTexture = false;
     _gpu = null;
     _gpuLive = false;
+  }
+
+  /// The ring [connection]'s holder let go of goes to the first view still
+  /// waiting on it, which drops its ask for pixels (#206).
+  static void _passRing(RunnerConnection connection) {
+    final waiters = _ringWaiters[connection];
+    while (waiters != null && waiters.isNotEmpty) {
+      final next = waiters.removeAt(0);
+      if (!next.mounted || !identical(next.widget.connection, connection)) {
+        continue;
+      }
+      if (next._askedPixels && connection is CaptureConnection) {
+        connection.wantPixels(false);
+      }
+      next._askedPixels = false;
+      next._subscribeGpu();
+      return;
+    }
   }
 
   /// A connection that can serve the app's channels takes its mouse cursor
