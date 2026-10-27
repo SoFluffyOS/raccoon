@@ -13,7 +13,12 @@ Future<ProcessResult> _run(
   Platform.resolvedExecutable,
   [p.join(Directory.current.path, 'bin', 'raccoon_device.dart'), ...arguments],
   workingDirectory: directory,
-  environment: {'XDG_CONFIG_HOME': config, 'APPDATA': config},
+  // A home of its own: a ~/.flutter_custom_devices.json there would win.
+  environment: {
+    'XDG_CONFIG_HOME': config,
+    'APPDATA': config,
+    'HOME': p.dirname(config),
+  },
 );
 
 void main() {
@@ -31,7 +36,7 @@ void main() {
   File devicesFile() =>
       Platform.isWindows
           ? File(p.join(config, '.flutter_custom_devices.json'))
-          : File(p.join(config, 'flutter', 'custom_devices.json'));
+          : File(p.join(config, 'custom_devices.json'));
 
   test('setup writes the helper as an absolute path', () async {
     // Flutter runs the helper from the project's directory, where a
