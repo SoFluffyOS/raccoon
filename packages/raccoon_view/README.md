@@ -33,7 +33,8 @@ for the runner's host the way a phone would: `permission_handler`
 (granted, denied or permanently denied, as the host says),
 `google_mobile_ads` (initialized, never filled), `flutter_foreground_task`
 (a service that starts and stops), `vibration` and `sensors_plus` (a device
-at rest). Only calls no native plugin took reach the client, so a loaded
+at rest), `app_tracking_transparency` (as permissions say, when the app is
+shown as iOS). Only calls no native plugin took reach the client, so a loaded
 plugin is never answered by them; `PluginStubs.plugins` names them, for a
 host that warns about plugins whose calls fail.
 

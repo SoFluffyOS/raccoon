@@ -106,4 +106,25 @@ void main() {
     expect(reply(await stubs.handleSensors(call('listen'))), isNull);
     expect(await stubs.handleSensors(call('somethingNew')), isNull);
   });
+
+  test('tracking is authorized, or denied with no identifier', () async {
+    final stubs = PluginStubs();
+    expect(
+      reply(
+        await stubs.handleAppTracking(call('requestTrackingAuthorization')),
+      ),
+      3,
+    );
+    stubs.permission = StubPermission.denied;
+    expect(
+      reply(
+        await stubs.handleAppTracking(call('getTrackingAuthorizationStatus')),
+      ),
+      2,
+    );
+    expect(
+      reply(await stubs.handleAppTracking(call('getAdvertisingIdentifier'))),
+      '00000000-0000-0000-0000-000000000000',
+    );
+  });
 }

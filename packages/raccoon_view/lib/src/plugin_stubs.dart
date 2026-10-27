@@ -8,7 +8,7 @@ enum StubPermission { granted, denied, permanentlyDenied }
 /// runner's host, as a phone would, so the app goes on as it would there
 /// (#195): permissions granted (or as [permission] says), a foreground
 /// service that starts and stops, ads that initialize and never fill, a
-/// vibration that does nothing, sensors at rest.
+/// vibration that does nothing, sensors at rest, tracking as allowed.
 /// Only messages no native plugin took reach the client, so a plugin the
 /// runner loaded is never answered here. A method not listed stays "no
 /// plugin", as before.
@@ -26,6 +26,7 @@ final class PluginStubs {
     'flutter_foreground_task',
     'vibration',
     'sensors_plus',
+    'app_tracking_transparency',
   };
 
   /// Told the first time each plugin is answered here.
@@ -46,6 +47,10 @@ final class PluginStubs {
 
   /// `vibration`'s channel (Android and iOS only).
   static const String vibrationChannel = 'vibration';
+
+  /// `app_tracking_transparency`'s channel (iOS only; called when the app
+  /// is shown as iOS).
+  static const String appTrackingChannel = 'app_tracking_transparency';
 
   /// `sensors_plus`'s method channel and its sensors' event channels
   /// (Android, iOS and the web only).
@@ -72,7 +77,8 @@ final class PluginStubs {
       ..registerChannel(foregroundTaskChannel, handleForegroundTask)
       ..registerChannel(foregroundTaskBackgroundChannel, handleForegroundTask)
       ..registerChannel(vibrationChannel, handleVibration)
-      ..registerChannel(sensorsChannel, handleSensors);
+      ..registerChannel(sensorsChannel, handleSensors)
+      ..registerChannel(appTrackingChannel, handleAppTracking);
     for (final channel in sensorEventChannels) {
       client.registerChannel(channel, handleSensors);
     }
@@ -210,6 +216,27 @@ final class PluginStubs {
         'sensors_plus',
         null,
       ),
+      _ => null,
+    };
+  }
+
+  /// app_tracking_transparency reads a TrackingStatus index (denied 2,
+  /// authorized 3) as [permission] says, and the advertising identifier:
+  /// all zeros, as iOS gives it without authorization, or a made-up one.
+  Future<Uint8List?> handleAppTracking(Uint8List data) async {
+    final call = _codec.decodeMethodCall(ByteData.sublistView(data));
+    const plugin = 'app_tracking_transparency';
+    final authorized = permission == StubPermission.granted;
+    return switch (call.method) {
+      'getTrackingAuthorizationStatus' ||
+      'requestTrackingAuthorization' => _success(plugin, switch (authorized) {
+        true => 3,
+        false => 2,
+      }),
+      'getAdvertisingIdentifier' => _success(plugin, switch (authorized) {
+        true => '7A3E5B12-0C4D-4E6F-8A9B-1C2D3E4F5A6B',
+        false => '00000000-0000-0000-0000-000000000000',
+      }),
       _ => null,
     };
   }
