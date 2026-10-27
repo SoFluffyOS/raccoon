@@ -18,8 +18,9 @@ enum NativePlugins {
 
 /// Each app's [NativePlugins], where `raccoon-device install` finds it when
 /// `RACCOON_PLUGINS` says nothing: `<data>/raccoon/data/<app>/plugins`,
-/// beside its size. Every instance of an app (`wonders`, `wonders@tablet`)
-/// shares its project's, so [app] is the project's name.
+/// beside its size, or else the host's default, `<data>/raccoon/data/.plugins`.
+/// Every instance of an app (`wonders`, `wonders@tablet`) shares its
+/// project's, so [app] is the project's name.
 final class AppPlugins {
   const AppPlugins(this.directory);
 
@@ -32,24 +33,36 @@ final class AppPlugins {
 
   File _file(String app) => File(p.join(directory, app, 'plugins'));
 
-  /// [app]'s setting: [NativePlugins.build] unless one was saved.
-  NativePlugins read(String app) {
-    final file = _file(app);
-    if (!file.existsSync()) return NativePlugins.build;
-    final saved = file.readAsStringSync().trim();
-    return NativePlugins.values.asNameMap()[saved] ?? NativePlugins.build;
-  }
+  // Hidden: no Dart package, so no app, is named with a dot.
+  File get _defaultFile => File(p.join(directory, '.plugins'));
 
-  /// Saves [plugins] for [app]'s next install; [NativePlugins.build], the
-  /// default, leaves no file.
-  void save(String app, NativePlugins plugins) {
-    final file = _file(app);
-    if (plugins == NativePlugins.build) {
-      if (file.existsSync()) file.deleteSync();
+  /// [app]'s setting: its own, else the host's [readDefault].
+  NativePlugins read(String app) => _parse(_file(app)) ?? readDefault();
+
+  /// The host's setting for an app with none of its own:
+  /// [NativePlugins.build] unless one was saved.
+  NativePlugins readDefault() => _parse(_defaultFile) ?? NativePlugins.build;
+
+  /// Saves [plugins] for [app]'s next install, over the host's default.
+  void save(String app, NativePlugins plugins) => _write(_file(app), plugins);
+
+  /// Saves the host's default; [NativePlugins.build], the helper's own,
+  /// leaves no file.
+  void saveDefault(NativePlugins plugins) {
+    if (plugins != NativePlugins.build) {
+      _write(_defaultFile, plugins);
       return;
     }
-    file
-      ..parent.createSync(recursive: true)
-      ..writeAsStringSync('${plugins.name}\n');
+    if (_defaultFile.existsSync()) _defaultFile.deleteSync();
   }
+
+  static NativePlugins? _parse(File file) {
+    if (!file.existsSync()) return null;
+    return NativePlugins.values.asNameMap()[file.readAsStringSync().trim()];
+  }
+
+  static void _write(File file, NativePlugins plugins) =>
+      file
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync('${plugins.name}\n');
 }

@@ -5048,12 +5048,14 @@ class Report extends StatelessWidget {
         );
         expect(states(), {'raccoon_echo': 'loaded'});
 
-        // The app's own setting, where the environment says none; the
-        // environment's wins.
-        AppPlugins(
-          p.join(data, 'raccoon', 'data'),
-        ).save('plugins_app', NativePlugins.off);
+        // Where the environment says none, the host's default, then the
+        // app's own over it; the environment's wins over both.
+        final saved = AppPlugins(p.join(data, 'raccoon', 'data'));
+        saved.saveDefault(NativePlugins.off);
         expect(await install(null), contains('native plugins off'));
+        saved.save('plugins_app', NativePlugins.cached);
+        expect(await install(null), contains('1 from the cache: raccoon_echo'));
+        saved.save('plugins_app', NativePlugins.off);
         expect(
           await install('cached'),
           contains('1 from the cache: raccoon_echo'),

@@ -12,24 +12,27 @@ void main() {
     );
   });
 
-  test('a saved setting reads back; build, the default, leaves no file', () {
+  test('an app\'s own setting wins over the host\'s default', () {
     final temp = Directory.systemTemp.createTempSync('raccoon_plugins');
     addTearDown(() => temp.deleteSync(recursive: true));
     final plugins = AppPlugins(temp.path);
     final file = File(p.join(temp.path, 'wonders', 'plugins'));
     expect(plugins.read('wonders'), NativePlugins.build);
 
-    plugins.save('wonders', NativePlugins.cached);
-    expect(file.readAsStringSync(), 'cached\n');
-    expect(plugins.read('wonders'), NativePlugins.cached);
+    plugins.saveDefault(NativePlugins.off);
+    expect(File(p.join(temp.path, '.plugins')).readAsStringSync(), 'off\n');
+    expect(plugins.read('wonders'), NativePlugins.off);
 
     plugins.save('wonders', NativePlugins.build);
-    expect(file.existsSync(), isFalse);
+    expect(file.readAsStringSync(), 'build\n');
     expect(plugins.read('wonders'), NativePlugins.build);
+    expect(plugins.read('cookbook'), NativePlugins.off);
 
-    file
-      ..createSync(recursive: true)
-      ..writeAsStringSync('sometimes\n');
+    plugins.saveDefault(NativePlugins.build);
+    expect(File(p.join(temp.path, '.plugins')).existsSync(), isFalse);
+    expect(plugins.readDefault(), NativePlugins.build);
+
+    file.writeAsStringSync('sometimes\n');
     expect(plugins.read('wonders'), NativePlugins.build);
   });
 }

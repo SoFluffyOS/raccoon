@@ -246,9 +246,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   what it left out, as skipped; `off` has no native plugins at all
   (`RACCOON_PLUGINS=off flutter run -d raccoon`). The app's calls to a
   plugin it lacks fail as for a plugin with no implementation. Unset, the
-  app's own setting says (`<data>/<app>/plugins`, which raccoon_runtime's
-  `AppPlugins` saves for a host's Native Plugins menu); build otherwise
-  (#214).
+  app's own setting says (`<data>/<app>/plugins`), else the host's default
+  (`<data>/.plugins`), both as raccoon_runtime's `AppPlugins` saves them;
+  build otherwise (#214).
   Loading FlutterMacOS adds about 17 MB of resident memory and no
   measurable time to the first frame (184 to 188 ms, median of five); the
   run loop costs nothing at idle. The Objective-C runtime notes, once per
