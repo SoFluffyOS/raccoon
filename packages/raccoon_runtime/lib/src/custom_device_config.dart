@@ -176,29 +176,17 @@ final class CustomDeviceConfig {
 final class CustomDevicesFile {
   const CustomDevicesFile(this.path);
 
-  /// The tool's location on this host: `$XDG_CONFIG_HOME/flutter` or
-  /// `~/.config/flutter` on Linux and macOS, `.flutter_custom_devices.json`
-  /// in `%APPDATA%` on Windows.
+  /// The tool's location on this host, see [flutterConfigPath].
   factory CustomDevicesFile.forHost(
     Map<String, String> environment, {
     String? operatingSystem,
-  }) {
-    if ((operatingSystem ?? Platform.operatingSystem) == 'windows') {
-      return CustomDevicesFile(
-        p.windows.join(
-          environment['APPDATA'] ?? '.',
-          '.flutter_custom_devices.json',
-        ),
-      );
-    }
-    final configHome = switch (environment['XDG_CONFIG_HOME']) {
-      final dir? when dir.isNotEmpty => dir,
-      _ => p.posix.join(environment['HOME'] ?? '', '.config'),
-    };
-    return CustomDevicesFile(
-      p.posix.join(configHome, 'flutter', 'custom_devices.json'),
-    );
-  }
+  }) => CustomDevicesFile(
+    flutterConfigPath(
+      'custom_devices.json',
+      environment,
+      operatingSystem: operatingSystem,
+    ),
+  );
 
   static const _key = 'custom-devices';
 
@@ -326,23 +314,17 @@ final class CustomDevicesFile {
 final class FlutterSettings {
   const FlutterSettings(this.path);
 
-  /// `.flutter_settings` in `%APPDATA%` on Windows, `flutter/settings` in
-  /// the XDG config home elsewhere.
+  /// The tool's location on this host, see [flutterConfigPath].
   factory FlutterSettings.forHost(
     Map<String, String> environment, {
     String? operatingSystem,
-  }) {
-    if ((operatingSystem ?? Platform.operatingSystem) == 'windows') {
-      return FlutterSettings(
-        p.windows.join(environment['APPDATA'] ?? '.', '.flutter_settings'),
-      );
-    }
-    final configHome = switch (environment['XDG_CONFIG_HOME']) {
-      final dir? when dir.isNotEmpty => dir,
-      _ => p.posix.join(environment['HOME'] ?? '', '.config'),
-    };
-    return FlutterSettings(p.posix.join(configHome, 'flutter', 'settings'));
-  }
+  }) => FlutterSettings(
+    flutterConfigPath(
+      'settings',
+      environment,
+      operatingSystem: operatingSystem,
+    ),
+  );
 
   final String path;
 
@@ -358,4 +340,26 @@ final class FlutterSettings {
       return false;
     }
   }
+}
+
+/// Where the Flutter tool keeps its config file [name] on this host, as its
+/// own `Config` finds it (#220): `.flutter_<name>` in `%APPDATA%` on
+/// Windows; on Linux and macOS `~/.flutter_<name>` when there is one, else
+/// `<name>` right in `$XDG_CONFIG_HOME` when that is set, else in
+/// `~/.config/flutter`.
+String flutterConfigPath(
+  String name,
+  Map<String, String> environment, {
+  String? operatingSystem,
+}) {
+  if ((operatingSystem ?? Platform.operatingSystem) == 'windows') {
+    return p.windows.join(environment['APPDATA'] ?? '.', '.flutter_$name');
+  }
+  final home = environment['HOME'] ?? '.';
+  final legacy = p.posix.join(home, '.flutter_$name');
+  if (File(legacy).existsSync()) return legacy;
+  return switch (environment['XDG_CONFIG_HOME']) {
+    final dir? when dir.isNotEmpty => p.posix.join(dir, name),
+    _ => p.posix.join(home, '.config', 'flutter', name),
+  };
 }

@@ -13,16 +13,32 @@ void main() {
   tearDown(() => temp.deleteSync(recursive: true));
 
   test('resolves the tool config path from XDG_CONFIG_HOME, then HOME', () {
+    // Right in XDG_CONFIG_HOME, as the tool's Config has it (#220).
     expect(
       CustomDevicesFile.forHost({
         'XDG_CONFIG_HOME': '/xdg',
         'HOME': '/h',
       }, operatingSystem: 'linux').path,
-      '/xdg/flutter/custom_devices.json',
+      '/xdg/custom_devices.json',
     );
     expect(
       CustomDevicesFile.forHost({'HOME': '/h'}, operatingSystem: 'macos').path,
       '/h/.config/flutter/custom_devices.json',
+    );
+  });
+
+  test('a ~/.flutter_ file the tool already uses comes first', () {
+    final home = Directory.systemTemp.createTempSync('raccoon_home');
+    addTearDown(() => home.deleteSync(recursive: true));
+    File('${home.path}/.flutter_settings').writeAsStringSync('{}');
+    final environment = {'HOME': home.path, 'XDG_CONFIG_HOME': '/xdg'};
+    expect(
+      FlutterSettings.forHost(environment, operatingSystem: 'linux').path,
+      '${home.path}/.flutter_settings',
+    );
+    expect(
+      CustomDevicesFile.forHost(environment, operatingSystem: 'linux').path,
+      '/xdg/custom_devices.json',
     );
   });
 
