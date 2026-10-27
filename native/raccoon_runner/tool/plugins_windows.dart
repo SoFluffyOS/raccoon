@@ -580,7 +580,16 @@ Future<bool> _run(
   List<String> arguments,
 ) async {
   final cmake = _cmakeIn(environment) ?? 'cmake';
-  final result = await Process.run(cmake, arguments, environment: environment);
+  // The developer prompt's whole environment, on its own: merged into
+  // this process's, names differing only in case (WINDOWSSDKBINPATH from a
+  // shell that upper-cases them, WindowsSdkBinPath from vcvars) both reach
+  // MSBuild, which then can't start the compiler (#141).
+  final result = await Process.run(
+    cmake,
+    arguments,
+    environment: environment,
+    includeParentEnvironment: false,
+  );
   log.writeAsStringSync(
     '\$ cmake ${arguments.join(' ')}\n${result.stdout}${result.stderr}',
     mode: FileMode.append,
