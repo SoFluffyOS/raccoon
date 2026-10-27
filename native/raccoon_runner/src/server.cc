@@ -571,6 +571,12 @@ void RunnerServer::Flush() {
 #endif
     if (wrote < 0) {
       if (WouldBlock()) break;
+#if !defined(_WIN32)
+      // macOS refuses a message with descriptors with EMSGSIZE, not EAGAIN,
+      // while less room than their control data is free: full, not broken
+      // (#228). It says writable again only with 2 KB free.
+      if (!front.fds.empty() && errno == EMSGSIZE) break;
+#endif
       CloseClient();
       return;
     }

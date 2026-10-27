@@ -1290,6 +1290,9 @@ int Serve(const Options& options) {
           }
         }
       }
+      // A send that failed let the client go, and a view's client takes
+      // its view, |frame| with it (#228).
+      if (!server.has_client()) return;
       raccoon::SoftwareFrame::Gpu gpu;
       if (!frames_held && frame->TakeGpu(&gpu)) {
         // The fence goes first, to a client holding this set's buffers.
@@ -1316,6 +1319,7 @@ int Serve(const Options& options) {
         client.last_sent = gpu.sequence;
       }
     }
+    if (!server.has_client()) return;
     raccoon::SoftwareFrame::Shared shared;
     // A frame that waited for a buffer goes in the one given back.
     frame->PromoteInline();
@@ -1333,6 +1337,7 @@ int Serve(const Options& options) {
       if (!server.Send(message) && client.pool) client.pool->Release(shared.index);
       client.last_sent = shared.sequence;
     }
+    if (!server.has_client()) return;
     raccoon::SoftwareFrame::Copy copy;
     if (!frames_held && frame->CopyLatest(&copy, client.last_sent)) {
       raccoon::v1::RunnerMessage message;
@@ -1355,8 +1360,9 @@ int Serve(const Options& options) {
     // through the socket, while the buffers were made anew each time.
     // They grow by a quarter when a frame no longer fits, and shrink when
     // more than twice what a frame needs.
+    if (!server.has_client()) return;
     const size_t need = frame->LatestSizeBytes();
-    if (client.shared && !client.gpu && need > 0 && !frames_held && server.has_client() &&
+    if (client.shared && !client.gpu && need > 0 && !frames_held &&
         (!client.pool || client.pool->size() < need || client.pool->size() / 2 > need)) {
       frame->SetSharedPool(nullptr);
       auto fresh = std::make_unique<raccoon::SharedBufferPool>();
