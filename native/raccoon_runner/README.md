@@ -475,7 +475,11 @@ FlutterMacOS and the main run loop).
 
 Windows has no shared memory across a socket, so pixel frames come inline;
 GPU frames go through the Vulkan renderer's shared D3D11 textures, and
-native plugins load as above. The custom device starts the helper with Git for Windows' `bash.exe`, and the
+native plugins load as above. Those textures are shared the legacy way
+(`D3D11_RESOURCE_MISC_SHARED`), the only kind Flutter's texture registrar
+takes on the client's side: such a handle has no access list, so another
+process of the same user that guesses it can read the frames (#126). A
+client that would rather not takes pixel frames. The custom device starts the helper with Git for Windows' `bash.exe`, and the
 runner stops when any process from its parent up through Git Bash to the
 tool ends. Measured on a Ryzen 9 7945HX: `flutter run -d raccoon` in
 example/hello reaches the VM service 4.4 s after Launching, hot reload
