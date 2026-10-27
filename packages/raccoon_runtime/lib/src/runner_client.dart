@@ -403,15 +403,7 @@ final class RunnerClient
 
   void _onInbound(Inbound inbound) {
     _handles.addAll(inbound.handles);
-    final List<Uint8List> payloads;
-    try {
-      payloads = _unframer.add(inbound.bytes);
-    } on FormatException catch (error, stackTrace) {
-      if (!_closed.isCompleted) _messages.addError(error, stackTrace);
-      unawaited(close());
-      return;
-    }
-    for (final payload in payloads) {
+    for (final payload in _unframer.add(inbound.bytes)) {
       final RunnerMessage message;
       try {
         message = RunnerMessage.fromBuffer(payload);
@@ -473,6 +465,12 @@ final class RunnerClient
         unawaited(_servePlatformMessage(message.platformMessage));
       }
       _messages.add(message);
+    }
+    // Past a length no message has: what came before it was delivered, and
+    // nothing after it can be trusted to be framed right.
+    if (_unframer.failure case final failure? when !_closed.isCompleted) {
+      _messages.addError(failure, StackTrace.current);
+      unawaited(close());
     }
   }
 

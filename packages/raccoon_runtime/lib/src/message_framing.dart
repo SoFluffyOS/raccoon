@@ -27,18 +27,28 @@ final class MessageUnframer {
   final _chunks = <Uint8List>[];
   var _pendingLength = 0;
 
-  /// Feeds [chunk] and returns every complete payload it completed. Throws
-  /// a [FormatException] for a length past [MessageFraming.maxLength]: what
-  /// follows is not framed as the protocol frames it.
+  /// Why the stream stopped being the protocol: a length past
+  /// [MessageFraming.maxLength]. Set by [add], which still returns the
+  /// payloads before it; nothing after it is read.
+  FormatException? get failure => _failure;
+  FormatException? _failure;
+
+  /// Feeds [chunk] and returns every complete payload it completed, up to
+  /// a [failure].
   List<Uint8List> add(List<int> chunk) {
-    if (chunk.isEmpty) return const [];
+    if (chunk.isEmpty || _failure != null) return const [];
     _chunks.add(chunk is Uint8List ? chunk : Uint8List.fromList(chunk));
     _pendingLength += chunk.length;
     final payloads = <Uint8List>[];
     while (true) {
       final length = _peekLength();
       if (length != null && length > MessageFraming.maxLength) {
-        throw FormatException('a message of $length bytes is not the protocol');
+        _failure = FormatException(
+          'a message of $length bytes is not the protocol',
+        );
+        _chunks.clear();
+        _pendingLength = 0;
+        break;
       }
       if (length == null ||
           _pendingLength < MessageFraming.prefixLength + length) {

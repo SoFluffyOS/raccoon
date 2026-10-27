@@ -65,6 +65,9 @@ final class _Runner {
   /// [payload] framed as a message, whatever it is.
   void raw(List<int> payload) => _client?.add(MessageFraming.frame(payload));
 
+  /// [bytes] as they are, framed or not, in one write.
+  void bytes(List<int> bytes) => _client?.add(bytes);
+
   void log(String line) =>
       send(RunnerMessage(log: LogLine(tag: 'stderr', message: line)));
 
@@ -220,6 +223,30 @@ void main() {
     runner.resumeReading();
     await all.timeout(const Duration(seconds: 30));
     expect(ids, List.generate(count, (i) => i));
+  });
+
+  test('a length no message has ends the client after the messages before '
+      'it', () async {
+    final lines = <String>[];
+    final errors = <Object>[];
+    client.messages.listen(
+      (message) => lines.add(message.log.message),
+      onError: errors.add,
+    );
+    final tooLong = Uint8List(4);
+    ByteData.sublistView(
+      tooLong,
+    ).setUint32(0, MessageFraming.maxLength + 1, Endian.little);
+    runner.bytes([
+      ...MessageFraming.frame(
+        RunnerMessage(log: LogLine(message: 'before')).writeToBuffer(),
+      ),
+      ...tooLong,
+    ]);
+
+    await client.closed.timeout(const Duration(seconds: 5));
+    expect(lines, ['before']);
+    expect(errors.single, isA<FormatException>());
   });
 
   test('an app that died before its first frame is reported, with the '

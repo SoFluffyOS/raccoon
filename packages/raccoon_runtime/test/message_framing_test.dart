@@ -43,13 +43,25 @@ void main() {
     expect(payloads.first.first, 9);
   });
 
-  test('a length past the most a message may be is an error', () {
+  test('a length past the most a message may be is a failure, after the '
+      'messages before it', () {
     final prefix = Uint8List(4);
     ByteData.sublistView(
       prefix,
     ).setUint32(0, MessageFraming.maxLength + 1, Endian.little);
+    final unframer = MessageUnframer();
 
-    expect(() => MessageUnframer().add(prefix), throwsFormatException);
+    expect(
+      unframer.add([
+        ...MessageFraming.frame([1]),
+        ...prefix,
+      ]),
+      [
+        [1],
+      ],
+    );
+    expect(unframer.failure, isA<FormatException>());
+    expect(unframer.add(MessageFraming.frame([2])), isEmpty);
   });
 
   test('unframer returns several messages from one chunk', () {
