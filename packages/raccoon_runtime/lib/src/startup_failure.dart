@@ -152,13 +152,18 @@ final class StartupFailure {
     },
     PluginState.PLUGIN_STATE_BUILT_NOTHING =>
       '${plugin.name} built and made no library',
+    PluginState.PLUGIN_STATE_SKIPPED => switch (plugin.detail) {
+      '' => '${plugin.name} was not built',
+      final detail => '${plugin.name}: $detail',
+    },
     _ => plugin.name,
   };
 
   static bool _cannotWork(PluginReport report) => switch (report.state) {
     PluginState.PLUGIN_STATE_NO_HOST ||
     PluginState.PLUGIN_STATE_FAILED ||
-    PluginState.PLUGIN_STATE_BUILT_NOTHING => true,
+    PluginState.PLUGIN_STATE_BUILT_NOTHING ||
+    PluginState.PLUGIN_STATE_SKIPPED => true,
     _ => false,
   };
 

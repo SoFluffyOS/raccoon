@@ -1477,27 +1477,17 @@ if misses:
                  'CODE_SIGNING_ALLOWED=NO', 'build'],
                 env=env, stdout=log, stderr=subprocess.STDOUT).returncode == 0
 
-    # Each target builds into roots of its own, so a few build at once: most
-    # of a target's ten seconds is xcodebuild starting, not the compiler.
-    targets = [] if toolchain is not None else [p['name'] for p in misses if p['name'] not in broken]
-    workers = max(1, min(4, (os.cpu_count() or 2) // 2))
-    with concurrent.futures.ThreadPoolExecutor(workers) as pool:
-        target_built = dict(zip(targets, pool.map(xcodebuild, targets)))
-    for plugin in misses:
+    def take(plugin, ok):
+        """Caches what [plugin]'s target made and drops its roots."""
         name = plugin['name']
-        if name in broken:
-            continue
-        if toolchain is not None:
-            broken[name] = toolchain
-            continue
         symroot = os.path.join(pods, 'out', name)
         objroot = os.path.join(pods, 'obj', name)
         build_log = os.path.join(pods, name + '.log')
-        if not target_built[name]:
+        if not ok:
             broken[name] = 'did not build; see ' + build_log
             keep_failure(plugin, broken[name], build_log)
             drop(symroot, objroot)
-            continue
+            return
         cached = os.path.join(cache, plugin['key'])
         release = os.path.join(symroot, 'Release')
         made = [(d, f) for d in sorted(os.listdir(release))
@@ -1521,7 +1511,7 @@ if misses:
             status.append({'name': name, 'state': 'built_nothing', 'detail': 'built and made no framework'})
             broken[name] = None
             drop(symroot, objroot)
-            continue
+            return
         # A fresh entry: one built again replaces what an older helper left.
         # Copied aside, then renamed into place: an interrupted copy leaves
         # no entry that counts as cached (#122).
@@ -1540,6 +1530,23 @@ if misses:
         settle(staging, cached, lambda: in_cache(plugin))
         drop(symroot, objroot)
         built.append(name)
+
+    for plugin in misses:
+        if toolchain is not None and plugin['name'] not in broken:
+            broken[plugin['name']] = toolchain
+    # Each target builds into roots of its own, so a few build at once: most
+    # of a target's ten seconds is xcodebuild starting, not the compiler.
+    # Each is cached as it finishes and its roots go, so only the ones still
+    # building take disk.
+    targets = [p for p in misses if p['name'] not in broken]
+    workers = max(1, min(4, (os.cpu_count() or 2) // 2))
+    with concurrent.futures.ThreadPoolExecutor(workers) as pool:
+        running = {pool.submit(xcodebuild, p['name']): p for p in targets}
+        for done in concurrent.futures.as_completed(running):
+            take(running[done], done.result())
+    order = {p['name']: i for i, p in enumerate(misses)}
+    built.sort(key=lambda name: order.get(name, len(order)))
+    empty.sort(key=lambda name: order.get(name, len(order)))
 
 entries = []
 for plugin in wanted:
@@ -1869,9 +1876,12 @@ case "$verb" in
     # it), shared by its instances, else the host's default, where the
     # environment says none (#214).
     if [ -z "${RACCOON_PLUGINS:-}" ]; then
+      # One that says none of the three is passed over, as AppPlugins does.
       for setting in "$DATA/$2/plugins" "$DATA/.plugins"; do
         [ -f "$setting" ] || continue
-        RACCOON_PLUGINS="$(tr -d '[:space:]' < "$setting")"
+        saved="$(tr -d '[:space:]' < "$setting")"
+        case "$saved" in build|cached|off) ;; *) continue ;; esac
+        RACCOON_PLUGINS="$saved"
         export RACCOON_PLUGINS
         break
       done

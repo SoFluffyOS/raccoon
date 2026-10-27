@@ -5084,6 +5084,11 @@ class Report extends StatelessWidget {
         final saved = AppPlugins(p.join(data, 'raccoon', 'data'));
         saved.saveDefault(NativePlugins.off);
         expect(await install(null), contains('native plugins off'));
+        // An app's file that says none of the three is passed over.
+        File(p.join(data, 'raccoon', 'data', 'plugins_app', 'plugins'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('sometimes\n');
+        expect(await install(null), contains('native plugins off'));
         saved.save('plugins_app', NativePlugins.cached);
         expect(await install(null), contains('1 from the cache: raccoon_echo'));
         saved.save('plugins_app', NativePlugins.off);

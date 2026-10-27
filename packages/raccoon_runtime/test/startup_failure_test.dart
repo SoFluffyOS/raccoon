@@ -175,5 +175,30 @@ void main() {
       hint(PluginState.PLUGIN_STATE_BUILT_NOTHING, ''),
       'camera built and made no library',
     );
+    // An install told to take only what is cached (#214).
+    expect(
+      hint(
+        PluginState.PLUGIN_STATE_SKIPPED,
+        'not built: native plugins are cached only (RACCOON_PLUGINS=cached)',
+      ),
+      'camera: not built: native plugins are cached only '
+      '(RACCOON_PLUGINS=cached)',
+    );
+  });
+
+  test('a channel of a skipped plugin is put down to it', () {
+    final reports = [
+      PluginReport(
+        name: 'url_launcher_macos',
+        state: PluginState.PLUGIN_STATE_SKIPPED,
+      ),
+    ];
+    expect(
+      StartupFailure.pluginOf(
+        'dev.flutter.pigeon.url_launcher_macos.UrlLauncherApi.launchUrl',
+        reports,
+      )?.name,
+      'url_launcher_macos',
+    );
   });
 }
