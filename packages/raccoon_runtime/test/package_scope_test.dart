@@ -16,6 +16,9 @@ void main() {
       'package_scope.dart',
     ),
   );
+  // As raccoon-device runs it: with a package config of none (#217).
+  final noPackages =
+      '--packages=${p.join(p.dirname(script), 'no_packages.json')}';
   late Directory temp;
 
   setUp(() => temp = Directory.systemTemp.createTempSync('raccoon_scope'));
@@ -58,6 +61,7 @@ void main() {
       }
       final out = p.join(app, 'build', 'raccoon', 'package_config.json');
       final result = await Process.run(Platform.resolvedExecutable, [
+        noPackages,
         script,
         app,
         out,
@@ -72,4 +76,41 @@ void main() {
       expect(names, ['app']);
     });
   }
+
+  test(
+    'runs inside a workspace that asks for a newer Dart than the SDK',
+    () async {
+      // #217: a checkout inside a pub workspace whose root asks for a newer
+      // language version than this SDK has; dart would take that config.
+      final tool = Directory(p.join(temp.path, 'workspace', 'tool'))
+        ..createSync(recursive: true);
+      final copy = File(
+        script,
+      ).copySync(p.join(tool.path, 'package_scope.dart'));
+      File(p.join(temp.path, 'workspace', '.dart_tool', 'package_config.json'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync(
+          jsonEncode({
+            'configVersion': 2,
+            'packages': [
+              {
+                'name': 'workspace',
+                'rootUri': '../',
+                'packageUri': 'lib/',
+                'languageVersion': '99.0',
+              },
+            ],
+          }),
+        );
+      final plain = await Process.run(Platform.resolvedExecutable, [copy.path]);
+      expect('${plain.stderr}', contains('too high'));
+      final scoped = await Process.run(Platform.resolvedExecutable, [
+        noPackages,
+        copy.path,
+      ]);
+      // Its usage: it ran.
+      expect(scoped.exitCode, 2, reason: '${scoped.stderr}');
+      expect('${scoped.stderr}', contains('usage: package_scope.dart'));
+    },
+  );
 }

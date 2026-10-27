@@ -126,7 +126,10 @@ package_config() {
     echo "$project/.dart_tool/package_config.json"
     return 0
   fi
-  "$(sdk_root)/bin/cache/dart-sdk/bin/dart$EXE" "$(native_path "$ROOT/tool/package_scope.dart")" \
+  # With a package config of none: dart would take the config of a pub
+  # workspace this checkout sits in, at its language version (#217).
+  "$(sdk_root)/bin/cache/dart-sdk/bin/dart$EXE" --packages="$(native_path "$ROOT/tool/no_packages.json")" \
+    "$(native_path "$ROOT/tool/package_scope.dart")" \
     "$(native_path "$project")" "$(native_path "$scoped")" > /dev/null && echo "$scoped"
 }
 
@@ -288,7 +291,8 @@ build_plugins_windows() {
   version="$(tr -d '[:space:]' < "$ROOT/VERSION")"
   cache="${RACCOON_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/$engine}"
   sdk="$(sdk_root)"
-  "$sdk/bin/cache/dart-sdk/bin/dart.exe" "$(native_path "$ROOT/tool/plugins_windows.dart")" \
+  "$sdk/bin/cache/dart-sdk/bin/dart.exe" --packages="$(native_path "$ROOT/tool/no_packages.json")" \
+    "$(native_path "$ROOT/tool/plugins_windows.dart")" \
     "$(native_path "$config")" "$(native_path "$out")" \
     "$VIRTUAL_PLUGINS" "$(native_path "$cache")" "$version" \
     "$(native_path "$sdk/bin/cache/artifacts/engine/$SDK_ENGINE")"
