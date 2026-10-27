@@ -396,6 +396,16 @@ else()
       set(RAPIDJSON_BUILD_TESTS OFF CACHE BOOL "" FORCE)
       FetchContent_MakeAvailable(rapidjson)
       target_include_directories(flutter_linux_gtk PRIVATE ${rapidjson_SOURCE_DIR}/include)
+      # gmodule's pkg-config entry exports every symbol of whatever links
+      # it, for GtkBuilder's signal lookup, which nothing here uses. On the
+      # runner that kept code --gc-sections would drop, and offered its
+      # protobuf to a plugin's own references.
+      get_target_property(RACCOON_FL_LINK_OPTIONS PkgConfig::RACCOON_FL INTERFACE_LINK_OPTIONS)
+      if(RACCOON_FL_LINK_OPTIONS)
+        list(REMOVE_ITEM RACCOON_FL_LINK_OPTIONS "-Wl,--export-dynamic" "-rdynamic")
+        set_target_properties(PkgConfig::RACCOON_FL PROPERTIES
+          INTERFACE_LINK_OPTIONS "${RACCOON_FL_LINK_OPTIONS}")
+      endif()
       target_link_libraries(flutter_linux_gtk PUBLIC PkgConfig::RACCOON_FL)
       target_link_libraries(raccoon_runner PRIVATE flutter_linux_gtk)
       # The runner uses the library's private headers, as the embedding's own
