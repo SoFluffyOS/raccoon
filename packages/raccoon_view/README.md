@@ -42,6 +42,8 @@ host that warns about plugins whose calls fail.
 firebase_messaging's native half delivers one: its
 `FirebaseMessaging.onMessage`, or `onMessageOpenedApp` for one the user
 tapped, gets a `RemoteMessage`. No Firebase project is involved.
+`SensorEvents.shake` shakes the device: half a second of strong readings
+on sensors_plus' accelerometers, what a shake detector takes for a shake.
 
 `RaccoonView(touch: true)` sends the mouse as a finger, as a phone app
 expects: lists drag and fling. A press made with Option held puts down a

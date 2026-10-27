@@ -9,3 +9,4 @@ export 'package:raccoon_view/src/raccoon_board.dart';
 export 'package:raccoon_view/src/raccoon_canvas.dart';
 export 'package:raccoon_view/src/raccoon_view.dart';
 export 'package:raccoon_view/src/remote_messages.dart';
+export 'package:raccoon_view/src/sensor_events.dart';

@@ -217,6 +217,13 @@ Future<void> main() async {
 
   device();
   WidgetsBinding.instance.addObserver(_Device(device));
+  // A sensor's readings, which a client may send (#212); after the first
+  // frame, so its unanswered listen is no startup failure.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    const EventChannel('dev.fluttercommunity.plus/sensors/accelerometer')
+        .receiveBroadcastStream()
+        .listen((event) => print('SENSOR:${(event as List).first}'));
+  });
   runApp(ChannelsApp(ok: failures.isEmpty));
 }
 

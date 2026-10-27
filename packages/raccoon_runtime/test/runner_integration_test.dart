@@ -4716,6 +4716,23 @@ class Report extends StatelessWidget {
         // #209: the system back button.
         client.popRoute();
         await printed('BACK');
+        // #212: a sensor reading, as sensors_plus' native side sends one:
+        // a success envelope of a list of four doubles, each aligned to 8.
+        final reading =
+            ByteData(64)
+              ..setUint8(0, 0)
+              ..setUint8(1, 12)
+              ..setUint8(2, 4);
+        for (final (index, value) in [30.0, 9.81, 0.0, 1000.0].indexed) {
+          reading
+            ..setUint8(3 + 16 * index, 6)
+            ..setFloat64(8 + 16 * index, value, Endian.little);
+        }
+        client.sendToApp(
+          'dev.fluttercommunity.plus/sensors/accelerometer',
+          reading.buffer.asUint8List(),
+        );
+        await printed('SENSOR:30.0');
       } finally {
         client.shutdown();
         await client.close();
