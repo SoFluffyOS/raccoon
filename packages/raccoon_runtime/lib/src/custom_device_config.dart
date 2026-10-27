@@ -320,3 +320,42 @@ final class CustomDevicesFile {
     return const [];
   }
 }
+
+/// The Flutter tool's own settings file, read for `enable-custom-devices`,
+/// without which it lists no custom device.
+final class FlutterSettings {
+  const FlutterSettings(this.path);
+
+  /// `.flutter_settings` in `%APPDATA%` on Windows, `flutter/settings` in
+  /// the XDG config home elsewhere.
+  factory FlutterSettings.forHost(
+    Map<String, String> environment, {
+    String? operatingSystem,
+  }) {
+    if ((operatingSystem ?? Platform.operatingSystem) == 'windows') {
+      return FlutterSettings(
+        p.windows.join(environment['APPDATA'] ?? '.', '.flutter_settings'),
+      );
+    }
+    final configHome = switch (environment['XDG_CONFIG_HOME']) {
+      final dir? when dir.isNotEmpty => dir,
+      _ => p.posix.join(environment['HOME'] ?? '', '.config'),
+    };
+    return FlutterSettings(p.posix.join(configHome, 'flutter', 'settings'));
+  }
+
+  final String path;
+
+  /// Whether the tool lists custom devices: `flutter config
+  /// --enable-custom-devices` was run.
+  bool get customDevicesEnabled {
+    final file = File(path);
+    if (!file.existsSync()) return false;
+    try {
+      final decoded = jsonDecode(file.readAsStringSync());
+      return decoded is Map && decoded['enable-custom-devices'] == true;
+    } on FormatException {
+      return false;
+    }
+  }
+}

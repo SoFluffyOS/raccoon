@@ -355,4 +355,25 @@ void main() {
       'raccoon-desktop',
     ]);
   });
+
+  test('the tool\'s settings say whether it lists custom devices', () {
+    expect(
+      FlutterSettings.forHost({'HOME': '/h'}, operatingSystem: 'macos').path,
+      '/h/.config/flutter/settings',
+    );
+    expect(
+      FlutterSettings.forHost({
+        'APPDATA': r'C:\Users\me\AppData\Roaming',
+      }, operatingSystem: 'windows').path,
+      r'C:\Users\me\AppData\Roaming\.flutter_settings',
+    );
+    final temp = Directory.systemTemp.createTempSync('raccoon_settings');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    final settings = FlutterSettings('${temp.path}/settings');
+    expect(settings.customDevicesEnabled, isFalse);
+    File(settings.path).writeAsStringSync('{"enable-custom-devices": true}');
+    expect(settings.customDevicesEnabled, isTrue);
+    File(settings.path).writeAsStringSync('not json');
+    expect(settings.customDevicesEnabled, isFalse);
+  });
 }
