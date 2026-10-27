@@ -3,7 +3,7 @@
 #include "plugins.h"
 
 #include <dlfcn.h>
-#include <gtk/gtk.h>
+#include <glib-object.h>
 
 #include <cstdio>
 
@@ -14,6 +14,27 @@
 #include "flutter/shell/platform/linux/fl_texture_registrar_private.h"
 
 namespace raccoon {
+
+namespace {
+
+// GTK, set up once a plugin's library has brought it in, before that
+// plugin registers: plugins that open dialogs want it up. The runner itself
+// does not link it, so an app whose plugins don't use it never loads it
+// (#223).
+void InitGtkIfLoaded() {
+  static bool done = false;
+  if (done) return;
+  void* gtk = dlopen("libgtk-3.so.0", RTLD_NOW | RTLD_NOLOAD);
+  if (gtk == nullptr) return;
+  done = true;
+  using InitCheck = int (*)(int*, char***);
+  auto init = reinterpret_cast<InitCheck>(dlsym(gtk, "gtk_init_check"));
+  if (init == nullptr || !init(nullptr, nullptr)) {
+    std::fprintf(stderr, "🦝 no display for GTK; plugins that open windows will not\n");
+  }
+}
+
+}  // namespace
 
 PluginHost::PluginHost(Bridge bridge) : bridge_(std::move(bridge)) {
   c_bridge_.send_platform_message = SendPlatformMessage;
@@ -26,10 +47,6 @@ PluginHost::PluginHost(Bridge bridge) : bridge_(std::move(bridge)) {
   textures_ = FL_TEXTURE_REGISTRAR(g_object_ref(fl_engine_get_texture_registrar(engine_)));
   // No view: the app's window is the client's pane.
   registrar_ = fl_plugin_registrar_new(nullptr, messenger_, textures_);
-  // Plugins that open dialogs want GTK up; without a display that is a no.
-  if (!gtk_init_check(nullptr, nullptr)) {
-    std::fprintf(stderr, "🦝 no display for GTK; plugins that open windows will not\n");
-  }
 }
 
 PluginHost::~PluginHost() {
@@ -65,6 +82,7 @@ bool PluginHost::Load(const PluginEntry& entry, std::string* error) {
     return false;
   }
   handles_.push_back(handle);
+  InitGtkIfLoaded();
   register_plugin(registrar_);
   names_.push_back(entry.name);
   return true;

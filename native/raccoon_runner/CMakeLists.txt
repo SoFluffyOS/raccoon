@@ -408,6 +408,10 @@ else()
       endif()
       target_link_libraries(flutter_linux_gtk PUBLIC PkgConfig::RACCOON_FL)
       target_link_libraries(raccoon_runner PRIVATE flutter_linux_gtk)
+      # GTK comes with the library's link but the runner calls none of it:
+      # only a plugin that uses it loads it (#223), whatever the toolchain's
+      # default.
+      target_link_options(raccoon_runner PRIVATE -Wl,--as-needed)
       # The runner uses the library's private headers, as the embedding's own
       # engine would.
       target_compile_definitions(raccoon_runner PRIVATE RACCOON_HAS_PLUGINS=1 FLUTTER_LINUX_COMPILATION)
