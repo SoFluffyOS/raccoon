@@ -488,8 +488,10 @@ bool MetalRenderer::Present(int64_t texture_id, const FrameCallback& callback) {
       {
         std::lock_guard<std::mutex> lock(impl->mutex);
         --impl->in_flight;
+        // Under the lock: once it is let go, Shutdown may return and the
+        // renderer, |impl| with it, be freed (a retired view's, #229).
+        impl->drained.notify_all();
       }
-      impl->drained.notify_all();
     }];
     [commands commit];
     return true;

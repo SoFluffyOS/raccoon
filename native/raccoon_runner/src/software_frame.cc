@@ -159,6 +159,12 @@ bool SoftwareFrame::WritePpm(const std::string& path, bool bgra) const {
 }
 
 
+SoftwareFrame::~SoftwareFrame() {
+#if !defined(_WIN32)
+  if (pending_gpu_.fence_fd >= 0) close(pending_gpu_.fence_fd);
+#endif
+}
+
 void SoftwareFrame::PresentGpu(uint32_t generation, int index, size_t width,
                                size_t height, int fence_fd) {
   {

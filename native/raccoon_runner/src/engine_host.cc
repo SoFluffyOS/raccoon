@@ -810,7 +810,18 @@ bool EngineHost::ShareGpuBuffersByPort(FlutterViewId view, bool by_port) {
 
 bool EngineHost::GpuBufferPorts(FlutterViewId view, uint32_t generation,
                                 std::vector<uint32_t>* ports) const {
-  auto* metal = static_cast<MetalRenderer*>(metal_ == nullptr ? nullptr : GpuOf(view));
+  if (metal_ == nullptr) return false;
+  // Asked on the port server's thread: the view is held while its renderer
+  // answers, or one whose client left meanwhile is freed under it (#229).
+  std::shared_ptr<View> held;
+  GpuRenderer* gpu = nullptr;
+  if (views_mode_) {
+    held = ViewOf(view);
+    if (held) gpu = held->gpu.get();
+  } else if (view == 0) {
+    gpu = gpu_.get();
+  }
+  auto* metal = static_cast<MetalRenderer*>(gpu);
   return metal != nullptr && metal->SurfacePorts(generation, ports);
 }
 #endif

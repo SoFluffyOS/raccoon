@@ -24,6 +24,12 @@ constexpr bool kSoftwareFrameIsBgra = true;
 // engine's raster thread; everything else on the owner's thread.
 class SoftwareFrame {
  public:
+  SoftwareFrame() = default;
+  // Closes a GPU frame's fence nobody took (a view whose client left).
+  ~SoftwareFrame();
+  SoftwareFrame(const SoftwareFrame&) = delete;
+  SoftwareFrame& operator=(const SoftwareFrame&) = delete;
+
   struct Copy {
     // A string, so the frame message can take it without another copy.
     std::string pixels;
