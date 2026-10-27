@@ -100,6 +100,7 @@ const PluginState$json = {
     {'1': 'PLUGIN_STATE_BUILT_NOTHING', '2': 3},
     {'1': 'PLUGIN_STATE_NO_HOST', '2': 4},
     {'1': 'PLUGIN_STATE_BUILT_IN', '2': 5},
+    {'1': 'PLUGIN_STATE_SKIPPED', '2': 6},
   ],
 };
 
@@ -108,7 +109,7 @@ final $typed_data.Uint8List pluginStateDescriptor = $convert.base64Decode(
     'CgtQbHVnaW5TdGF0ZRIcChhQTFVHSU5fU1RBVEVfVU5TUEVDSUZJRUQQABIXChNQTFVHSU5fU1'
     'RBVEVfTE9BREVEEAESFwoTUExVR0lOX1NUQVRFX0ZBSUxFRBACEh4KGlBMVUdJTl9TVEFURV9C'
     'VUlMVF9OT1RISU5HEAMSGAoUUExVR0lOX1NUQVRFX05PX0hPU1QQBBIZChVQTFVHSU5fU1RBVE'
-    'VfQlVJTFRfSU4QBQ==');
+    'VfQlVJTFRfSU4QBRIYChRQTFVHSU5fU1RBVEVfU0tJUFBFRBAG');
 
 @$core.Deprecated('Use clientHelloDescriptor instead')
 const ClientHello$json = {

@@ -16,6 +16,12 @@
 # --instance KEY (the "raccoon-KEY" device: 2, phone, tablet, desktop, a name) keeps the same project apart from its
 # first run: socket, app store and data directory are named <appName>@N, so
 # one project can run at two sizes side by side.
+#
+# RACCOON_PLUGINS says what an install does with the app's native plugins:
+# build (the default) builds what isn't cached; cached takes the cache and
+# the release's prebuilt plugins but compiles nothing, and says which it
+# left out; off has none at all. Unset, the app's own setting says, as
+# raccoon_runtime's AppPlugins saves it (#214).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
@@ -247,6 +253,11 @@ build_plugins() {
   # Install passes it, worked out once for both steps.
   if [ $# -ge 3 ]; then config="$3"; else config="$(package_config "$project")" || config=""; fi
   [ -n "$config" ] || return 0
+  case "${RACCOON_PLUGINS:-build}" in
+    build|cached) ;;
+    off) echo "🦝 native plugins off (RACCOON_PLUGINS=off)" >&2; return 0 ;;
+    *) echo "🦝 RACCOON_PLUGINS is build, cached or off, not $RACCOON_PLUGINS; building" >&2 ;;
+  esac
   if [ -n "$WINDOWS" ]; then
     build_plugins_windows "$project" "$out" "$config"
     return 0
@@ -333,6 +344,8 @@ def clone(source, target):
         shutil.copy2(source, target)
 
 config, out, lib, headers, virtual, cache, runner_version, arch, prebuilt_url = sys.argv[1:10]
+# What an install that may only take the cache says of the rest (#214).
+SKIPPED = 'not built: native plugins are cached only (RACCOON_PLUGINS=cached)'
 virtual = set(virtual.split())
 dart_tool = os.path.dirname(os.path.abspath(config))
 
@@ -587,9 +600,10 @@ def keep_failure(plugin, why, log):
 
 
 os.makedirs(os.path.join(out, 'lib'), exist_ok=True)
-built, failed, empty, from_cache = [], [], [], []
+built, failed, empty, from_cache, skipped = [], [], [], [], []
 entries = []
 toolchain = None  # looked up when a build is needed
+cached_only = os.environ.get('RACCOON_PLUGINS') == 'cached'
 for plugin in wanted:
     name = plugin['name']
     cached = os.path.join(cache, plugin['key'])
@@ -599,6 +613,10 @@ for plugin in wanted:
         libs = sorted(glob.glob(os.path.join(cached, '*.so')))
     if libs:
         from_cache.append(name)
+    elif cached_only:
+        skipped.append(name)
+        status.append({'name': name, 'state': 'skipped', 'detail': SKIPPED})
+        continue
     else:
         if toolchain is None:
             toolchain = can_build() or 'ok'
@@ -662,6 +680,8 @@ if empty:
     parts.append('%d built nothing: %s' % (len(empty), ', '.join(empty)))
 if failed:
     parts.append('%d failed: %s' % (len(failed), '; '.join(failed)))
+if skipped:
+    parts.append('%d not built (RACCOON_PLUGINS=cached): %s' % (len(skipped), ', '.join(skipped)))
 if not parts:
     parts.append('none to build')
 print('🦝 native plugins ready in %.1f s: ' % (time.time() - started) + '; '.join(parts), file=sys.stderr)
@@ -728,6 +748,9 @@ def clone(source, target):
         shutil.copy2(source, target)
 
 config, out, virtual, cache, runner_version, arch, engine_dir, prebuilt_url, project = sys.argv[1:10]
+# What an install that may only take the cache says of the rest (#214).
+SKIPPED = 'not built: native plugins are cached only (RACCOON_PLUGINS=cached)'
+cached_only = os.environ.get('RACCOON_PLUGINS') == 'cached'
 virtual = set(virtual.split())
 dart_tool = os.path.dirname(os.path.abspath(config))
 # What flutter precache --macos ships: the xcframework, no podspec (one in
@@ -1224,7 +1247,7 @@ if not wanted and not swift and not status:
     sys.exit(0)
 
 os.makedirs(os.path.join(out, 'frameworks'), exist_ok=True)
-built, failed, empty, from_cache = [], [], [], []
+built, failed, empty, from_cache, skipped = [], [], [], [], []
 # The Swift packages, in one cache entry by the keys of them all: what
 # they share is built once and loaded once (#187).
 def swift_entry_of(plugins):
@@ -1276,7 +1299,9 @@ swift_why, swift_built = None, False
 if swift and not in_cache(swift_entry) and all(in_cache(p) for p in swift):
     wanted.extend(swift)
     swift = []
-while swift and not in_cache(swift_entry):
+if swift and not in_cache(swift_entry) and cached_only:
+    swift_why = SKIPPED
+while swift_why is None and swift and not in_cache(swift_entry):
     swift_why = can_build_packages() or kept_failure(swift_entry)
     if swift_why is not None:
         break
@@ -1300,13 +1325,17 @@ fallen = [p for p in swift_all if p['podspec']
 if fallen:
     # The ones with a podspec as well get their pods instead.
     wanted.extend(fallen)
-    print('🦝 swift packages did not build for %s; CocoaPods instead' %
-          ', '.join(p['name'] for p in fallen), file=sys.stderr)
+    if swift_why != SKIPPED:
+        print('🦝 swift packages did not build for %s; CocoaPods instead' %
+              ', '.join(p['name'] for p in fallen), file=sys.stderr)
 misses = [p for p in wanted if not in_cache(p)]
 if misses:
     fetch_prebuilt()
     misses = [p for p in wanted if not in_cache(p)]
 broken = {}  # name: why, for the misses that did not build
+if misses and cached_only:
+    broken = {p['name']: SKIPPED for p in misses}
+    misses = []
 if misses:
     toolchain = can_build()
     if toolchain is None:
@@ -1497,7 +1526,10 @@ entries = []
 for plugin in wanted:
     name = plugin['name']
     if name in broken:
-        if broken[name] is not None:
+        if broken[name] == SKIPPED:
+            skipped.append(name)
+            status.append({'name': name, 'state': 'skipped', 'detail': SKIPPED})
+        elif broken[name] is not None:
             failed.append('%s (%s)' % (name, broken[name]))
             status.append({'name': name, 'state': 'failed', 'detail': broken[name]})
         continue
@@ -1522,6 +1554,11 @@ for plugin in swift_all:
         status.append({'name': name, 'state': 'failed', 'detail': swift_dropped[name]})
 for plugin in swift:
     name = plugin['name']
+    if swift_why == SKIPPED:
+        if not plugin['podspec']:
+            skipped.append(name)
+            status.append({'name': name, 'state': 'skipped', 'detail': SKIPPED})
+        continue
     if swift_why is not None:
         if not plugin['podspec']:
             failed.append('%s (%s)' % (name, swift_why))
@@ -1547,6 +1584,8 @@ if empty:
     parts.append('%d built nothing: %s' % (len(empty), ', '.join(empty)))
 if failed:
     parts.append('%d failed: %s' % (len(failed), '; '.join(failed)))
+if skipped:
+    parts.append('%d not built (RACCOON_PLUGINS=cached): %s' % (len(skipped), ', '.join(skipped)))
 if not parts:
     parts.append('none to build')
 print('🦝 native plugins ready in %.1f s: ' % (time.time() - started) + '; '.join(parts), file=sys.stderr)
@@ -1793,7 +1832,7 @@ case "$verb" in
     # Swift package plugins has one: a Swift package build is cached by
     # the whole set, which no other app's matches (#189).
     RACCOON_PLUGIN_CACHE="$stage/cache" RACCOON_NO_PREBUILT=1 RACCOON_NO_SWIFT_PACKAGES=1 \
-      build_plugins "$(cd "$project" && pwd)" "$stage/out"
+      RACCOON_PLUGINS=build build_plugins "$(cd "$project" && pwd)" "$stage/out"
     mkdir -p "$(dirname "$archive")"
     if [ -d "$stage/cache" ]; then
       # No AppleDouble ._ files for extended attributes: macOS's tar adds
@@ -1807,6 +1846,13 @@ case "$verb" in
     ;;
   install)
     local_path="$1"; key="$(app_key "$2")"
+    # The app's own setting (raccoon_runtime's AppPlugins, the app pane's
+    # Native Plugins), shared by its instances, where the environment says
+    # none (#214).
+    if [ -z "${RACCOON_PLUGINS:-}" ] && [ -f "$DATA/$2/plugins" ]; then
+      RACCOON_PLUGINS="$(tr -d '[:space:]' < "$DATA/$2/plugins")"
+      export RACCOON_PLUGINS
+    fi
     rm -rf "$APPS/$key"
     mkdir -p "$APPS/$key"
     clone_tree "$local_path" "$APPS/$key/flutter_assets"

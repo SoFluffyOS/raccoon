@@ -312,6 +312,8 @@ enum PluginState {
   PLUGIN_STATE_NO_HOST = 4;
   // The runner answers its channels itself (the window plugins).
   PLUGIN_STATE_BUILT_IN = 5;
+  // Not built: the install was told to take only what is cached, or none.
+  PLUGIN_STATE_SKIPPED = 6;
 }
 
 // The runner has a client already; the connection closes after this.

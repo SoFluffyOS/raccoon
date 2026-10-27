@@ -1,5 +1,6 @@
 ## Unreleased
 
+- `PluginState` gains `SKIPPED`: a native plugin the install left out because it was told to take only what is cached (`RACCOON_PLUGINS=cached`). A client that predates it reads it as unspecified.
 - `AppMessage`: the client sends the app a platform message with no reply, as a device's own controls do (`flutter/lifecycle` to put it in the background, `flutter/navigation` to open a link). A runner that predates it ignores it.
 - `Resize.view_inset_top`, `_right`, `_bottom` and `_left`, and `Settings`: the client sets what covers the view's edges (an on-screen keyboard), and the device's locales, text scale, dark mode and hour format in place of the host's. A runner that predates them ignores both.
 - `PointerPhase` gains `CANCEL`: the host took a press away, and the app drops it with no tap. A runner that predates it already took an unknown phase as a cancel.

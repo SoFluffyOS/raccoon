@@ -240,6 +240,15 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   Linux, which keeps failures the same way), so a new version of the plugin,
   an edit to a path plugin, a new runner or a new toolchain tries again.
   `RACCOON_RETRY_PLUGINS=1` tries again at once (#136).
+  `RACCOON_PLUGINS` says how much of this an install does, on every host:
+  `build` (the default) as above; `cached` takes the cache and the
+  release's prebuilt plugins but compiles nothing, and the app pane lists
+  what it left out as skipped; `off` has no native plugins at all
+  (`RACCOON_PLUGINS=off flutter run -d raccoon`). The app's calls to a
+  plugin it lacks fail as for a plugin with no implementation. Unset, the
+  app's own setting says (`<data>/<app>/plugins`, which raccoon_runtime's
+  `AppPlugins` saves for a host's Native Plugins menu); build otherwise
+  (#214).
   Loading FlutterMacOS adds about 17 MB of resident memory and no
   measurable time to the first frame (184 to 188 ms, median of five); the
   run loop costs nothing at idle. The Objective-C runtime notes, once per

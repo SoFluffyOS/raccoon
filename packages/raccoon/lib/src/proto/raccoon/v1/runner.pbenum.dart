@@ -165,6 +165,10 @@ class PluginState extends $pb.ProtobufEnum {
   static const PluginState PLUGIN_STATE_BUILT_IN =
       PluginState._(5, _omitEnumNames ? '' : 'PLUGIN_STATE_BUILT_IN');
 
+  /// Not built: the install was told to take only what is cached, or none.
+  static const PluginState PLUGIN_STATE_SKIPPED =
+      PluginState._(6, _omitEnumNames ? '' : 'PLUGIN_STATE_SKIPPED');
+
   static const $core.List<PluginState> values = <PluginState>[
     PLUGIN_STATE_UNSPECIFIED,
     PLUGIN_STATE_LOADED,
@@ -172,10 +176,11 @@ class PluginState extends $pb.ProtobufEnum {
     PLUGIN_STATE_BUILT_NOTHING,
     PLUGIN_STATE_NO_HOST,
     PLUGIN_STATE_BUILT_IN,
+    PLUGIN_STATE_SKIPPED,
   ];
 
   static final $core.List<PluginState?> _byValue =
-      $pb.ProtobufEnum.$_initByValueList(values, 5);
+      $pb.ProtobufEnum.$_initByValueList(values, 6);
   static PluginState? valueOf($core.int value) =>
       value < 0 || value >= _byValue.length ? null : _byValue[value];
 

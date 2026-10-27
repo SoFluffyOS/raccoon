@@ -133,6 +133,8 @@ Future<void> main(List<String> arguments) async {
   final failed = <String>[];
   final empty = <String>[];
   final fromCache = <String>[];
+  final skipped = <String>[];
+  final cachedOnly = Platform.environment['RACCOON_PLUGINS'] == 'cached';
   final entries = <Map<String, String>>[];
   Map<String, String>? toolchain;
   String? noToolchain;
@@ -144,6 +146,14 @@ Future<void> main(List<String> arguments) async {
       var dlls = _dllsIn(cached);
       if (dlls.isNotEmpty) {
         fromCache.add(plugin.name);
+      } else if (cachedOnly) {
+        skipped.add(plugin.name);
+        status.add({
+          'name': plugin.name,
+          'state': 'skipped',
+          'detail': _skipped,
+        });
+        continue;
       } else {
         if (toolchain == null && noToolchain == null) {
           try {
@@ -269,6 +279,9 @@ Future<void> main(List<String> arguments) async {
       '${fromCache.length} from the cache: ${fromCache.join(', ')}',
     if (empty.isNotEmpty) '${empty.length} built nothing: ${empty.join(', ')}',
     if (failed.isNotEmpty) '${failed.length} failed: ${failed.join('; ')}',
+    if (skipped.isNotEmpty)
+      '${skipped.length} not built (RACCOON_PLUGINS=cached): '
+          '${skipped.join(', ')}',
   ];
   stderr.writeln(
     '🦝 native plugins ready in '
@@ -276,6 +289,10 @@ Future<void> main(List<String> arguments) async {
     '${parts.isEmpty ? 'none to build' : parts.join('; ')}',
   );
 }
+
+/// What an install that may only take the cache says of the rest (#214).
+const _skipped =
+    'not built: native plugins are cached only (RACCOON_PLUGINS=cached)';
 
 // A plugin that failed to build is kept failed, as on the other hosts
 // (#136): by its key and Visual Studio's tools, for a day, its log beside

@@ -4987,6 +4987,92 @@ class Report extends StatelessWidget {
     'flutter_assets',
   );
   test(
+    'RACCOON_PLUGINS=cached builds nothing, off has no plugins',
+    () async {
+      // #214: plugins_app's echo plugin, with an empty cache and no
+      // prebuilt archive: cached leaves it out and says so, off has none,
+      // and once built, cached takes it.
+      final temp = Directory.systemTemp.createTempSync('raccoon_plugins');
+      final helper = p.join(runnerDir, 'tool', 'raccoon-device');
+      final data = p.join(temp.path, 'data');
+      final out = p.join(data, 'raccoon', 'apps', 'plugins_app', 'plugins');
+      Future<String> install(String? mode) async {
+        final result = await Process.run(
+          helper,
+          ['install', pluginsAppAssets, 'plugins_app'],
+          environment: {
+            'RACCOON_RUNNER': binary!,
+            if (sdk != null) 'FLUTTER_ROOT': sdk,
+            'XDG_DATA_HOME': data,
+            'XDG_RUNTIME_DIR': temp.path,
+            'TMPDIR': '${temp.path}/',
+            'RACCOON_PLUGIN_CACHE': p.join(temp.path, 'cache'),
+            'RACCOON_NO_PREBUILT': '1',
+            if (mode != null) 'RACCOON_PLUGINS': mode,
+          },
+        );
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        return '${result.stderr}';
+      }
+
+      Map<String, String> states() {
+        final manifest =
+            jsonDecode(File(p.join(out, 'manifest.json')).readAsStringSync())
+                as Map;
+        return {
+          for (final entry in (manifest['status'] as List).cast<Map>())
+            '${entry['name']}': '${entry['state']}',
+          for (final entry in (manifest['plugins'] as List).cast<Map>())
+            '${entry['name']}': 'loaded',
+        };
+      }
+
+      try {
+        expect(await install('off'), contains('native plugins off'));
+        expect(File(p.join(out, 'manifest.json')).existsSync(), isFalse);
+
+        expect(
+          await install('cached'),
+          contains('1 not built (RACCOON_PLUGINS=cached): raccoon_echo'),
+        );
+        expect(states(), {'raccoon_echo': 'skipped'});
+        expect(
+          Directory(p.join(temp.path, 'cache', 'failed')).existsSync(),
+          isFalse,
+        );
+
+        expect(await install('build'), contains('1 built: raccoon_echo'));
+        expect(
+          await install('cached'),
+          contains('1 from the cache: raccoon_echo'),
+        );
+        expect(states(), {'raccoon_echo': 'loaded'});
+
+        // The app's own setting, where the environment says none; the
+        // environment's wins.
+        AppPlugins(
+          p.join(data, 'raccoon', 'data'),
+        ).save('plugins_app', NativePlugins.off);
+        expect(await install(null), contains('native plugins off'));
+        expect(
+          await install('cached'),
+          contains('1 from the cache: raccoon_echo'),
+        );
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((
+      binary != null && sdk != null && Directory(pluginsAppAssets).existsSync(),
+      Platform.isWindows,
+    )) {
+      (false, _) => 'build the runner and example/plugins_app first',
+      (_, true) => 'the helper runs in Git Bash on Windows',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 5)),
+  );
+  test(
     'on macOS a plugin with a Swift package is built through it and answers',
     () async {
       // #187: example/plugins/echo has a Package.swift beside its podspec,
@@ -5471,6 +5557,11 @@ class Report extends StatelessWidget {
                 'state': 'built_in',
                 'detail': 'the runner answers it',
               },
+              {
+                'name': 'geolocator_apple',
+                'state': 'skipped',
+                'detail': 'not built: native plugins are cached only',
+              },
             ],
           }),
         );
@@ -5507,6 +5598,10 @@ class Report extends StatelessWidget {
         expect(
           byName['desktop_window']?.state,
           PluginState.PLUGIN_STATE_BUILT_IN,
+        );
+        expect(
+          byName['geolocator_apple']?.state,
+          PluginState.PLUGIN_STATE_SKIPPED,
         );
         expect(client.latestPlugins, plugins);
         if (Platform.isMacOS) {
