@@ -5266,6 +5266,9 @@ class Report extends StatelessWidget {
         // macOS, the platform thread's messages on Windows: the runner turns
         // the plugins' main loop.
         expect(output, contains('ECHO:echo: hello'));
+        // Plugins are called on a thread in a single-threaded apartment,
+        // which shell dialogs need (#126).
+        if (Platform.isWindows) expect(output, contains('APARTMENT:sta'));
         // flutter_secure_storage's options reach the plugin without what an
         // unsigned process can't have: the login keychain, no access group,
         // no iCloud sync (#87).

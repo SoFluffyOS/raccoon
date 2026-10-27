@@ -13,6 +13,10 @@ abstract final class RaccoonEcho {
   /// a [Texture] widget. Fails where the host takes no texture.
   static Future<int?> texture() => _channel.invokeMethod<int>('texture');
 
+  /// The COM apartment of the thread the plugin is called on: Windows only.
+  static Future<String?> apartment() =>
+      _channel.invokeMethod<String>('apartment');
+
   /// A modal dialog that closes itself after [milliseconds], as a user
   /// would; it answers once the dialog is gone. While it is up its own loop
   /// holds the platform thread's: a message loop on Windows, the run loop

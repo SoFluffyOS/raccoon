@@ -2,7 +2,8 @@ import 'package:flutter/widgets.dart';
 import 'package:raccoon_echo/raccoon_echo.dart';
 
 /// Calls the native plugin before the first frame and prints what came
-/// back: ECHO:<answer>, SECURE:<options> (macOS), then TEXTURE:<id>. With a
+/// back: ECHO:<answer>, APARTMENT:<COM apartment> (Windows),
+/// SECURE:<options> (macOS), then TEXTURE:<id>. With a
 /// texture it draws that full screen, orange; otherwise green when the
 /// plugin answered, red otherwise.
 Future<void> main() async {
@@ -15,6 +16,13 @@ Future<void> main() async {
   }
   // ignore: avoid_print
   print(line);
+  try {
+    // ignore: avoid_print
+    print('APARTMENT:${await RaccoonEcho.apartment()}');
+  } catch (error) {
+    // ignore: avoid_print
+    print('APARTMENT:error $error');
+  }
   try {
     final options = await RaccoonEcho.secureStorageOptions({
       'accountName': 'app',
@@ -41,10 +49,10 @@ Future<void> main() async {
     switch (textureId) {
       final id? => Texture(textureId: id),
       null => ColoredBox(
-        color: line == 'ECHO:echo: hello'
-            ? const Color(0xFF2E7D32)
-            : const Color(0xFFC62828),
-      ),
+          color: line == 'ECHO:echo: hello'
+              ? const Color(0xFF2E7D32)
+              : const Color(0xFFC62828),
+        ),
     },
   );
 }

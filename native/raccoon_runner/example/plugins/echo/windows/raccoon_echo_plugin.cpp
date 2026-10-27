@@ -12,6 +12,7 @@
 #include <flutter/standard_method_codec.h>
 #include <flutter/texture_registrar.h>
 #include <windows.h>
+#include <objbase.h>
 
 #include <memory>
 #include <optional>
@@ -74,6 +75,17 @@ class RaccoonEchoPlugin : public flutter::Plugin {
         pending->result->Error("echo", "no window to post to");
         delete pending;
       }
+      return;
+    }
+    if (call.method_name() == "apartment") {
+      // The COM apartment of the thread plugins are called on.
+      APTTYPE type;
+      APTTYPEQUALIFIER qualifier;
+      const char* name = "none";
+      if (SUCCEEDED(CoGetApartmentType(&type, &qualifier))) {
+        name = type == APTTYPE_MTA ? "mta" : "sta";
+      }
+      result->Success(EncodableValue(std::string(name)));
       return;
     }
     if (call.method_name() == "modal") {

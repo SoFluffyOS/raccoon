@@ -8,6 +8,7 @@
 #if defined(_WIN32)
 #include <io.h>
 #include <windows.h>
+#include <objbase.h>
 #include <timeapi.h>
 #include <tlhelp32.h>
 // A windows.h macro that would rename the embedder's GetCurrentTime.
@@ -1433,6 +1434,10 @@ int main(int argc, char** argv) {
   // 60 Hz would sleep two ticks a frame and draw at 32 fps. A millisecond,
   // for this process alone, while it runs.
   timeBeginPeriod(1);
+  // The platform thread in a single-threaded apartment, as Flutter's
+  // Windows runner puts it: shell dialogs (file_selector, image_picker)
+  // need one, and a plugin's COM calls assume it (#126).
+  CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 #endif
   if (argc == 2 && std::strcmp(argv[1], "--version") == 0) {
     std::printf("%s\n", RACCOON_RUNNER_VERSION);
