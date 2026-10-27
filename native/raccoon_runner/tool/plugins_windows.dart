@@ -32,9 +32,14 @@ Future<void> main(List<String> arguments) async {
   final [config, out, virtualList, cache, runnerVersion, engine] = arguments;
   final virtual = virtualList.split(' ').where((n) => n.isNotEmpty).toSet();
   final dartTool = File(config).parent.path;
-  final pubCache =
-      Platform.environment['PUB_CACHE'] ??
-      '${Platform.environment['LOCALAPPDATA'] ?? ''}\\Pub\\Cache';
+  // Where pub may keep packages: PUB_CACHE, its default, or the Flutter
+  // SDK's own .pub-cache, which the tool picks when it is there. The SDK is
+  // five levels above its windows-x64 artifacts.
+  final pubCaches = [
+    if (Platform.environment['PUB_CACHE'] case final set?) set,
+    '${Platform.environment['LOCALAPPDATA'] ?? ''}\\Pub\\Cache',
+    '${Directory(engine).parent.parent.parent.parent.parent.path}\\.pub-cache',
+  ];
 
   final packages = <({String name, String root, String pubspec})>[];
   final decoded = jsonDecode(File(config).readAsStringSync()) as Map;
@@ -116,7 +121,7 @@ Future<void> main(List<String> arguments) async {
             ? null
             : '${pluginClass}RegisterWithRegistrar',
         key:
-            '${_versionKey(package.name, package.root, pubCache)}'
+            '${_versionKey(package.name, package.root, pubCaches)}'
             '-$runnerVersion',
       ),
     );
@@ -397,19 +402,29 @@ String _windowsBlock(String pubspec) {
 }
 
 /// Renames [staging] into place as [cached]; an install that finished the
-/// same entry first keeps its own.
+/// same entry first keeps its own. Never deletes an entry with anything in
+/// it: another install may have just renamed it there, or be copying from
+/// it.
 void _settle(Directory staging, Directory cached) {
-  try {
-    if (_dllsIn(cached).isEmpty) {
-      // Windows renames over nothing.
-      if (cached.existsSync()) cached.deleteSync(recursive: true);
+  for (var attempt = 0; attempt < 2; attempt++) {
+    try {
       staging.renameSync(cached.path);
       return;
+    } on FileSystemException {
+      // Windows renames over nothing: an empty leftover goes, once.
+      if (attempt > 0 || _dllsIn(cached).isNotEmpty) break;
+      try {
+        cached.deleteSync();
+      } on FileSystemException {
+        break;
+      }
     }
-  } on FileSystemException {
-    // Another install put its entry there between the two.
   }
-  if (staging.existsSync()) staging.deleteSync(recursive: true);
+  try {
+    staging.deleteSync(recursive: true);
+  } on FileSystemException {
+    // A file still held open; the next install's staging has its own name.
+  }
 }
 
 /// A hosted package is its directory name, name-version. A git one is its
@@ -417,31 +432,41 @@ void _settle(Directory staging, Directory cached) {
 /// of its native side, so an edit rebuilds it: every file but its Dart code,
 /// tests, examples, build output and hidden folders, so the shared sources
 /// an FFI plugin builds (src/) count too, as on the other hosts (#121).
-String _versionKey(String name, String root, String pubCache) {
+String _versionKey(String name, String root, List<String> pubCaches) {
+  // Junctions, subst drives and short names resolved, as pub's paths are
+  // compared with the package's.
+  String real(String path) {
+    try {
+      return Directory(path).resolveSymbolicLinksSync();
+    } on FileSystemException {
+      return path;
+    }
+  }
+
   String folded(String path) => path
       .replaceAll('/', '\\')
       .toLowerCase()
       .replaceFirst(RegExp(r'\\+$'), '');
-  var real = root;
-  try {
-    real = Directory(root).resolveSymbolicLinksSync();
-  } on FileSystemException {
-    // As written, then.
-  }
-  final place = folded(real);
-  final cache = folded(pubCache);
-  if (place.startsWith('$cache\\hosted\\')) {
-    return real.split(RegExp(r'[\\/]')).lastWhere((s) => s.isNotEmpty);
+  final resolved = real(root);
+  final place = folded(resolved);
+  final cache = pubCaches
+      .map((path) => folded(real(path)))
+      .where((cache) => place.startsWith('$cache\\'))
+      .firstOrNull;
+  if (cache != null && place.startsWith('$cache\\hosted\\')) {
+    return resolved.split(RegExp(r'[\\/]')).lastWhere((s) => s.isNotEmpty);
   }
   final shape = StringBuffer();
-  if (place.startsWith('$cache\\')) {
+  if (cache != null) {
     shape.write(place.substring(cache.length));
   } else {
+    // A junctioned folder is walked too (shared sources, say), once.
+    final seen = <String>{};
     void walk(Directory directory, bool top) {
+      if (!seen.add(folded(real(directory.path)))) return;
       final List<FileSystemEntity> found;
       try {
-        found = directory.listSync(followLinks: false)
-          ..sort((a, b) => a.path.compareTo(b.path));
+        found = directory.listSync()..sort((a, b) => a.path.compareTo(b.path));
       } on FileSystemException {
         return;
       }
@@ -473,7 +498,7 @@ String _versionKey(String name, String root, String pubCache) {
     hash = ((hash ^ unit) * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF;
   }
   final digest = hash.toUnsigned(64).toRadixString(16).padLeft(16, '0');
-  final kind = place.startsWith('$cache\\') ? 'git' : 'path';
+  final kind = cache == null ? 'path' : 'git';
   return '$name-$kind-$digest';
 }
 
