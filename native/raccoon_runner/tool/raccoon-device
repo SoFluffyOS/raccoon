@@ -1846,9 +1846,8 @@ case "$verb" in
     ;;
   install)
     local_path="$1"; key="$(app_key "$2")"
-    # The app's own setting (raccoon_runtime's AppPlugins, the app pane's
-    # Native Plugins), shared by its instances, where the environment says
-    # none (#214).
+    # The app's own setting (raccoon_runtime's AppPlugins, as a host saves
+    # it), shared by its instances, where the environment says none (#214).
     if [ -z "${RACCOON_PLUGINS:-}" ] && [ -f "$DATA/$2/plugins" ]; then
       RACCOON_PLUGINS="$(tr -d '[:space:]' < "$DATA/$2/plugins")"
       export RACCOON_PLUGINS

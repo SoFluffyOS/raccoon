@@ -242,8 +242,8 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   `RACCOON_RETRY_PLUGINS=1` tries again at once (#136).
   `RACCOON_PLUGINS` says how much of this an install does, on every host:
   `build` (the default) as above; `cached` takes the cache and the
-  release's prebuilt plugins but compiles nothing, and the app pane lists
-  what it left out as skipped; `off` has no native plugins at all
+  release's prebuilt plugins but compiles nothing, and a client is told
+  what it left out, as skipped; `off` has no native plugins at all
   (`RACCOON_PLUGINS=off flutter run -d raccoon`). The app's calls to a
   plugin it lacks fail as for a plugin with no implementation. Unset, the
   app's own setting says (`<data>/<app>/plugins`, which raccoon_runtime's
