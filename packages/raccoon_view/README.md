@@ -43,6 +43,11 @@ firebase_messaging's native half delivers one: its
 `FirebaseMessaging.onMessage`, or `onMessageOpenedApp` for one the user
 tapped, gets a `RemoteMessage`. No Firebase project is involved.
 
+`RaccoonView(touch: true)` sends the mouse as a finger, as a phone app
+expects: lists drag and fling. A press made with Option held puts down a
+second finger across the view's center, so the drag pinches and turns, as
+in iOS Simulator.
+
 Uses no Material or Cupertino widgets.
 
 ## Issues

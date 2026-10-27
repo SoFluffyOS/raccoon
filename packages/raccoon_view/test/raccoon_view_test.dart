@@ -414,4 +414,58 @@ void main() {
     );
     await gesture.removePointer();
   });
+
+  testWidgets('with touch, Option puts down a second finger across the '
+      'center', (tester) async {
+    // #208: as iOS Simulator has it, so a mouse can pinch.
+    final connection = _FakeConnection();
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Center(
+          child: SizedBox(
+            width: 100,
+            height: 50,
+            child: RaccoonView(
+              connection: connection,
+              pixelRatio: 1,
+              touch: true,
+            ),
+          ),
+        ),
+      ),
+    );
+    final origin = tester.getTopLeft(find.byType(RaccoonView));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: origin + const Offset(10, 10));
+    await gesture.down(origin + const Offset(10, 10));
+    await gesture.moveTo(origin + const Offset(20, 10));
+    await gesture.up();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    await tester.pump();
+    final first = connection.pointers.first.pointerId;
+    expect(
+      [
+        for (final event in connection.pointers)
+          (
+            event.phase.name.replaceFirst('POINTER_PHASE_', ''),
+            event.pointerId - first,
+            event.x,
+            event.y,
+          ),
+      ],
+      [
+        ('DOWN', 0, 10.0, 10.0),
+        ('DOWN', 1 << 20, 90.0, 40.0),
+        ('MOVE', 0, 20.0, 10.0),
+        ('MOVE', 1 << 20, 80.0, 40.0),
+        ('UP', 0, 20.0, 10.0),
+        ('REMOVE', 0, 20.0, 10.0),
+        ('UP', 1 << 20, 80.0, 40.0),
+        ('REMOVE', 1 << 20, 80.0, 40.0),
+      ],
+    );
+    await gesture.removePointer();
+  });
 }

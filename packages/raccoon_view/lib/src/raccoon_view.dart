@@ -442,6 +442,10 @@ class _RaccoonViewState extends State<RaccoonView> {
     );
   }
 
+  /// A second finger the press under way put down, mirrored around the
+  /// view's center, when Option was held (#208); null otherwise.
+  int? _mirrored;
+
   void _onPointer(PointerEvent event) {
     // A click into the app is a click into the app: the keys follow it.
     if (event is PointerDownEvent && !_focus.hasFocus) _focus.requestFocus();
@@ -452,15 +456,46 @@ class _RaccoonViewState extends State<RaccoonView> {
     );
     if (mapped == null) return;
     if (event.kind == PointerDeviceKind.mouse) _mouseIn = true;
-    widget.connection.sendPointer(mapped);
-    // A finger lifted is gone, as a touchscreen says: each press is a
-    // pointer of its own, and the engine would keep every one (#207).
-    final lifted = event is PointerUpEvent || event is PointerCancelEvent;
-    if (lifted && mapped.device == rc.PointerDevice.POINTER_DEVICE_TOUCH) {
-      widget.connection.sendPointer(
-        mapped.deepCopy()..phase = rc.PointerPhase.POINTER_PHASE_REMOVE,
-      );
+    final finger =
+        widget.touch &&
+        event.kind == PointerDeviceKind.mouse &&
+        mapped.device == rc.PointerDevice.POINTER_DEVICE_TOUCH;
+    // As iOS Simulator has it: Option puts down a second finger, so the
+    // drag pinches and turns.
+    if (finger &&
+        event is PointerDownEvent &&
+        HardwareKeyboard.instance.isAltPressed) {
+      _mirrored = mapped.pointerId + _mirrorOffset;
     }
+    final lifted = event is PointerUpEvent || event is PointerCancelEvent;
+    final events = [
+      mapped,
+      if ((finger, _mirrored) case (true, final pointer?))
+        _mirror(mapped, pointer),
+    ];
+    for (final sent in events) {
+      widget.connection.sendPointer(sent);
+      // A finger lifted is gone, as a touchscreen says: each press is a
+      // pointer of its own, and the engine would keep every one (#207).
+      if (lifted && sent.device == rc.PointerDevice.POINTER_DEVICE_TOUCH) {
+        widget.connection.sendPointer(
+          sent.deepCopy()..phase = rc.PointerPhase.POINTER_PHASE_REMOVE,
+        );
+      }
+    }
+    if (lifted) _mirrored = null;
+  }
+
+  /// Where the second finger's ids start, clear of the framework's own.
+  static const _mirrorOffset = 1 << 20;
+
+  /// [event] for the second finger [pointer]: across the view's center.
+  rc.PointerEvent _mirror(rc.PointerEvent event, int pointer) {
+    final size = _sentSize ?? Size.zero;
+    return event.deepCopy()
+      ..pointerId = pointer
+      ..x = size.width * _pixelRatio - event.x
+      ..y = size.height * _pixelRatio - event.y;
   }
 
   /// The mouse left the view; not while it drags, which goes on outside.
