@@ -5082,7 +5082,7 @@ class Report extends StatelessWidget {
       final helper = p.join(runnerDir, 'tool', 'raccoon-device');
       final data = p.join(temp.path, 'data');
       final out = p.join(data, 'raccoon', 'apps', 'plugins_app', 'plugins');
-      Future<String> install(String? mode) async {
+      Future<String> install(String? mode, {bool pods = false}) async {
         final result = await Process.run(
           helper,
           ['install', pluginsAppAssets, 'plugins_app'],
@@ -5095,6 +5095,7 @@ class Report extends StatelessWidget {
             'RACCOON_PLUGIN_CACHE': p.join(temp.path, 'cache'),
             'RACCOON_NO_PREBUILT': '1',
             if (mode != null) 'RACCOON_PLUGINS': mode,
+            if (pods) 'RACCOON_NO_SWIFT_PACKAGES': '1',
           },
         );
         expect(result.exitCode, 0, reason: '${result.stderr}');
@@ -5133,6 +5134,35 @@ class Report extends StatelessWidget {
           contains('1 from the cache: raccoon_echo'),
         );
         expect(states(), {'raccoon_echo': 'loaded'});
+
+        if (Platform.isMacOS) {
+          // #225: a CocoaPods entry records the keys of the plugins it
+          // carries; one recorded with a key this app's plugin no longer
+          // has is built again.
+          expect(
+            await install('build', pods: true),
+            contains('1 built: raccoon_echo'),
+          );
+          final record = Directory(p.join(temp.path, 'cache'))
+              .listSync(recursive: true)
+              .whereType<File>()
+              .singleWhere(
+                (file) =>
+                    p.basename(file.path) == '.plugins.json' &&
+                    p.basename(file.parent.path).startsWith('raccoon_echo-'),
+              );
+          expect(record.readAsStringSync(), '{}');
+          record.writeAsStringSync('{"raccoon_echo": "an older key"}');
+          expect(
+            await install('cached', pods: true),
+            contains('1 not built (RACCOON_PLUGINS=cached): raccoon_echo'),
+          );
+          expect(
+            await install('build', pods: true),
+            contains('1 built: raccoon_echo'),
+          );
+          expect(record.readAsStringSync(), '{}');
+        }
 
         // Where the environment says none, the host's default, then the
         // app's own over it; the environment's wins over both.

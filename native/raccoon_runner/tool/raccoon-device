@@ -179,7 +179,7 @@ PLIST
 # characters a version has. Nothing when there is none.
 pubspec_version() {
   sed -n 's/^version:[[:space:]]*//p' "$1/pubspec.yaml" 2>/dev/null | head -n 1 |
-    sed 's/[[:space:]]*#.*//' | tr -cd 'A-Za-z0-9.+-'
+    sed 's/[[:space:]]*#.*//' | tr -cd 'A-Za-z0-9.+-' || true
 }
 
 # The key an app's socket, store and data are named by: the app name, with
@@ -969,9 +969,39 @@ FAILURE_DAYS = 1
 toolchain_id = None
 
 
+def toolchain_stamp():
+    """What changes when Xcode or CocoaPods does, read without running
+    either: the selected Xcode and its version file, and pod's resolved
+    path, all with their times."""
+    parts = []
+    developer = os.environ.get('DEVELOPER_DIR') or os.path.realpath('/var/db/xcode_select_link')
+    if not os.path.isdir(developer):
+        developer = '/Applications/Xcode.app/Contents/Developer'
+    pod = shutil.which('pod', path=env.get('PATH'))
+    for path in (developer, os.path.join(developer, '..', 'version.plist'),
+                 os.path.realpath(pod) if pod else ''):
+        try:
+            parts.append('%s %d' % (path, os.stat(path).st_mtime_ns))
+        except OSError:
+            parts.append(path)
+    return ' / '.join(parts)
+
+
 def toolchain_identity():
+    """xcodebuild's and pod's versions, which take most of a second to ask
+    for: kept in the cache by toolchain_stamp (#225)."""
     global toolchain_id
     if toolchain_id is None:
+        stamp = toolchain_stamp()
+        kept = os.path.join(cache, 'toolchain.json')
+        try:
+            with open(kept) as f:
+                known = json.load(f)
+            if known.get('stamp') == stamp:
+                toolchain_id = known['id']
+                return toolchain_id
+        except (OSError, ValueError, KeyError):
+            pass
         versions = []
         for command in (['xcodebuild', '-version'], ['pod', '--version']):
             try:
@@ -979,6 +1009,14 @@ def toolchain_identity():
             except OSError:
                 versions.append('')
         toolchain_id = ' / '.join(v.replace('\n', ' ') for v in versions)
+        try:
+            os.makedirs(cache, exist_ok=True)
+            staging = '%s.%d' % (kept, os.getpid())
+            with open(staging, 'w') as f:
+                json.dump({'stamp': stamp, 'id': toolchain_id}, f)
+            os.replace(staging, kept)
+        except OSError:
+            pass
     return toolchain_id
 
 
@@ -1036,6 +1074,16 @@ def in_cache(plugin):
     entry = os.path.join(cache, plugin['key'])
     present = binaries(entry)
     if not any(f.endswith('.framework') for f in present):
+        return False
+    # An entry carries the plugins its pods depend on (firebase_core with
+    # firebase_analytics), recorded with their keys: built against others
+    # than this app's, it is built again (#225).
+    try:
+        with open(os.path.join(entry, '.plugins.json')) as f:
+            carried = json.load(f)
+    except (OSError, ValueError):
+        carried = {}
+    if any(current_keys.get(dep, key) != key for dep, key in carried.items()):
         return False
     stamp = os.path.join(entry, '.complete')
     if os.path.exists(stamp):
@@ -1255,6 +1303,7 @@ for name, root, pubspec in packages:
 
 if not wanted and not swift and not status:
     sys.exit(0)
+current_keys = {p['name']: p['key'] for p in wanted}
 
 os.makedirs(os.path.join(out, 'frameworks'), exist_ok=True)
 built, failed, empty, from_cache, skipped = [], [], [], [], []
@@ -1527,6 +1576,9 @@ if misses:
                 shutil.copytree(path, target, symlinks=True, dirs_exist_ok=True)
             else:
                 shutil.copy2(path, target)
+        carried = {f[:-len('.framework')] for _, f in made} - {name}
+        with open(os.path.join(staging, '.plugins.json'), 'w') as f:
+            json.dump({dep: current_keys[dep] for dep in sorted(carried) if dep in current_keys}, f)
         settle(staging, cached, lambda: in_cache(plugin))
         drop(symroot, objroot)
         built.append(name)
@@ -1565,7 +1617,11 @@ for plugin in wanted:
     for f in binaries(cached):
         target = os.path.join(out, 'frameworks', f)
         if os.path.exists(target):
-            continue
+            # A plugin's own framework comes from its own entry, not from
+            # one that carries it as a dependency, maybe an older one.
+            if f != name + '.framework':
+                continue
+            shutil.rmtree(target, ignore_errors=True)
         clone(os.path.join(cached, f), target)
     library = os.path.join(out, 'frameworks', name + '.framework', name)
     if plugin['class'] is None:
@@ -1621,20 +1677,28 @@ PY
 # Instances of one project (raccoon, raccoon-2) share its build/raccoon: a
 # workspace member's scoped package config, the native assets and their
 # stamp. Installs that write there take turns, until the helper exits
-# (#136); a lock ten minutes old is a killed install's. Taken only then, so
-# an app with neither pays nothing for it.
+# (#136); a lock whose holder is gone is a killed install's. Taken only
+# then, so an app with neither pays nothing for it.
 lock_build() {
   [ -z "${BUILD_LOCK:-}" ] || return 0
   BUILD_LOCK="$1/build/raccoon/.install-lock"
   [ -d "$1/build/raccoon" ] || mkdir -p "$1/build/raccoon"
+  # The holder's pid is in the lock: one whose holder is gone is stale, and
+  # an exit takes away only its own. A cold build can hold it for longer
+  # than any age would allow (#225).
+  local holder
   until mkdir "$BUILD_LOCK" 2>/dev/null; do
-    if [ -n "$(find "$BUILD_LOCK" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then
+    holder="$(cat "$BUILD_LOCK/pid" 2>/dev/null || true)"
+    if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; } ||
+       { [ -z "$holder" ] && [ -n "$(find "$BUILD_LOCK" -maxdepth 0 -mmin +10 2>/dev/null)" ]; }; then
+      rm -f "$BUILD_LOCK/pid"
       rmdir "$BUILD_LOCK" 2>/dev/null || true
       continue
     fi
     sleep 0.2
   done
-  trap 'rmdir "$BUILD_LOCK" 2>/dev/null' EXIT
+  echo $$ > "$BUILD_LOCK/pid"
+  trap '[ "$(cat "$BUILD_LOCK/pid" 2>/dev/null)" = $$ ] && rm -f "$BUILD_LOCK/pid" && rmdir "$BUILD_LOCK" 2>/dev/null' EXIT
 }
 
 # A linux/ holding only flutter/ephemeral is the Linux target's engine copy,
@@ -1889,9 +1953,15 @@ case "$verb" in
     rm -rf "$APPS/$key"
     mkdir -p "$APPS/$key"
     clone_tree "$local_path" "$APPS/$key/flutter_assets"
-    # The project is two levels above its bundle; its native plugins are
-    # built for this host and loaded into the runner.
-    project="$(cd "$local_path/../.." && pwd)"
+    # The project is the nearest folder above its bundle with a pubspec:
+    # two levels up by default, more under `flutter config --build-dir`
+    # (#225). Its native plugins are built for this host and loaded into
+    # the runner.
+    project="$(cd "$local_path/.." && pwd)"
+    until [ -f "$project/pubspec.yaml" ] || [ "$project" = / ]; do
+      project="$(dirname "$project")"
+    done
+    [ -f "$project/pubspec.yaml" ] || project="$(cd "$local_path/../.." && pwd)"
     pubspec_version "$project" > "$APPS/$key/version"
     # The project's Firebase config for Apple hosts, where its Runner keeps
     # it: the macOS one, else the iOS one. The app's bundle carries it.
