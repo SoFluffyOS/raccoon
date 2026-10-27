@@ -228,15 +228,34 @@ std::vector<uint32_t> AncestorsToWatch() {
   return ancestors;
 }
 
+// Whether the process behind |handle| started after this one: no ancestor
+// can, so its pid was handed out again after the ancestor's exit.
+bool StartedAfterThis(HANDLE handle) {
+  FILETIME theirs, ours, exit, kernel, user;
+  if (!GetProcessTimes(handle, &theirs, &exit, &kernel, &user) ||
+      !GetProcessTimes(GetCurrentProcess(), &ours, &exit, &kernel, &user)) {
+    return false;
+  }
+  return CompareFileTime(&theirs, &ours) > 0;
+}
+
 // Says when a process has exited. Its handle is opened up front, so a pid
-// the system hands out again later is not taken for it.
+// the system hands out again later is not taken for it; one handed out
+// again before is told by its start, after this process's (#126).
 class ProcessWatch {
  public:
   // A pid of 0 or 1 is no process, as on the other hosts.
   explicit ProcessWatch(uint32_t pid) : pid_(pid) {
     if (pid <= 1) return;
-    handle_ = OpenProcess(SYNCHRONIZE, FALSE, pid);
-    gone_ = handle_ == nullptr && GetLastError() == ERROR_INVALID_PARAMETER;
+    handle_ = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    // One this process may not query (an elevated tool) is watched as
+    // before, without its start.
+    const bool queried = handle_ != nullptr;
+    if (handle_ == nullptr && GetLastError() == ERROR_ACCESS_DENIED) {
+      handle_ = OpenProcess(SYNCHRONIZE, FALSE, pid);
+    }
+    gone_ = (handle_ == nullptr && GetLastError() == ERROR_INVALID_PARAMETER) ||
+            (queried && StartedAfterThis(handle_));
   }
   ~ProcessWatch() {
     if (handle_ != nullptr) CloseHandle(handle_);
