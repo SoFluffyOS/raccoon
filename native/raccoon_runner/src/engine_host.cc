@@ -535,6 +535,10 @@ bool EngineHost::CreateBackingStore(const FlutterBackingStoreConfig* config,
 #if RACCOON_HAS_GL
   if (target.gl != nullptr) {
     target.gl->EnsureCurrent();
+    // Textures (the camera's) go through the root renderer, which draws no
+    // view here: it counts a frame with the first view's, so what it let
+    // go is deleted (#229). Siblings share its context.
+    if (target.gl != host->gl_ && config->view_id == 0) host->gl_->CountFrame();
     const uint32_t fbo = target.gl->Fbo(width, height);
     if (fbo == 0) return false;
     out->type = kFlutterBackingStoreTypeOpenGL;

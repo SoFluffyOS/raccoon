@@ -52,6 +52,10 @@ class GlRenderer : public GpuRenderer {
   // The framebuffer for a frame of this size, made or resized as needed;
   // 0 when it cannot be. With a pool, a free pool buffer when there is one.
   uint32_t Fbo(size_t width, size_t height);
+  // A frame went by: what was forgotten three frames ago is deleted. Fbo
+  // counts its own; in views mode, where the root renderer makes no Fbo,
+  // the host counts one per frame for it (#229).
+  void CountFrame();
   // Hands the drawn frame on: to |gpu| when it is in a pool buffer, else read
   // back through |callback|. Context current.
   bool Present(const FrameCallback& callback);

@@ -525,13 +525,15 @@ bool GlRenderer::BuildPool(size_t width, size_t height) {
   return true;
 }
 
+void GlRenderer::CountFrame() {
+  std::lock_guard<std::mutex> lock(pixels_mutex_);
+  ++frames_;
+  DeleteForgotten();
+}
+
 uint32_t GlRenderer::Fbo(size_t width, size_t height) {
   if (width == 0 || height == 0) return 0;
-  {
-    std::lock_guard<std::mutex> lock(pixels_mutex_);
-    ++frames_;
-    DeleteForgotten();
-  }
+  CountFrame();
   int fence = -1;
   uint32_t fbo = 0;
   {
