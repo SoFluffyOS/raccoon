@@ -427,6 +427,38 @@ def version_key(name, root):
 lib_stamp = runner_version
 
 
+swept = False
+
+
+def sweep_staging():
+    """What an install killed mid-copy left in the cache: entries and records
+    being staged, prebuilt archives being unpacked. An hour old, so none
+    another install is still filling (#226). Once an install."""
+    global swept
+    if swept:
+        return
+    swept = True
+    now = time.time()
+    for folder in (cache, os.path.join(cache, 'failed')):
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        for name in names:
+            if '.partial-' not in name and not name.startswith('.prebuilt-'):
+                continue
+            path = os.path.join(folder, name)
+            try:
+                if now - os.lstat(path).st_mtime < 3600:
+                    continue
+                if os.path.isdir(path) and not os.path.islink(path):
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    os.remove(path)
+            except OSError:
+                pass
+
+
 prebuilt_tried = False
 
 
@@ -618,6 +650,7 @@ for plugin in wanted:
     cached = os.path.join(cache, plugin['key'])
     libs = sorted(glob.glob(os.path.join(cached, '*.so')))
     if not libs:
+        sweep_staging()
         fetch_prebuilt()
         libs = sorted(glob.glob(os.path.join(cached, '*.so')))
     if libs:
@@ -847,6 +880,38 @@ def dependencies(pubspec):
         if named:
             names.add(named.group(1))
     return names
+
+
+swept = False
+
+
+def sweep_staging():
+    """What an install killed mid-copy left in the cache: entries and records
+    being staged, prebuilt archives being unpacked. An hour old, so none
+    another install is still filling (#226). Once an install."""
+    global swept
+    if swept:
+        return
+    swept = True
+    now = time.time()
+    for folder in (cache, os.path.join(cache, 'failed')):
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        for name in names:
+            if '.partial-' not in name and not name.startswith('.prebuilt-'):
+                continue
+            path = os.path.join(folder, name)
+            try:
+                if now - os.lstat(path).st_mtime < 3600:
+                    continue
+                if os.path.isdir(path) and not os.path.islink(path):
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    os.remove(path)
+            except OSError:
+                pass
 
 
 prebuilt_tried = False
@@ -1389,6 +1454,7 @@ if fallen:
               ', '.join(p['name'] for p in fallen), file=sys.stderr)
 misses = [p for p in wanted if not in_cache(p)]
 if misses:
+    sweep_staging()
     fetch_prebuilt()
     misses = [p for p in wanted if not in_cache(p)]
 broken = {}  # name: why, for the misses that did not build
