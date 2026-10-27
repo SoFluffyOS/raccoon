@@ -418,6 +418,10 @@ else()
           INTERFACE_LINK_OPTIONS "${RACCOON_FL_LINK_OPTIONS}")
       endif()
       target_link_libraries(flutter_linux_gtk PUBLIC PkgConfig::RACCOON_FL)
+      # Its sources call no GTK either: without this, a toolchain that
+      # doesn't default to it records GTK as needed here, and the runner
+      # loads it through the library (#223).
+      target_link_options(flutter_linux_gtk PRIVATE -Wl,--as-needed)
       target_link_libraries(raccoon_runner PRIVATE flutter_linux_gtk)
       # GTK comes with the library's link but the runner calls none of it:
       # only a plugin that uses it loads it (#223), whatever the toolchain's

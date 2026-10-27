@@ -1074,6 +1074,10 @@ def toolchain_identity():
             except OSError:
                 versions.append('')
         toolchain_id = ' / '.join(v.replace('\n', ' ') for v in versions)
+        # Not kept while either says nothing (Xcode's license not accepted
+        # yet, say): accepting it changes no file the stamp reads.
+        if not all(versions):
+            return toolchain_id
         try:
             os.makedirs(cache, exist_ok=True)
             staging = '%s.%d' % (kept, os.getpid())
@@ -1751,12 +1755,14 @@ lock_build() {
   [ -d "$1/build/raccoon" ] || mkdir -p "$1/build/raccoon"
   # The holder's pid is in the lock: one whose holder is gone is stale, and
   # an exit takes away only its own. A cold build can hold it for longer
-  # than any age would allow (#225).
+  # than ten minutes (#225); an hour is past any, and frees a lock whose
+  # killed holder's pid went to another process since.
   local holder
   until mkdir "$BUILD_LOCK" 2>/dev/null; do
     holder="$(cat "$BUILD_LOCK/pid" 2>/dev/null || true)"
     if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; } ||
-       { [ -z "$holder" ] && [ -n "$(find "$BUILD_LOCK" -maxdepth 0 -mmin +10 2>/dev/null)" ]; }; then
+       { [ -z "$holder" ] && [ -n "$(find "$BUILD_LOCK" -maxdepth 0 -mmin +10 2>/dev/null)" ]; } ||
+       [ -n "$(find "$BUILD_LOCK" -maxdepth 0 -mmin +60 2>/dev/null)" ]; then
       rm -f "$BUILD_LOCK/pid"
       rmdir "$BUILD_LOCK" 2>/dev/null || true
       continue

@@ -15,7 +15,7 @@ final class _Runner {
   _Runner._(this._server) {
     _server.listen((socket) {
       _client = socket;
-      socket.listen((bytes) {
+      _reading = socket.listen((bytes) {
         for (final payload in _unframer.add(bytes)) {
           _received.add(ClientMessage.fromBuffer(payload));
         }
@@ -37,6 +37,13 @@ final class _Runner {
   final _received = StreamController<ClientMessage>.broadcast();
   final _connected = Completer<void>();
   Socket? _client;
+  StreamSubscription<Uint8List>? _reading;
+
+  /// Stops reading what the client sends, as a runner whose platform
+  /// thread is busy does, until [resumeReading].
+  void pauseReading() => _reading?.pause();
+
+  void resumeReading() => _reading?.resume();
 
   Stream<ClientMessage> get received => _received.stream;
 
@@ -189,6 +196,7 @@ void main() {
   test('what is sent while the runner reads slowly arrives whole and in '
       'order', () async {
     // #227: a backlog is written from its head, not joined again per write.
+    runner.pauseReading();
     const count = 3000;
     final ids = <int>[];
     final all = runner.received
@@ -206,6 +214,10 @@ void main() {
         ),
       );
     }
+    // Most of it is queued now: more than the socket takes.
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(ids, isEmpty);
+    runner.resumeReading();
     await all.timeout(const Duration(seconds: 30));
     expect(ids, List.generate(count, (i) => i));
   });

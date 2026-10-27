@@ -187,13 +187,6 @@ void OnSignal(int) {
 
 uint32_t ThisProcessId() { return GetCurrentProcessId(); }
 
-// The runner's ancestors whose end ends the run, nearest first: its parent,
-// and on through Git Bash's processes to the first that is not one. Windows
-// has no getppid, so they are found once, in a snapshot of the process
-// table. The device helper runs in Git Bash, where the tool starts a
-// launcher, the launcher the shell, and a forked copy of the shell waits
-// on the runner; the tool stops a run by killing the launcher, which none
-// of the others notice, and the shell has no pid of the tool to pass on.
 // When the process |pid| started, or false when this one may not ask.
 bool StartOf(uint32_t pid, FILETIME* start) {
   const HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
@@ -204,6 +197,13 @@ bool StartOf(uint32_t pid, FILETIME* start) {
   return known;
 }
 
+// The runner's ancestors whose end ends the run, nearest first: its parent,
+// and on through Git Bash's processes to the first that is not one. Windows
+// has no getppid, so they are found once, in a snapshot of the process
+// table. The device helper runs in Git Bash, where the tool starts a
+// launcher, the launcher the shell, and a forked copy of the shell waits
+// on the runner; the tool stops a run by killing the launcher, which none
+// of the others notice, and the shell has no pid of the tool to pass on.
 std::vector<uint32_t> AncestorsToWatch() {
   struct Entry {
     uint32_t parent;
