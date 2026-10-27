@@ -32,6 +32,9 @@ Future<void> main(List<String> arguments) async {
   final [config, out, virtualList, cache, runnerVersion, engine] = arguments;
   final virtual = virtualList.split(' ').where((n) => n.isNotEmpty).toSet();
   final dartTool = File(config).parent.path;
+  final pubCache =
+      Platform.environment['PUB_CACHE'] ??
+      '${Platform.environment['LOCALAPPDATA'] ?? ''}\\Pub\\Cache';
 
   final packages = <({String name, String root, String pubspec})>[];
   final decoded = jsonDecode(File(config).readAsStringSync()) as Map;
@@ -112,7 +115,9 @@ Future<void> main(List<String> arguments) async {
         symbol: pluginClass == null
             ? null
             : '${pluginClass}RegisterWithRegistrar',
-        key: '${_versionKey(package.name, package.root)}-$runnerVersion',
+        key:
+            '${_versionKey(package.name, package.root, pubCache)}'
+            '-$runnerVersion',
       ),
     );
   }
@@ -127,110 +132,125 @@ Future<void> main(List<String> arguments) async {
   Map<String, String>? toolchain;
   String? noToolchain;
   for (final plugin in wanted) {
-    final cached = Directory('$cache\\${plugin.key}');
-    var dlls = _dllsIn(cached);
-    if (dlls.isNotEmpty) {
-      fromCache.add(plugin.name);
-    } else {
-      if (toolchain == null && noToolchain == null) {
-        try {
-          toolchain = await _msvcEnvironment();
-        } on _NoToolchain catch (error) {
-          noToolchain = error.message;
+    // Whatever else goes wrong fails this plugin, not the install: the
+    // helper runs under set -e, and native assets build after (#141).
+    try {
+      final cached = Directory('$cache\\${plugin.key}');
+      var dlls = _dllsIn(cached);
+      if (dlls.isNotEmpty) {
+        fromCache.add(plugin.name);
+      } else {
+        if (toolchain == null && noToolchain == null) {
+          try {
+            toolchain = await _msvcEnvironment();
+          } on _NoToolchain catch (error) {
+            noToolchain = error.message;
+          }
         }
-      }
-      final environment = toolchain;
-      if (environment == null) {
-        failed.add('${plugin.name} ($noToolchain)');
-        status.add({
-          'name': plugin.name,
-          'state': 'failed',
-          'detail': '$noToolchain; native plugins need Visual Studio',
-        });
-        continue;
-      }
-      if (_keptFailure(cache, plugin, environment) case final why?) {
-        failed.add('${plugin.name} ($why)');
-        status.add({'name': plugin.name, 'state': 'failed', 'detail': why});
-        continue;
-      }
-      final project = Directory('$out\\build\\${plugin.name}')
-        ..createSync(recursive: true);
-      File('${project.path}\\CMakeLists.txt').writeAsStringSync(
-        '${_preamble(engine)}'
-        'add_subdirectory("${_cmakePath('${plugin.root}\\windows')}" "plugin")\n'
-        '# What the plugin bundles beside itself, for the runner to find.\n'
-        'file(WRITE "\${CMAKE_BINARY_DIR}/bundled.txt" '
-        '"\${${plugin.name}_bundled_libraries}")\n',
-      );
-      final log = File('${project.path}\\build.log');
-      // Visual Studio's own generator, CMake's default here, as the Flutter
-      // tool builds Windows apps: some plugins hand MSBuild a NuGet
-      // package's .targets file, which no other generator reads.
-      final ok =
-          await _run(environment, log, [
-            '-S',
-            project.path,
-            '-B',
-            '${project.path}\\out',
-            '-A',
-            'x64',
-          ]) &&
-          await _run(environment, log, [
-            '--build',
-            '${project.path}\\out',
-            '--config',
-            'Release',
-          ]);
-      if (!ok) {
-        final why = _keepFailure(
-          cache,
-          plugin,
-          environment,
-          'did not build; see ${log.path}',
-          log,
+        final environment = toolchain;
+        if (environment == null) {
+          failed.add('${plugin.name} ($noToolchain)');
+          status.add({
+            'name': plugin.name,
+            'state': 'failed',
+            'detail': '$noToolchain; native plugins need Visual Studio',
+          });
+          continue;
+        }
+        if (_keptFailure(cache, plugin, environment) case final why?) {
+          failed.add('${plugin.name} ($why)');
+          status.add({'name': plugin.name, 'state': 'failed', 'detail': why});
+          continue;
+        }
+        final project = Directory('$out\\build\\${plugin.name}')
+          ..createSync(recursive: true);
+        File('${project.path}\\CMakeLists.txt').writeAsStringSync(
+          '${_preamble(engine)}'
+          'add_subdirectory("${_cmakePath('${plugin.root}\\windows')}" "plugin")\n'
+          '# What the plugin bundles beside itself, for the runner to find.\n'
+          'file(WRITE "\${CMAKE_BINARY_DIR}/bundled.txt" '
+          '"\${${plugin.name}_bundled_libraries}")\n',
         );
-        failed.add('${plugin.name} (see ${log.path})');
-        status.add({'name': plugin.name, 'state': 'failed', 'detail': why});
-        continue;
+        final log = File('${project.path}\\build.log');
+        // Visual Studio's own generator, CMake's default here, as the Flutter
+        // tool builds Windows apps: some plugins hand MSBuild a NuGet
+        // package's .targets file, which no other generator reads.
+        final ok =
+            await _run(environment, log, [
+              '-S',
+              project.path,
+              '-B',
+              '${project.path}\\out',
+              '-A',
+              'x64',
+            ]) &&
+            await _run(environment, log, [
+              '--build',
+              '${project.path}\\out',
+              '--config',
+              'Release',
+            ]);
+        if (!ok) {
+          final why = _keepFailure(
+            cache,
+            plugin,
+            environment,
+            'did not build; see ${log.path}',
+            log,
+          );
+          failed.add('${plugin.name} (see ${log.path})');
+          status.add({'name': plugin.name, 'state': 'failed', 'detail': why});
+          continue;
+        }
+        final made = [
+          ..._dllsIn(Directory('${project.path}\\out\\plugin')),
+          ..._bundled(File('${project.path}\\out\\bundled.txt')),
+        ];
+        if (made.isEmpty) {
+          // Built fine and made nothing: an FFI plugin whose library wants
+          // a toolchain this machine has not.
+          empty.add(plugin.name);
+          status.add({
+            'name': plugin.name,
+            'state': 'built_nothing',
+            'detail': 'built and made no library',
+          });
+          continue;
+        }
+        // Staged aside and renamed into place, as on the other hosts
+        // (#136): an install that stops halfway leaves no entry, and two at
+        // once never share a half-copied one.
+        final staging = Directory('${cached.path}.partial-$pid')
+          ..createSync(recursive: true);
+        for (final dll in made) {
+          dll.copySync('${staging.path}\\${_basename(dll.path)}');
+        }
+        _settle(staging, cached);
+        dlls = _dllsIn(cached);
+        // A rename the system refused: the build's own.
+        if (dlls.isEmpty) dlls = made;
+        built.add(plugin.name);
       }
-      final made = [
-        ..._dllsIn(Directory('${project.path}\\out\\plugin')),
-        ..._bundled(File('${project.path}\\out\\bundled.txt')),
-      ];
-      if (made.isEmpty) {
-        // Built fine and made nothing: an FFI plugin whose library wants
-        // a toolchain this machine has not.
-        empty.add(plugin.name);
-        status.add({
-          'name': plugin.name,
-          'state': 'built_nothing',
-          'detail': 'built and made no library',
-        });
-        continue;
+      for (final dll in dlls) {
+        dll.copySync('${lib.path}\\${_basename(dll.path)}');
       }
-      cached.createSync(recursive: true);
-      for (final dll in made) {
-        dll.copySync('${cached.path}\\${_basename(dll.path)}');
-      }
-      dlls = _dllsIn(cached);
-      built.add(plugin.name);
+      final symbol = plugin.symbol;
+      if (symbol == null) continue;
+      // The plugin's own library is the one named after it.
+      final own = dlls.where(
+        (dll) =>
+            _basename(dll.path).toLowerCase() == '${plugin.name}_plugin.dll',
+      );
+      final main = own.isEmpty ? dlls.first : own.first;
+      entries.add({
+        'name': plugin.name,
+        'library': '${lib.path}\\${_basename(main.path)}',
+        'symbol': symbol,
+      });
+    } on Exception catch (error) {
+      failed.add('${plugin.name} ($error)');
+      status.add({'name': plugin.name, 'state': 'failed', 'detail': '$error'});
     }
-    for (final dll in dlls) {
-      dll.copySync('${lib.path}\\${_basename(dll.path)}');
-    }
-    final symbol = plugin.symbol;
-    if (symbol == null) continue;
-    // The plugin's own library is the one named after it.
-    final own = dlls.where(
-      (dll) => _basename(dll.path).toLowerCase() == '${plugin.name}_plugin.dll',
-    );
-    final main = own.isEmpty ? dlls.first : own.first;
-    entries.add({
-      'name': plugin.name,
-      'library': '${lib.path}\\${_basename(main.path)}',
-      'symbol': symbol,
-    });
   }
 
   File('$out\\manifest.json').writeAsStringSync(
@@ -376,29 +396,85 @@ String _windowsBlock(String pubspec) {
   return block.join('\n');
 }
 
-/// A hosted package is its directory name, name-version; a path package is
-/// the shape of its windows/ directory, so an edit rebuilds it.
-String _versionKey(String name, String root) {
-  final segments = root.split(RegExp(r'[\\/]'));
-  if (segments.contains('hosted'))
-    return segments.lastWhere((s) => s.isNotEmpty);
-  final windows = Directory('$root\\windows');
+/// Renames [staging] into place as [cached]; an install that finished the
+/// same entry first keeps its own.
+void _settle(Directory staging, Directory cached) {
+  try {
+    if (_dllsIn(cached).isEmpty) {
+      // Windows renames over nothing.
+      if (cached.existsSync()) cached.deleteSync(recursive: true);
+      staging.renameSync(cached.path);
+      return;
+    }
+  } on FileSystemException {
+    // Another install put its entry there between the two.
+  }
+  if (staging.existsSync()) staging.deleteSync(recursive: true);
+}
+
+/// A hosted package is its directory name, name-version. A git one is its
+/// place in pub's cache, which names the commit. A path package is the shape
+/// of its native side, so an edit rebuilds it: every file but its Dart code,
+/// tests, examples, build output and hidden folders, so the shared sources
+/// an FFI plugin builds (src/) count too, as on the other hosts (#121).
+String _versionKey(String name, String root, String pubCache) {
+  String folded(String path) => path
+      .replaceAll('/', '\\')
+      .toLowerCase()
+      .replaceFirst(RegExp(r'\\+$'), '');
+  var real = root;
+  try {
+    real = Directory(root).resolveSymbolicLinksSync();
+  } on FileSystemException {
+    // As written, then.
+  }
+  final place = folded(real);
+  final cache = folded(pubCache);
+  if (place.startsWith('$cache\\hosted\\')) {
+    return real.split(RegExp(r'[\\/]')).lastWhere((s) => s.isNotEmpty);
+  }
   final shape = StringBuffer();
-  final files = windows.listSync(recursive: true).whereType<File>().toList()
-    ..sort((a, b) => a.path.compareTo(b.path));
-  for (final file in files) {
-    final stat = file.statSync();
-    shape.writeln(
-      '${file.path.substring(root.length)} ${stat.size} '
-      '${stat.modified.millisecondsSinceEpoch ~/ 1000}',
-    );
+  if (place.startsWith('$cache\\')) {
+    shape.write(place.substring(cache.length));
+  } else {
+    void walk(Directory directory, bool top) {
+      final List<FileSystemEntity> found;
+      try {
+        found = directory.listSync(followLinks: false)
+          ..sort((a, b) => a.path.compareTo(b.path));
+      } on FileSystemException {
+        return;
+      }
+      for (final entry in found) {
+        final base = _basename(entry.path);
+        if (entry is Directory) {
+          if (base.startsWith('.') ||
+              (top &&
+                  const {'lib', 'test', 'example', 'build'}.contains(base)) ||
+              File('${entry.path}\\pubspec.yaml').existsSync()) {
+            continue;
+          }
+          walk(entry, false);
+        } else {
+          final stat = entry.statSync();
+          shape.writeln(
+            '${entry.path.substring(root.length)} ${stat.size} '
+            '${stat.modified.millisecondsSinceEpoch ~/ 1000}',
+          );
+        }
+      }
+    }
+
+    walk(Directory(root), true);
   }
   // FNV-1a, 64 bits: dart: has no hash of its own to offer here.
   var hash = 0xcbf29ce484222325;
   for (final unit in utf8.encode(shape.toString())) {
     hash = ((hash ^ unit) * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF;
   }
-  return '$name-path-${hash.toUnsigned(64).toRadixString(16).padLeft(16, '0')}';
+  final digest = hash.toUnsigned(64).toRadixString(16).padLeft(16, '0');
+  final kind = place.startsWith('$cache\\') ? 'git' : 'path';
+  return '$name-$kind-$digest';
 }
 
 /// What Flutter's Windows template gives a plugin: the root's UNICODE, the
@@ -443,28 +519,31 @@ Future<Map<String, String>> _msvcEnvironment() async {
   if (!File(vswhere).existsSync()) {
     throw const _NoToolchain('no Visual Studio');
   }
-  final found = await Process.run(vswhere, const [
-    '-latest',
-    '-products',
-    '*',
-    '-requires',
-    'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
-    '-property',
-    'installationPath',
-  ]);
+  final ProcessResult found;
+  try {
+    found = await Process.run(vswhere, const [
+      '-latest',
+      '-products',
+      '*',
+      '-requires',
+      'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+      '-property',
+      'installationPath',
+    ]);
+  } on ProcessException {
+    throw const _NoToolchain('vswhere failed');
+  }
   final install = '${found.stdout}'.trim();
   if (install.isEmpty) {
     throw const _NoToolchain('no Visual Studio with the C++ tools');
   }
   final vcvars = '$install\\VC\\Auxiliary\\Build\\vcvars64.bat';
-  final set = await Process.run('cmd', [
-    '/c',
-    'call',
-    vcvars,
-    '>nul',
-    '&&',
-    'set',
-  ]);
+  final ProcessResult set;
+  try {
+    set = await Process.run('cmd', ['/c', 'call', vcvars, '>nul', '&&', 'set']);
+  } on ProcessException {
+    throw const _NoToolchain('vcvars64.bat failed');
+  }
   if (set.exitCode != 0) throw const _NoToolchain('vcvars64.bat failed');
   final environment = <String, String>{};
   for (final line in const LineSplitter().convert('${set.stdout}')) {
@@ -475,22 +554,32 @@ Future<Map<String, String>> _msvcEnvironment() async {
       at + 1,
     );
   }
+  // Visual Studio without its CMake component, and none on the PATH: a
+  // toolchain missing, not a plugin failing.
+  if (_cmakeIn(environment) == null) {
+    throw const _NoToolchain('no CMake in Visual Studio or on the PATH');
+  }
   return environment;
 }
 
+/// cmake.exe on [environment]'s PATH. Windows looks a program up on this
+/// process's PATH, not the one it is given, so it is named by its path.
+String? _cmakeIn(Map<String, String> environment) {
+  for (final directory in (environment['PATH'] ?? '').split(';')) {
+    if (directory.isEmpty) continue;
+    final path = '$directory\\cmake.exe';
+    if (File(path).existsSync()) return path;
+  }
+  return null;
+}
+
 /// Runs Visual Studio's cmake with [arguments], its output into [log].
-/// Windows looks a program up on this process's PATH, not the one it is
-/// given, so cmake is named by its path in [environment].
 Future<bool> _run(
   Map<String, String> environment,
   File log,
   List<String> arguments,
 ) async {
-  final cmake = (environment['PATH'] ?? '')
-      .split(';')
-      .where((directory) => directory.isNotEmpty)
-      .map((directory) => '$directory\\cmake.exe')
-      .firstWhere((path) => File(path).existsSync(), orElse: () => 'cmake');
+  final cmake = _cmakeIn(environment) ?? 'cmake';
   final result = await Process.run(cmake, arguments, environment: environment);
   log.writeAsStringSync(
     '\$ cmake ${arguments.join(' ')}\n${result.stdout}${result.stderr}',

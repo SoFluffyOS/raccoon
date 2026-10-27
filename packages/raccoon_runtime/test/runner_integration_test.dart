@@ -1439,6 +1439,88 @@ void main() {
     },
     timeout: const Timeout(Duration(minutes: 8)),
   );
+  test(
+    'on Windows a plugin is cached whole, and rebuilt when its sources change',
+    () async {
+      // #141: the echo plugin, copied under a folder named hosted (which is
+      // not pub's cache), built by the Windows helper on its own.
+      final temp = Directory.systemTemp.createTempSync('raccoon_windows');
+      final root = p.join(temp.path, 'hosted', 'raccoon_echo');
+      final source = p.join(runnerDir, 'example', 'plugins', 'echo');
+      for (final file in Directory(source).listSync(recursive: true)) {
+        final relative = p.relative(file.path, from: source);
+        if (file is! File || relative.startsWith('.')) continue;
+        file.copySync(
+          (File(p.join(root, relative))
+            ..parent.createSync(recursive: true)).path,
+        );
+      }
+      final config =
+          File(p.join(temp.path, 'app', '.dart_tool', 'p.json'))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(
+              jsonEncode({
+                'configVersion': 2,
+                'packages': [
+                  {
+                    'name': 'raccoon_echo',
+                    'rootUri': Uri.directory(root).toString(),
+                  },
+                ],
+              }),
+            );
+      final cache = p.join(temp.path, 'cache');
+      final out = p.join(temp.path, 'out');
+      Future<String> build() async {
+        final result = await Process.run(
+          p.join(sdk!, 'bin', 'cache', 'dart-sdk', 'bin', 'dart.exe'),
+          [
+            p.join(runnerDir, 'tool', 'plugins_windows.dart'),
+            config.path,
+            out,
+            '',
+            cache,
+            '0.0.0-test',
+            p.join(sdk, 'bin', 'cache', 'artifacts', 'engine', 'windows-x64'),
+          ],
+        );
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        return '${result.stderr}';
+      }
+
+      try {
+        expect(await build(), contains('1 built: raccoon_echo'));
+        final manifest =
+            jsonDecode(File(p.join(out, 'manifest.json')).readAsStringSync())
+                as Map;
+        expect(
+          '${(manifest['plugins'] as List).single['library']}',
+          endsWith('raccoon_echo_plugin.dll'),
+        );
+        // One entry, renamed into place; nothing staged left behind.
+        final entries = Directory(cache)
+            .listSync()
+            .whereType<Directory>()
+            .map((entry) => p.basename(entry.path))
+            .where((name) => name != 'failed');
+        expect(entries, [startsWith('raccoon_echo-path-')]);
+        expect(await build(), contains('1 from the cache: raccoon_echo'));
+        // A source beside windows/, as an FFI plugin's src/.
+        File(p.join(root, 'src', 'shared.c'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('int shared(void) { return 1; }\n');
+        expect(await build(), contains('1 built: raccoon_echo'));
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((sdk != null, Platform.isWindows)) {
+      (false, _) => 'needs a Flutter SDK on PATH',
+      (_, false) => 'the Windows plugin helper',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 8)),
+  );
 
   test(
     'on macOS a ready-made framework in a plugin\'s pod lands beside it',
