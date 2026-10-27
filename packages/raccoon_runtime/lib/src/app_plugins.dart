@@ -39,6 +39,15 @@ final class AppPlugins {
   /// [app]'s setting: its own, else the host's [readDefault].
   NativePlugins read(String app) => _parse(_file(app)) ?? readDefault();
 
+  /// [app]'s own setting; null when it follows the host's default.
+  NativePlugins? readOwn(String app) => _parse(_file(app));
+
+  /// [app] follows the host's default again.
+  void clear(String app) {
+    final file = _file(app);
+    if (file.existsSync()) file.deleteSync();
+  }
+
   /// The host's setting for an app with none of its own:
   /// [NativePlugins.build] unless one was saved.
   NativePlugins readDefault() => _parse(_defaultFile) ?? NativePlugins.build;

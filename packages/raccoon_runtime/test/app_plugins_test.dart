@@ -34,5 +34,19 @@ void main() {
 
     file.writeAsStringSync('sometimes\n');
     expect(plugins.read('wonders'), NativePlugins.build);
+    expect(plugins.readOwn('wonders'), isNull);
+  });
+
+  test('an app that clears its own setting follows the default', () {
+    final temp = Directory.systemTemp.createTempSync('raccoon_plugins');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    final plugins =
+        AppPlugins(temp.path)
+          ..saveDefault(NativePlugins.cached)
+          ..save('wonders', NativePlugins.build);
+    expect(plugins.readOwn('wonders'), NativePlugins.build);
+    plugins.clear('wonders');
+    expect(plugins.readOwn('wonders'), isNull);
+    expect(plugins.read('wonders'), NativePlugins.cached);
   });
 }
