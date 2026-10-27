@@ -747,6 +747,7 @@ def clone(source, target):
     else:
         shutil.copy2(source, target)
 
+import concurrent.futures
 config, out, virtual, cache, runner_version, arch, engine_dir, prebuilt_url, project = sys.argv[1:10]
 # What an install that may only take the cache says of the rest (#214).
 SKIPPED = 'not built: native plugins are cached only (RACCOON_PLUGINS=cached)'
@@ -1455,6 +1456,24 @@ if misses:
                 broken[name] = 'pod install failed; see ' + kept
                 keep_failure(next(p for p in misses if p['name'] == name), broken[name], kept)
             podded = [p for p in podded if p['name'] not in culprits]
+    def xcodebuild(name):
+        with open(os.path.join(pods, name + '.log'), 'w') as log:
+            return subprocess.run(
+                ['xcodebuild', '-project', os.path.join(pods, 'Pods', 'Pods.xcodeproj'),
+                 '-target', name, '-configuration', 'Release',
+                 'ARCHS=' + arch, 'ONLY_ACTIVE_ARCH=YES',
+                 'SYMROOT=' + os.path.join(pods, 'out', name),
+                 'OBJROOT=' + os.path.join(pods, 'obj', name),
+                 'LD_RUNPATH_SEARCH_PATHS=@loader_path/../../..',
+                 'CODE_SIGNING_ALLOWED=NO', 'build'],
+                env=env, stdout=log, stderr=subprocess.STDOUT).returncode == 0
+
+    # Each target builds into roots of its own, so a few build at once: most
+    # of a target's ten seconds is xcodebuild starting, not the compiler.
+    targets = [] if toolchain is not None else [p['name'] for p in misses if p['name'] not in broken]
+    workers = max(1, min(4, (os.cpu_count() or 2) // 2))
+    with concurrent.futures.ThreadPoolExecutor(workers) as pool:
+        target_built = dict(zip(targets, pool.map(xcodebuild, targets)))
     for plugin in misses:
         name = plugin['name']
         if name in broken:
@@ -1465,16 +1484,7 @@ if misses:
         symroot = os.path.join(pods, 'out', name)
         objroot = os.path.join(pods, 'obj', name)
         build_log = os.path.join(pods, name + '.log')
-        with open(build_log, 'w') as log:
-            ok = subprocess.run(
-                ['xcodebuild', '-project', os.path.join(pods, 'Pods', 'Pods.xcodeproj'),
-                 '-target', name, '-configuration', 'Release',
-                 'ARCHS=' + arch, 'ONLY_ACTIVE_ARCH=YES',
-                 'SYMROOT=' + symroot, 'OBJROOT=' + objroot,
-                 'LD_RUNPATH_SEARCH_PATHS=@loader_path/../../..',
-                 'CODE_SIGNING_ALLOWED=NO', 'build'],
-                env=env, stdout=log, stderr=subprocess.STDOUT).returncode == 0
-        if not ok:
+        if not target_built[name]:
             broken[name] = 'did not build; see ' + build_log
             keep_failure(plugin, broken[name], build_log)
             drop(symroot, objroot)
