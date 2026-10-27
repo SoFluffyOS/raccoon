@@ -2,6 +2,7 @@
 @TestOn('!windows')
 library;
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -73,6 +74,24 @@ void main() {
         isA<List<String>>(),
       );
       await expectLater(vmService, throwsA(isA<RunnerExited>()));
+    },
+  );
+
+  test(
+    'a runner that times out is killed, though it ignores SIGTERM',
+    () async {
+      // #230: one stuck before it listens was sent SIGTERM once and left
+      // alive, to take the socket path from the next runner later.
+      final pidFile = p.join(temp.path, 'pid');
+      await expectLater(
+        RunnerProcess.start(
+          launchOf("trap '' TERM; echo \$\$ > '$pidFile'; exec sleep 30"),
+          timeout: const Duration(milliseconds: 500),
+        ),
+        throwsA(isA<TimeoutException>()),
+      );
+      final pid = File(pidFile).readAsStringSync().trim();
+      expect(Process.runSync('kill', ['-0', pid]).exitCode, isNot(0));
     },
   );
 }

@@ -161,6 +161,29 @@ void main() {
     await server.close();
     await subscription.cancel();
   });
+
+  test('a runner bound while the watch starts is seen at once', () async {
+    // #230: the directory was listed before the watch began, and Linux and
+    // Windows tell only of what changes after: a socket made in between
+    // stayed unseen until something else changed.
+    final dir = p.join(temp.path, 'raccoon');
+    final socket = p.join(dir, 'app.sock');
+    final discovery = RunnerDiscovery(
+      dir,
+      watcher: (_) {
+        Process.runSync('python3', [
+          '-c',
+          'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])',
+          socket,
+        ]);
+        return const Stream<FileSystemEvent>.empty();
+      },
+    );
+
+    final first = await discovery.watch().first;
+
+    expect(first.map((endpoint) => endpoint.path), [socket]);
+  }, testOn: '!windows');
 }
 
 /// Polls [condition] until it holds, failing after five seconds.

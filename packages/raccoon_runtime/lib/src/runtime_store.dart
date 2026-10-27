@@ -244,14 +244,17 @@ final class RuntimeStore {
       }
       _makeExecutable(library);
       // Another store may have installed it meanwhile, and a runner may
-      // already use it: a good install stays.
+      // already use it: a good install stays. Only one in the way that is
+      // not good (a crash's) is deleted, once moving in fails: deleting
+      // first could take another store's install, done in between (#230).
       if (installed(revision) case final runtime?) return runtime;
-      if (directory.existsSync()) directory.deleteSync(recursive: true);
       try {
-        staging.renameSync(directory.path);
+        await _moveIn(staging, directory.path);
       } on FileSystemException {
         if (installed(revision) case final runtime?) return runtime;
-        rethrow;
+        if (!directory.existsSync()) rethrow;
+        directory.deleteSync(recursive: true);
+        await _moveIn(staging, directory.path);
       }
     } finally {
       _deleteQuietly(staging);
@@ -278,6 +281,25 @@ final class RuntimeStore {
 
   /// A cleanup that fails leaves the folder; it never hides the error the
   /// install itself may be throwing.
+  /// Moves [staging] in as [target]. Windows refuses for a moment while
+  /// antivirus or the indexer holds a file just written: tried again there
+  /// for a few seconds, rather than download the engine again (#230).
+  static Future<void> _moveIn(Directory staging, String target) async {
+    for (var attempt = 0; ; attempt++) {
+      try {
+        staging.renameSync(target);
+        return;
+      } on FileSystemException {
+        if (!Platform.isWindows ||
+            attempt >= 30 ||
+            Directory(target).existsSync()) {
+          rethrow;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+    }
+  }
+
   static void _deleteQuietly(Directory directory) {
     try {
       if (directory.existsSync()) directory.deleteSync(recursive: true);

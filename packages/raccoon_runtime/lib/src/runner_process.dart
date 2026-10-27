@@ -130,8 +130,15 @@ final class RunnerProcess {
     final runner = RunnerProcess._(process, launch);
     await runner._listening.future.timeout(
       timeout,
-      onTimeout: () {
+      onTimeout: () async {
+        // One stuck before it listens doesn't heed SIGTERM yet; left alive,
+        // it would take the socket path from the next runner when it got
+        // unstuck (#230).
         runner.kill();
+        if (!await runner._exitsWithin(killGrace)) {
+          runner._process.kill(ProcessSignal.sigkill);
+          await runner._exitsWithin(killGrace);
+        }
         throw TimeoutException('runner did not start listening', timeout);
       },
     );
@@ -171,6 +178,13 @@ final class RunnerProcess {
   /// What rasterizes: `software`, `gl`, `metal` or `vulkan`, once the runner
   /// said; it says before it listens, so this is known after [start].
   String? get renderer => _renderer;
+
+  /// How long a runner that timed out gets to exit before it is killed.
+  static const killGrace = Duration(seconds: 2);
+
+  Future<bool> _exitsWithin(Duration grace) => _process.exitCode
+      .then((_) => true)
+      .timeout(grace, onTimeout: () => false);
 
   /// The runner's process id.
   int get pid => _process.pid;

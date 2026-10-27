@@ -88,23 +88,27 @@ final class RunnerDiscovery {
   };
 
   /// Every runner socket present right now, sorted by path.
-  List<UnixSocketEndpoint> list() {
-    final dir = Directory(directory);
-    if (!dir.existsSync()) return const [];
+  List<UnixSocketEndpoint> list() => [
+    for (final seen in _scan()) UnixSocketEndpoint(seen.path),
+  ];
+
+  /// The sockets with their stamps (see [_stampFrom]), one stat each: a
+  /// watch that polls does this twice a second.
+  List<_Seen> _scan() {
     final List<FileSystemEntity> entities;
     try {
-      entities = dir.listSync();
+      entities = Directory(directory).listSync();
     } on FileSystemException {
-      // Removed since it was checked: no runners there.
+      // Not there (yet, or any more): no runners there.
       return const [];
     }
-    final found = <UnixSocketEndpoint>[
-      for (final entity in entities)
-        if (entity.path.endsWith(socketSuffix) &&
-            FileSystemEntity.typeSync(entity.path) ==
-                FileSystemEntityType.unixDomainSock)
-          UnixSocketEndpoint(entity.path),
-    ];
+    final found = <_Seen>[];
+    for (final entity in entities) {
+      if (!entity.path.endsWith(socketSuffix)) continue;
+      final stat = FileStat.statSync(entity.path);
+      if (stat.type != FileSystemEntityType.unixDomainSock) continue;
+      found.add((path: entity.path, stamp: _stampFrom(stat)));
+    }
     found.sort((a, b) => a.path.compareTo(b.path));
     return found;
   }
@@ -120,14 +124,11 @@ final class RunnerDiscovery {
     List<_Seen>? last;
     late final StreamController<List<UnixSocketEndpoint>> controller;
     void emitIfChanged() {
-      final found = list();
-      final seen = [
-        for (final endpoint in found)
-          (path: endpoint.path, stamp: _stampOf(endpoint.path)),
-      ];
+      if (controller.isClosed) return;
+      final seen = _scan();
       if (last case final previous? when _sameRunners(previous, seen)) return;
       last = seen;
-      controller.add(found);
+      controller.add([for (final one in seen) UnixSocketEndpoint(one.path)]);
     }
 
     var cancelled = false;
@@ -151,8 +152,8 @@ final class RunnerDiscovery {
         if (cancelled || !identical(events, watching)) return;
         unawaited(watching.cancel());
         events = null;
-        emitIfChanged();
         if (dir.existsSync()) {
+          emitIfChanged();
           timer ??= Timer.periodic(
             fallbackPollInterval,
             (_) => emitIfChanged(),
@@ -160,6 +161,7 @@ final class RunnerDiscovery {
           return;
         }
         startWatching();
+        emitIfChanged();
       }
 
       final watch =
@@ -183,13 +185,16 @@ final class RunnerDiscovery {
 
     controller = StreamController(
       onListen: () {
-        emitIfChanged();
         switch (pollInterval) {
           case final interval?:
             timer = Timer.periodic(interval, (_) => emitIfChanged());
           case null:
             startWatching();
         }
+        // Listed once the watch is up: Linux and Windows tell only of what
+        // changes after, so a runner that bound in between was missed until
+        // something else changed (#230).
+        emitIfChanged();
       },
       onCancel: () {
         cancelled = true;
@@ -205,8 +210,7 @@ final class RunnerDiscovery {
   /// time as changed, and gives a file made again under a name just freed
   /// the old one's (file system tunnelling), so the modification time
   /// counts too.
-  static (int, int)? _stampOf(String path) {
-    final stat = FileStat.statSync(path);
+  static (int, int)? _stampFrom(FileStat stat) {
     return switch (stat.type) {
       FileSystemEntityType.notFound => null,
       _ => (
