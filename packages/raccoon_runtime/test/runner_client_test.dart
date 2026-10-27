@@ -160,6 +160,56 @@ void main() {
     expect(errors, hasLength(1));
   });
 
+  test('a message that does not parse reaches frames and messages once; '
+      'the other streams just end', () async {
+    // #227: listeners on text fields, plugins and GPU buffers rarely say
+    // what to do with an error, and the client's end is told on frames.
+    final frameErrors = <Object>[];
+    final uncaught = <Object>[];
+    final ended = <Future<void>>[];
+    runZonedGuarded(() {
+      client.frames.listen((_) {}, onError: frameErrors.add);
+      for (final stream in <Stream<Object>>[
+        client.textFields,
+        client.plugins,
+        client.gpuBufferSets,
+      ]) {
+        final done = Completer<void>();
+        stream.listen((_) {}, onDone: done.complete);
+        ended.add(done.future);
+      }
+    }, (error, _) => uncaught.add(error));
+    runner.raw([0xff, 0xff, 0xff, 0xff]);
+    await client.closed.timeout(const Duration(seconds: 5));
+    await Future.wait(ended).timeout(const Duration(seconds: 5));
+    expect(frameErrors, hasLength(1));
+    expect(uncaught, isEmpty);
+  });
+
+  test('what is sent while the runner reads slowly arrives whole and in '
+      'order', () async {
+    // #227: a backlog is written from its head, not joined again per write.
+    const count = 3000;
+    final ids = <int>[];
+    final all = runner.received
+        .where((m) => m.hasPlatformResponse())
+        .take(count)
+        .forEach((m) => ids.add(m.platformResponse.responseId.toInt()));
+    for (var i = 0; i < count; i++) {
+      client.send(
+        ClientMessage(
+          platformResponse: PlatformResponse(
+            responseId: Int64(i),
+            handled: true,
+            data: Uint8List(i % 500 == 0 ? 1 << 18 : 16),
+          ),
+        ),
+      );
+    }
+    await all.timeout(const Duration(seconds: 30));
+    expect(ids, List.generate(count, (i) => i));
+  });
+
   test('an app that died before its first frame is reported, with the '
       'plugin behind it', () async {
     final reports = <StartupFailure?>[];

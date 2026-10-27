@@ -6,6 +6,11 @@ abstract final class MessageFraming {
   /// Bytes in the length prefix.
   static const int prefixLength = 4;
 
+  /// The longest message a client takes: well past a frame's pixels at any
+  /// size a host shows, short of a length a corrupt prefix would give
+  /// (#227).
+  static const int maxLength = 512 * 1024 * 1024;
+
   /// Prepends the length prefix to [payload].
   static Uint8List frame(List<int> payload) {
     final out = Uint8List(prefixLength + payload.length);
@@ -22,7 +27,9 @@ final class MessageUnframer {
   final _chunks = <Uint8List>[];
   var _pendingLength = 0;
 
-  /// Feeds [chunk] and returns every complete payload it completed.
+  /// Feeds [chunk] and returns every complete payload it completed. Throws
+  /// a [FormatException] for a length past [MessageFraming.maxLength]: what
+  /// follows is not framed as the protocol frames it.
   List<Uint8List> add(List<int> chunk) {
     if (chunk.isEmpty) return const [];
     _chunks.add(chunk is Uint8List ? chunk : Uint8List.fromList(chunk));
@@ -30,6 +37,9 @@ final class MessageUnframer {
     final payloads = <Uint8List>[];
     while (true) {
       final length = _peekLength();
+      if (length != null && length > MessageFraming.maxLength) {
+        throw FormatException('a message of $length bytes is not the protocol');
+      }
       if (length == null ||
           _pendingLength < MessageFraming.prefixLength + length) {
         break;
@@ -57,8 +67,19 @@ final class MessageUnframer {
     return ByteData.sublistView(head).getUint32(0, Endian.little);
   }
 
-  /// Removes and returns the first [count] pending bytes as one buffer.
+  /// Removes and returns the first [count] pending bytes as one buffer: a
+  /// view of the first chunk when they are all in it, else joined.
   Uint8List _take(int count) {
+    final first = _chunks.first;
+    if (first.length >= count) {
+      if (first.length == count) {
+        _chunks.removeAt(0);
+      } else {
+        _chunks[0] = Uint8List.sublistView(first, count);
+      }
+      _pendingLength -= count;
+      return Uint8List.sublistView(first, 0, count);
+    }
     final out = Uint8List(count);
     var filled = 0;
     while (filled < count) {

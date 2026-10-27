@@ -141,7 +141,7 @@ final class RunnerClient
   @override
   Stream<GpuBuffers> get gpuBufferSets async* {
     if (_latestGpuBuffers case final set?) yield set;
-    yield* messages
+    yield* _withoutErrors
         .where((message) => message.hasGpuBuffers())
         .map((message) => message.gpuBuffers);
   }
@@ -182,8 +182,13 @@ final class RunnerClient
   var _takesViews = false;
   var _viewId = 0;
 
-  /// Every message the runner sends, after the connection was made.
+  /// Every message the runner sends, after the connection was made. What
+  /// ends the connection badly comes here, and to [frames], once each; the
+  /// other streams built on it just end (#227).
   Stream<RunnerMessage> get messages => _messages.stream;
+
+  Stream<RunnerMessage> get _withoutErrors =>
+      messages.handleError((Object _) {});
 
   /// The runner's hello, with its protocol version.
   Future<RunnerHello> get hello => _hello.future;
@@ -330,7 +335,7 @@ final class RunnerClient
   /// The latest word on the plugins first, then every change.
   Stream<Plugins> get plugins async* {
     if (_latestPlugins case final plugins?) yield plugins;
-    yield* messages
+    yield* _withoutErrors
         .where((message) => message.hasPlugins())
         .map((message) => message.plugins);
   }
@@ -338,7 +343,7 @@ final class RunnerClient
   @override
   Stream<TextField> get textFields async* {
     if (_latestTextField case final field?) yield field;
-    yield* messages
+    yield* _withoutErrors
         .where((message) => message.hasTextField())
         .map((message) => message.textField);
   }
@@ -398,7 +403,15 @@ final class RunnerClient
 
   void _onInbound(Inbound inbound) {
     _handles.addAll(inbound.handles);
-    for (final payload in _unframer.add(inbound.bytes)) {
+    final List<Uint8List> payloads;
+    try {
+      payloads = _unframer.add(inbound.bytes);
+    } on FormatException catch (error, stackTrace) {
+      if (!_closed.isCompleted) _messages.addError(error, stackTrace);
+      unawaited(close());
+      return;
+    }
+    for (final payload in payloads) {
       final RunnerMessage message;
       try {
         message = RunnerMessage.fromBuffer(payload);

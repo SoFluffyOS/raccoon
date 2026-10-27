@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -41,7 +42,11 @@ final class RunnerTransport {
   final bool receivesHandles;
 
   final _inbound = StreamController<Inbound>();
-  final _pending = BytesBuilder(copy: false);
+  // What the socket has not taken yet, written from the head: a runner that
+  // stops reading costs each write nothing more than its place in line
+  // (#227).
+  final _pending = ListQueue<Uint8List>();
+  var _head = 0;
   late final StreamSubscription<RawSocketEvent> _subscription;
   var _closed = false;
   var _runnerClosed = false;
@@ -55,9 +60,10 @@ final class RunnerTransport {
   /// Sends [bytes], queueing what the socket does not take yet until it
   /// drains; ignored once closing.
   void write(Uint8List bytes) {
-    if (_closed) return;
+    if (_closed || bytes.isEmpty) return;
     _pending.add(bytes);
-    _flush();
+    // Behind others, it waits for the socket to drain them.
+    if (_pending.length == 1) _flush();
   }
 
   /// Sends what is still queued first (a Shutdown written right before
@@ -89,18 +95,35 @@ final class RunnerTransport {
   }
 
   void _flush() {
-    if (_pending.isNotEmpty) {
-      final bytes = _pending.takeBytes();
-      final written = _socket.write(bytes);
-      if (written < bytes.length) {
-        _pending.add(Uint8List.sublistView(bytes, written));
+    while (_pending.isNotEmpty) {
+      final bytes = _pending.first;
+      final written = _socket.write(bytes, _head);
+      _head += written;
+      if (_head < bytes.length) {
         _socket.writeEventsEnabled = true;
         return;
       }
+      _pending.removeFirst();
+      _head = 0;
     }
+    _completeDrained();
+  }
+
+  void _completeDrained() {
     if (_drained case final drained? when !drained.isCompleted) {
       drained.complete();
     }
+  }
+
+  /// The runner is gone: nothing queued will be taken, and the transport
+  /// ends as on any hang-up.
+  void _gone() {
+    _runnerClosed = true;
+    if (_hungUp case final hungUp? when !hungUp.isCompleted) {
+      hungUp.complete();
+    }
+    _completeDrained();
+    unawaited(close());
   }
 
   void _onEvent(RawSocketEvent event) {
@@ -110,12 +133,13 @@ final class RunnerTransport {
       case RawSocketEvent.write:
         _flush();
       case RawSocketEvent.readClosed:
-      case RawSocketEvent.closed:
         _runnerClosed = true;
         if (_hungUp case final hungUp? when !hungUp.isCompleted) {
           hungUp.complete();
         }
         unawaited(close());
+      case RawSocketEvent.closed:
+        _gone();
     }
   }
 
@@ -134,7 +158,10 @@ final class RunnerTransport {
       return;
     }
     if (!receivesHandles) {
-      final bytes = _socket.read();
+      // As much as is there, in one buffer: a read with no count gathers
+      // it and copies it once more.
+      final available = _socket.available();
+      final bytes = _socket.read(available > 0 ? available : null);
       if (bytes != null) _inbound.add(Inbound(bytes, const []));
       return;
     }
@@ -151,15 +178,18 @@ final class RunnerTransport {
     // A write that fails (Broken pipe) is a runner that is gone, as when it
     // exits while a Shutdown or a pointer is on its way: it hung up, which
     // ends the transport as any hang-up does, and is nobody's error (#90).
-    if (error is SocketException && error.message.startsWith('Write failed')) {
-      _runnerClosed = true;
-      if (_hungUp case final hungUp? when !hungUp.isCompleted) {
-        hungUp.complete();
-      }
-      unawaited(close());
+    // So is a reset, which Linux and Windows give a read when the runner
+    // exits with what the host sent still unread (#227).
+    if (error is SocketException &&
+        (error.message.startsWith('Write failed') ||
+            _resets.contains(error.osError?.errorCode))) {
+      _gone();
       return;
     }
     _inbound.addError(error, stackTrace);
     unawaited(close());
   }
+
+  /// ECONNRESET on macOS and Linux, WSAECONNRESET on Windows.
+  static const _resets = {54, 104, 10054};
 }

@@ -26,6 +26,32 @@ void main() {
     ]);
   });
 
+  test('a message whole in one chunk is a view of it, not a copy', () {
+    // #227: a frame that arrives in one read costs no copy here.
+    final chunk = Uint8List.fromList([
+      ...MessageFraming.frame([1, 2, 3]),
+      ...MessageFraming.frame([4]),
+    ]);
+
+    final payloads = MessageUnframer().add(chunk);
+
+    expect(payloads, [
+      [1, 2, 3],
+      [4],
+    ]);
+    chunk[MessageFraming.prefixLength] = 9;
+    expect(payloads.first.first, 9);
+  });
+
+  test('a length past the most a message may be is an error', () {
+    final prefix = Uint8List(4);
+    ByteData.sublistView(
+      prefix,
+    ).setUint32(0, MessageFraming.maxLength + 1, Endian.little);
+
+    expect(() => MessageUnframer().add(prefix), throwsFormatException);
+  });
+
   test('unframer returns several messages from one chunk', () {
     final unframer = MessageUnframer();
     final chunk = [
