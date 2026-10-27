@@ -468,4 +468,29 @@ void main() {
     );
     await gesture.removePointer();
   });
+
+  testWidgets('touch turned off mid-press lifts the finger it left down', (
+    tester,
+  ) async {
+    // #213: it stayed down in the app, every later tap a second finger.
+    final connection = _FakeConnection();
+    Widget view(bool touch) =>
+        RaccoonView(connection: connection, pixelRatio: 1, touch: touch);
+    await tester.pumpWidget(view(true));
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: const Offset(10, 10));
+    await gesture.down(const Offset(10, 10));
+    await tester.pump();
+    final finger = connection.pointers.last.pointerId;
+    await tester.pumpWidget(view(false));
+    expect(
+      [
+        for (final event in connection.pointers.skip(1))
+          (event.phase.name, event.pointerId == finger),
+      ],
+      [('POINTER_PHASE_CANCEL', true), ('POINTER_PHASE_REMOVE', true)],
+    );
+    await gesture.up();
+    await gesture.removePointer();
+  });
 }

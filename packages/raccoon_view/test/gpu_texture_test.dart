@@ -567,6 +567,78 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('a view waiting on the ring leaves its buffers alone', (
+    tester,
+  ) async {
+    // #213: the holder gives them back; the waiter released them too.
+    final connection = _CountingConnection();
+    final textures = _FakeTextures(releases: true);
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Row(
+          children: [
+            for (var i = 0; i < 2; i++)
+              Expanded(
+                child: RaccoonView(
+                  connection: connection,
+                  gpuTextures: textures,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+    connection.sets.add(_set('/run/r.gpu'));
+    await tester.pump();
+    await tester.pump();
+    for (var index = 0; index < 3; index++) {
+      connection.frameController.add(
+        rc.Frame(
+          sequence: Int64(index + 1),
+          inGpuBuffer: true,
+          bufferIndex: index,
+          gpuGeneration: 1,
+        ),
+      );
+      await tester.pump();
+    }
+    expect(connection.released, isEmpty);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a second view that cannot ask for pixels takes the ring later', (
+    tester,
+  ) async {
+    // #213: it waited for nothing and stayed blank.
+    final connection = _GpuConnection();
+    final textures = _FakeTextures(releases: true);
+    Widget views(List<String> keys) => Directionality(
+      textDirection: TextDirection.ltr,
+      child: Row(
+        children: [
+          for (final key in keys)
+            Expanded(
+              key: ValueKey(key),
+              child: RaccoonView(connection: connection, gpuTextures: textures),
+            ),
+        ],
+      ),
+    );
+    await tester.pumpWidget(views(['pane', 'board']));
+    connection.sets.add(_set('/run/r.gpu'));
+    await tester.pump();
+    await tester.pump();
+    expect(textures.calls.where((call) => call == 'create'), hasLength(1));
+    await tester.pumpWidget(views(['board']));
+    await tester.pump();
+    connection.sets.add(_set('/run/r.gpu'));
+    await tester.pump();
+    await tester.pump();
+    expect(textures.calls.where((call) => call == 'create'), hasLength(2));
+    await tester.pumpWidget(const SizedBox());
+  });
+
   // #143: a quiet ring was given up before the pixel frame decoded, and a
   // frame that failed left the view on stale content.
   testWidgets('the texture stays until a pixel frame has taken its place', (

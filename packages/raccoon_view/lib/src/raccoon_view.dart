@@ -133,6 +133,10 @@ class _RaccoonViewState extends State<RaccoonView> {
   @override
   void didUpdateWidget(RaccoonView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.touch != widget.touch ||
+        oldWidget.connection != widget.connection) {
+      _liftFingers(oldWidget.connection);
+    }
     if (oldWidget.connection == widget.connection) return;
     unawaited(_frames?.cancel());
     _unsubscribeText();
@@ -149,6 +153,7 @@ class _RaccoonViewState extends State<RaccoonView> {
   @override
   void dispose() {
     _releaseKeys();
+    _liftFingers(widget.connection);
     unawaited(_frames?.cancel());
     _unsubscribeText();
     _unsubscribeGpu(widget.connection);
@@ -195,10 +200,12 @@ class _RaccoonViewState extends State<RaccoonView> {
     // too (#205).
     if (_ringHolders[connection] case final holder?
         when !identical(holder, this)) {
+      // Waits for the ring either way; one that can't ask for pixels shows
+      // nothing meanwhile (#213).
+      (_ringWaiters[connection] ??= []).add(this);
       if (connection case final CaptureConnection capture) {
         capture.wantPixels(true);
         _askedPixels = true;
-        (_ringWaiters[connection] ??= []).add(this);
       }
       return;
     }
@@ -259,7 +266,6 @@ class _RaccoonViewState extends State<RaccoonView> {
       connection.wantPixels(false);
     }
     _askedPixels = false;
-    if (heldRing) _passRing(connection);
     _gpuGeneration++;
     unawaited(_gpuSets?.cancel());
     _gpuSets = null;
@@ -276,16 +282,34 @@ class _RaccoonViewState extends State<RaccoonView> {
     _shown = null;
     _lastGpuFrame = null;
     _hostReleases = false;
-    if (_textureId case final id?) unawaited(_gpu?.dispose(id));
+    final disposing = switch (_textureId) {
+      final id? => _gpu?.dispose(id),
+      null => null,
+    };
     _textureId = null;
     _creatingTexture = false;
     _gpu = null;
     _gpuLive = false;
+    if (!heldRing) return;
+    // The ring goes on once the texture let go of the runner's GPU
+    // socket, which takes one connection at a time (#213).
+    if (disposing == null) {
+      _passRing(connection);
+      return;
+    }
+    unawaited(
+      disposing.then(
+        (_) => _passRing(connection),
+        onError: (Object _) => _passRing(connection),
+      ),
+    );
   }
 
   /// The ring [connection]'s holder let go of goes to the first view still
   /// waiting on it, which drops its ask for pixels (#206).
   static void _passRing(RunnerConnection connection) {
+    // A view that came meanwhile took it.
+    if (_ringHolders[connection] != null) return;
     final waiters = _ringWaiters[connection];
     while (waiters != null && waiters.isNotEmpty) {
       final next = waiters.removeAt(0);
@@ -336,6 +360,11 @@ class _RaccoonViewState extends State<RaccoonView> {
 
   void _onFrame(rc.Frame frame) {
     if (frame.inGpuBuffer) {
+      // Another view holds the ring and gives its buffers back (#213).
+      if (_ringHolders[widget.connection] case final holder?
+          when !identical(holder, this)) {
+        return;
+      }
       _lastGpuFrame = DateTime.now();
       unawaited(_showGpuFrame(frame));
       return;
@@ -446,6 +475,30 @@ class _RaccoonViewState extends State<RaccoonView> {
   /// view's center, when Option was held (#208); null otherwise.
   int? _mirrored;
 
+  /// The touch pointers down in the app, by id: lifted when touch input or
+  /// the connection changes under them (#213).
+  final _fingers = <int>{};
+
+  /// Cancels and removes every finger still down on [connection].
+  void _liftFingers(RunnerConnection connection) {
+    for (final pointer in _fingers) {
+      for (final phase in [
+        rc.PointerPhase.POINTER_PHASE_CANCEL,
+        rc.PointerPhase.POINTER_PHASE_REMOVE,
+      ]) {
+        connection.sendPointer(
+          rc.PointerEvent(
+            phase: phase,
+            device: rc.PointerDevice.POINTER_DEVICE_TOUCH,
+            pointerId: pointer,
+          ),
+        );
+      }
+    }
+    _fingers.clear();
+    _mirrored = null;
+  }
+
   void _onPointer(PointerEvent event) {
     // A click into the app is a click into the app: the keys follow it.
     if (event is PointerDownEvent && !_focus.hasFocus) _focus.requestFocus();
@@ -475,6 +528,17 @@ class _RaccoonViewState extends State<RaccoonView> {
     ];
     for (final sent in events) {
       widget.connection.sendPointer(sent);
+      if (sent.device == rc.PointerDevice.POINTER_DEVICE_TOUCH) {
+        switch (sent.phase) {
+          case rc.PointerPhase.POINTER_PHASE_DOWN:
+            _fingers.add(sent.pointerId);
+          case rc.PointerPhase.POINTER_PHASE_UP ||
+              rc.PointerPhase.POINTER_PHASE_CANCEL:
+            _fingers.remove(sent.pointerId);
+          default:
+            break;
+        }
+      }
       // A finger lifted is gone, as a touchscreen says: each press is a
       // pointer of its own, and the engine would keep every one (#207).
       if (lifted && sent.device == rc.PointerDevice.POINTER_DEVICE_TOUCH) {
