@@ -14,10 +14,13 @@ permissions:
   contents: write
 
 env:
-  FLUTTER_VERSION: 3.47.7
-  # Other Flutter versions people are on, each its own engine: on macOS the
-  # common plugins are prebuilt for these too, an archive each (#211).
-  MORE_FLUTTER_VERSIONS: "3.47.8 3.44.9"
+  # The latest patch of the newest minor version: the runner builds and
+  # tests on it, and the common plugins are prebuilt for its engine.
+  FLUTTER_VERSION: 3.47.8
+  # The latest patch of each older minor version people are on, each its
+  # own engine: on macOS the common plugins are prebuilt for these too, an
+  # archive each (#211). Never an older patch of a listed minor.
+  MORE_FLUTTER_VERSIONS: "3.44.9"
   PROTOC_VERSION: "21.12"
 
 jobs:
