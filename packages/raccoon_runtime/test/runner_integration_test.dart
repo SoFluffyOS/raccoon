@@ -1488,10 +1488,16 @@ void main() {
         return '${result.stderr}';
       }
 
-      // A build that failed says why in its log.
+      // A build that failed says why in its log, and CMake's own.
       String log() {
-        final file = File(p.join(out, 'build', 'raccoon_echo', 'build.log'));
-        return file.existsSync() ? file.readAsStringSync() : '';
+        final build = p.join(out, 'build', 'raccoon_echo');
+        return [
+          for (final path in [
+            p.join(build, 'build.log'),
+            p.join(build, 'out', 'CMakeFiles', 'CMakeConfigureLog.yaml'),
+          ])
+            if (File(path).existsSync()) File(path).readAsStringSync(),
+        ].join('\n');
       }
 
       try {
