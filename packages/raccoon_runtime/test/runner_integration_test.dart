@@ -1488,8 +1488,14 @@ void main() {
         return '${result.stderr}';
       }
 
+      // A build that failed says why in its log.
+      String log() {
+        final file = File(p.join(out, 'build', 'raccoon_echo', 'build.log'));
+        return file.existsSync() ? file.readAsStringSync() : '';
+      }
+
       try {
-        expect(await build(), contains('1 built: raccoon_echo'));
+        expect(await build(), contains('1 built: raccoon_echo'), reason: log());
         final manifest =
             jsonDecode(File(p.join(out, 'manifest.json')).readAsStringSync())
                 as Map;
@@ -1509,7 +1515,7 @@ void main() {
         File(p.join(root, 'src', 'shared.c'))
           ..createSync(recursive: true)
           ..writeAsStringSync('int shared(void) { return 1; }\n');
-        expect(await build(), contains('1 built: raccoon_echo'));
+        expect(await build(), contains('1 built: raccoon_echo'), reason: log());
       } finally {
         temp.deleteSync(recursive: true);
       }
