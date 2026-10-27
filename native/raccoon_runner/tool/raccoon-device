@@ -135,8 +135,9 @@ package_config() {
 # process has a main bundle and an identifier, dev.raccoon.app.<key>. Some
 # plugins' APIs throw without one (UserNotifications, at registration), and
 # what they keep by identifier stays the app's (path_provider's directories
-# are named after it). For an app with native plugins or native assets.
-# Prints the path to run.
+# are named after it). Firebase's Apple SDKs read GoogleService-Info.plist
+# from its resources, as from an app's. For an app with native plugins or
+# native assets. Prints the path to run.
 app_bundle() {
   local key="$1" bundle id version="" versions=""
   bundle="$APPS/$key/$key.app/Contents"
@@ -148,8 +149,12 @@ app_bundle() {
   <key>CFBundleVersion</key><string>${version#*+}</string>"
   fi
   id="dev.raccoon.app.$(printf '%s' "$key" | tr -c 'A-Za-z0-9.\n' '-')"
-  mkdir -p "$bundle/MacOS"
+  mkdir -p "$bundle/MacOS" "$bundle/Resources"
   ln -sfn "$RUNNER" "$bundle/MacOS/raccoon_runner"
+  rm -f "$bundle/Resources/GoogleService-Info.plist"
+  if [ -f "$APPS/$key/GoogleService-Info.plist" ]; then
+    cp "$APPS/$key/GoogleService-Info.plist" "$bundle/Resources/"
+  fi
   cat > "$bundle/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -1874,6 +1879,17 @@ case "$verb" in
     # built for this host and loaded into the runner.
     project="$(cd "$local_path/../.." && pwd)"
     pubspec_version "$project" > "$APPS/$key/version"
+    # The project's Firebase config for Apple hosts, where its Runner keeps
+    # it: the macOS one, else the iOS one. The app's bundle carries it.
+    if [ "$(uname -s)" = Darwin ]; then
+      for plist in "$project/macos/Runner/GoogleService-Info.plist" \
+        "$project/ios/Runner/GoogleService-Info.plist"; do
+        [ -f "$plist" ] || continue
+        cp "$plist" "$APPS/$key/GoogleService-Info.plist"
+        echo "🦝 Firebase config from ${plist#"$project"/}" >&2
+        break
+      done
+    fi
     # A workspace member's config is written into build/raccoon.
     [ -f "$project/.dart_tool/package_config.json" ] || lock_build "$project"
     # Worked out once: for a pub workspace member it runs package_scope.

@@ -485,11 +485,25 @@ void main() {
         'TMPDIR': '${temp.path}/',
       };
       final hadLinux = Directory(p.join(nativeAssetsApp, 'linux')).existsSync();
-      final install = await Process.run(helper, [
-        'install',
-        nativeAssetsBundle,
-        'native_assets_app',
-      ], environment: helperEnvironment);
+      // An iOS Runner's Firebase config, which the app's bundle carries on
+      // macOS.
+      final ios = Directory(p.join(nativeAssetsApp, 'ios'));
+      final hadIos = ios.existsSync();
+      if (!hadIos) {
+        File(p.join(ios.path, 'Runner', 'GoogleService-Info.plist'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('<plist><dict/></plist>');
+      }
+      final ProcessResult install;
+      try {
+        install = await Process.run(helper, [
+          'install',
+          nativeAssetsBundle,
+          'native_assets_app',
+        ], environment: helperEnvironment);
+      } finally {
+        if (!hadIos) ios.deleteSync(recursive: true);
+      }
       expect(install.exitCode, 0, reason: '${install.stderr}');
       expect('${install.stderr}', contains('1 for this host'));
       // The Linux target's engine copy goes again.
@@ -559,6 +573,23 @@ void main() {
             plist,
             contains('<key>CFBundleVersion</key><string>4</string>'),
           );
+          if (!hadIos) {
+            expect(
+              File(
+                p.join(
+                  data,
+                  'raccoon',
+                  'apps',
+                  'native_assets_app',
+                  'native_assets_app.app',
+                  'Contents',
+                  'Resources',
+                  'GoogleService-Info.plist',
+                ),
+              ).existsSync(),
+              isTrue,
+            );
+          }
         }
       } finally {
         run.kill();
