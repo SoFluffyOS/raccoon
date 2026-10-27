@@ -136,6 +136,29 @@ void main() {
     },
   );
 
+  test('picks the highest version, not the latest published', () async {
+    server
+      ..addRelease('runner-v0.3.1', platforms: ['linux-x64'])
+      ..addRelease('runner-v0.3.2', platforms: ['linux-x64'])
+      ..addRelease('runner-v0.3.0', platforms: ['linux-x64']);
+
+    final release = await downloader.find(pinned);
+
+    expect(release?.version, RunnerVersion.parse('0.3.2'));
+  });
+
+  test('a release pin takes no prerelease', () async {
+    server
+      ..addRelease('runner-v0.3.2-pre.1', platforms: ['linux-x64'])
+      ..addRelease('runner-v0.3.1', platforms: ['linux-x64']);
+    final stable = RunnerVersion.parse('0.3.0') ?? pinned;
+
+    expect(
+      (await downloader.find(stable))?.version,
+      RunnerVersion.parse('0.3.1'),
+    );
+  });
+
   test('skips the protocol package\'s own v tags', () async {
     server
       // The protocol package's release carries runner-like assets here on
@@ -197,6 +220,30 @@ void main() {
     expect(ran.stdout, 'raccoon_runner 0.3.1\n');
     final ping = await _runScript(prebuilt.deviceHelper);
     expect(ping.stdout, 'ping\n');
+  });
+
+  test('deletes a runner an earlier install moved aside', () async {
+    server.addRelease(
+      'runner-v0.3.1',
+      platforms: ['linux-x64'],
+      archive: fakeRunnerArchive(version: '0.3.1'),
+    );
+    final aside = Directory('${prebuilt.directory}.old-1-2')
+      ..createSync(recursive: true);
+    File(p.join(aside.path, 'held')).writeAsStringSync('old');
+    Directory(prebuilt.directory).createSync(recursive: true);
+    final release =
+        await downloader.find(pinned) ?? (throw StateError('no release'));
+
+    await downloader.install(release, prebuilt);
+
+    expect(File(prebuilt.binary).existsSync(), isTrue);
+    expect(
+      Directory(
+        p.dirname(prebuilt.directory),
+      ).listSync().map((entry) => p.basename(entry.path)),
+      ['runner'],
+    );
   });
 
   test('leaves an entry that would escape the directory out', () async {

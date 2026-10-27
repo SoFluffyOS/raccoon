@@ -194,6 +194,16 @@ uint32_t ThisProcessId() { return GetCurrentProcessId(); }
 // launcher, the launcher the shell, and a forked copy of the shell waits
 // on the runner; the tool stops a run by killing the launcher, which none
 // of the others notice, and the shell has no pid of the tool to pass on.
+// When the process |pid| started, or false when this one may not ask.
+bool StartOf(uint32_t pid, FILETIME* start) {
+  const HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+  if (handle == nullptr) return false;
+  FILETIME exit, kernel, user;
+  const bool known = GetProcessTimes(handle, start, &exit, &kernel, &user) != 0;
+  CloseHandle(handle);
+  return known;
+}
+
 std::vector<uint32_t> AncestorsToWatch() {
   struct Entry {
     uint32_t parent;
@@ -213,12 +223,23 @@ std::vector<uint32_t> AncestorsToWatch() {
   CloseHandle(snapshot);
   std::vector<uint32_t> ancestors;
   uint32_t pid = GetCurrentProcessId();
+  FILETIME child_start;
+  bool child_known = StartOf(pid, &child_start);
   // A bound, in case a reused pid makes a loop of the table.
   for (int depth = 0; depth < 16; ++depth) {
     const auto found = table.find(pid);
     if (found == table.end() || found->second.parent == 0) break;
     pid = found->second.parent;
+    // A parent that started after its child is a pid handed out again
+    // after the parent's exit, maybe before this runner started (#221).
+    FILETIME start;
+    const bool known = StartOf(pid, &start);
+    if (known && child_known && CompareFileTime(&start, &child_start) > 0) break;
     ancestors.push_back(pid);
+    // One that may not be asked is watched, but not walked past.
+    if (!known) break;
+    child_start = start;
+    child_known = true;
     const auto parent = table.find(pid);
     if (parent == table.end() ||
         (parent->second.exe != "bash.exe" && parent->second.exe != "sh.exe")) {

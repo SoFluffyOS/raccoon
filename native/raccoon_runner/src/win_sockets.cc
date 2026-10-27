@@ -56,6 +56,22 @@ int AcceptSocket(int listen_fd) {
 
 namespace {
 
+// Whether |server|, just accepted, is |client|'s other end: on the
+// loopback any local process may connect first.
+bool SamePair(int server, int client) {
+  sockaddr_storage peer{}, ours{};
+  int peer_length = sizeof(peer), ours_length = sizeof(ours);
+  return getpeername(AsSocket(server), reinterpret_cast<sockaddr*>(&peer), &peer_length) == 0 &&
+         getsockname(AsSocket(client), reinterpret_cast<sockaddr*>(&ours), &ours_length) == 0 &&
+         peer_length == ours_length && std::memcmp(&peer, &ours, peer_length) == 0;
+}
+
+bool NoDelay(int fd) {
+  const BOOL on = TRUE;
+  return setsockopt(AsSocket(fd), IPPROTO_TCP, TCP_NODELAY,
+                    reinterpret_cast<const char*>(&on), sizeof(on)) == 0;
+}
+
 // A connected pair through a listener at |address|: the listener goes once
 // its one connection is accepted.
 bool ConnectedPair(int family, sockaddr* address, int length, int fds[2]) {
@@ -73,8 +89,22 @@ bool ConnectedPair(int family, sockaddr* address, int length, int fds[2]) {
         WSAGetLastError() != WSAEWOULDBLOCK) {
       ok = false;
     }
-    WSAPOLLFD ready{AsSocket(listener), POLLRDNORM, 0};
-    if (ok && WSAPoll(&ready, 1, 5000) == 1) server = AcceptSocket(listener);
+    // A few tries, for a stranger's connection that came first.
+    for (int tries = 0; ok && server < 0 && tries < 4; ++tries) {
+      WSAPOLLFD ready{AsSocket(listener), POLLRDNORM, 0};
+      if (WSAPoll(&ready, 1, 5000) != 1) break;
+      server = AcceptSocket(listener);
+      if (server >= 0 && family == AF_INET && !SamePair(server, client)) {
+        CloseSocket(server);
+        server = -1;
+      }
+    }
+    // A wake is one byte: Nagle would hold the next back until the first
+    // is acknowledged, up to 200 ms later.
+    if (server >= 0 && family == AF_INET && (!NoDelay(server) || !NoDelay(client))) {
+      CloseSocket(server);
+      server = -1;
+    }
   }
   CloseSocket(listener);
   if (client < 0 || server < 0) {

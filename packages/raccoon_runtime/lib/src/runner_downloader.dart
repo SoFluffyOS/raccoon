@@ -125,9 +125,10 @@ final class RunnerDownloader {
   /// The archives' platform name this downloader serves, see [platformFor].
   final String platform;
 
-  /// The newest release compatible with [version], and no older than it,
-  /// that has an archive for [platform], or null when there is none. Throws [DownloadFailed] when
-  /// the list cannot be fetched or read.
+  /// The highest release compatible with [version], and no older than it,
+  /// that has an archive for [platform], or null when there is none. A
+  /// release [version] takes releases only; a prerelease takes either.
+  /// Throws [DownloadFailed] when the list cannot be fetched or read.
   Future<RunnerRelease?> find(RunnerVersion version) async {
     final body = await _get(releases, accept: 'application/vnd.github+json');
     final Object? decoded;
@@ -139,6 +140,9 @@ final class RunnerDownloader {
     if (decoded is! List) {
       throw DownloadFailed('$releases did not answer with a list of releases');
     }
+    // GitHub lists releases by when they were made, so a patch published
+    // after a newer one comes first.
+    RunnerRelease? best;
     for (final entry in decoded) {
       if (entry is! Map || entry['draft'] == true) continue;
       final tag = entry['tag_name'];
@@ -146,15 +150,19 @@ final class RunnerDownloader {
       final candidate = RunnerVersion.parse(tag);
       if (candidate == null || !candidate.isCompatibleWith(version)) continue;
       if (candidate.isOlderThan(version)) continue;
+      if (version.prerelease.isEmpty && candidate.prerelease.isNotEmpty) {
+        continue;
+      }
+      if (best != null && !best.version.isOlderThan(candidate)) continue;
       final url = _assetUrl(entry['assets'], assetName(candidate, platform));
       if (url == null) continue;
-      return RunnerRelease(
+      best = RunnerRelease(
         version: candidate,
         asset: Uri.parse(url),
         prerelease: entry['prerelease'] == true,
       );
     }
-    return null;
+    return best;
   }
 
   /// Downloads [release]'s archive and unpacks it into [into], replacing
@@ -167,8 +175,57 @@ final class RunnerDownloader {
     // the window, so it runs on its own isolate.
     final binary = p.basename(into.binary);
     await Isolate.run(() => _unpack(bytes, release.asset, staging, binary));
-    if (directory.existsSync()) directory.deleteSync(recursive: true);
-    Directory(staging).renameSync(directory.path);
+    // The old runner moves aside whole before the new one moves in, and
+    // comes back if that fails: a file held open (a running runner, on
+    // Windows) stops the move, not a delete halfway through.
+    _deleteAsides(directory);
+    final aside = Directory(
+      '${directory.path}.old-$pid-${DateTime.now().microsecondsSinceEpoch}',
+    );
+    if (directory.existsSync()) {
+      try {
+        directory.renameSync(aside.path);
+      } on FileSystemException catch (error) {
+        _deleteIfAny(Directory(staging));
+        throw DownloadFailed(
+          'cannot replace the runner in ${directory.path}, is it running? '
+          '${error.osError?.message ?? error.message}',
+        );
+      }
+    }
+    try {
+      Directory(staging).renameSync(directory.path);
+    } on FileSystemException catch (error) {
+      if (aside.existsSync()) aside.renameSync(directory.path);
+      throw DownloadFailed(
+        'cannot move the runner into ${directory.path}: '
+        '${error.osError?.message ?? error.message}',
+      );
+    }
+    _deleteIfAny(aside);
+  }
+
+  /// Deletes the runners earlier installs moved aside next to [directory]
+  /// and could not delete then.
+  static void _deleteAsides(Directory directory) {
+    final parent = directory.parent;
+    if (!parent.existsSync()) return;
+    final prefix = '${p.basename(directory.path)}.old-';
+    for (final entry in parent.listSync(followLinks: false)) {
+      if (entry is Directory && p.basename(entry.path).startsWith(prefix)) {
+        _deleteIfAny(entry);
+      }
+    }
+  }
+
+  /// Deletes [directory] if it is there; one a held file keeps is left for
+  /// the next install.
+  static void _deleteIfAny(Directory directory) {
+    try {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    } on FileSystemException {
+      return;
+    }
   }
 
   /// Unpacks the tar.gz [bytes] into [staging], afresh; the files keep
