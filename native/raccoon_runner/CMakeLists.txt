@@ -186,6 +186,13 @@ if(WIN32)
   # Foundation; and the tool the tests make a video with.
   target_sources(raccoon_runner PRIVATE src/camera_video_win.cc src/camera_recorder_win.cc)
   target_link_libraries(raccoon_runner PRIVATE mfplat mfreadwrite mfuuid ole32)
+  # Loaded when first called, not at start: most runs never touch them, and
+  # an N edition has no Media Foundation (#224).
+  if(MSVC)
+    target_link_options(raccoon_runner PRIVATE
+      /DELAYLOAD:mfplat.dll /DELAYLOAD:mfreadwrite.dll)
+    target_link_libraries(raccoon_runner PRIVATE delayimp)
+  endif()
   add_executable(raccoon_test_video test/make_test_video.cc)
   target_compile_definitions(raccoon_test_video PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
   target_link_libraries(raccoon_test_video PRIVATE mfplat mfreadwrite mfuuid ole32)
@@ -259,6 +266,10 @@ elseif(WIN32)
   target_sources(raccoon_runner PRIVATE src/vulkan_renderer.cc)
   target_compile_definitions(raccoon_runner PRIVATE RACCOON_HAS_VULKAN=1)
   target_link_libraries(raccoon_runner PRIVATE Vulkan::Headers d3d11 dxgi)
+  # D3D11 only for a client that imports shared textures (#224).
+  if(MSVC)
+    target_link_options(raccoon_runner PRIVATE /DELAYLOAD:d3d11.dll)
+  endif()
   message(STATUS "GPU renderer: on (Vulkan; shared D3D11 textures for a client that imports them)")
   # A GPU socket client that opens the ring's textures by their shared
   # handles and checks the frame in them; the tests run it.

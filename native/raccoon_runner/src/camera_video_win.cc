@@ -12,6 +12,7 @@
 #include <filesystem>
 
 #include "camera_source.h"
+#include "media_foundation_win.h"
 
 namespace raccoon {
 
@@ -38,7 +39,7 @@ class VideoSource : public CameraSource {
   bool Open(const std::string& path, std::string* error) {
     // The loop thread may already be in an apartment; either kind serves.
     com_ = SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
-    if (FAILED(MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET))) {
+    if (!MediaFoundationPresent() || FAILED(MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET))) {
       *error = "Media Foundation is not available";
       return false;
     }

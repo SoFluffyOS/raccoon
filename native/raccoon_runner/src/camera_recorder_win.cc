@@ -12,6 +12,7 @@
 #include <filesystem>
 
 #include "camera_recorder.h"
+#include "media_foundation_win.h"
 
 namespace raccoon {
 
@@ -49,7 +50,7 @@ class MediaFoundationRecorder : public CameraRecorder {
     height_ = height;
     frame_time_ = 10000000 / fps;
     com_ = SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
-    if (FAILED(MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET))) {
+    if (!MediaFoundationPresent() || FAILED(MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET))) {
       *error = "Media Foundation is not available";
       return false;
     }
