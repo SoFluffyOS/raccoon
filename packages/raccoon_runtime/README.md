@@ -59,6 +59,19 @@ ratio, `raccoon-phone` (390×844 @3x), `raccoon-tablet` (820×1180 @2x) and
 `raccoon-desktop` (1280×800 @1x). `raccoon_device remove <name>` takes one
 away.
 
+A machine with no checkout is set up from a release: `RunnerDownloader`
+finds the newest `runner-v*` release that goes with `RunnerVersion.current`
+and unpacks it into a `PrebuiltRunner`'s folder, whose `deviceHelper` the
+`raccoon` entry then names (`CustomDevicesFile.upsert`); `RuntimeStore`
+fetches the engine for the SDK, and `FlutterSettings` says whether the tool
+lists custom devices at all (`flutter config --enable-custom-devices`).
+Both of the tool's files are found where the tool itself keeps them
+(`flutterConfigPath`).
+
+What an install does with an app's native plugins (`RACCOON_PLUGINS`:
+build them, take only what is cached, or none) is saved per app, or as the
+host's default for apps with no setting of their own, with `AppPlugins`.
+
 The same holds on Linux, macOS and Windows. On every host the runner is
 reached through a Unix socket in the host's socket folder, which
 `RunnerDiscovery` watches: `$XDG_RUNTIME_DIR/raccoon` on Linux,
