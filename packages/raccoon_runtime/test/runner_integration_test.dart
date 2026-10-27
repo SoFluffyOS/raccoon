@@ -5638,6 +5638,30 @@ class Report extends StatelessWidget {
         ]);
         expect(render.exitCode, isNot(0));
         expect('${render.stderr}', contains('RACCOON_BOOM: the reason'));
+        // Serving, stderr goes through a pipe the runner reads: the reason
+        // reached it, and died with it more often than not (#231). A few
+        // runs, as it was a race.
+        for (var run = 0; run < 3; run++) {
+          final serve = await Process.run(binary, [
+            'serve',
+            '--engine-dir',
+            engineDir,
+            '--assets',
+            pluginsAppAssets,
+            '--icu',
+            icu,
+            '--plugins',
+            manifest.path,
+            '--socket',
+            p.join(temp.path, 'boom.sock'),
+          ]).timeout(const Duration(seconds: 30));
+          expect(serve.exitCode, isNot(0));
+          expect(
+            '${serve.stderr}',
+            contains('RACCOON_BOOM: the reason'),
+            reason: 'run $run',
+          );
+        }
       } finally {
         temp.deleteSync(recursive: true);
       }

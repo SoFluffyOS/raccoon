@@ -25,6 +25,7 @@
 #include <shared_mutex>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 
 using raccoon::PluginHost;
 
@@ -66,7 +67,12 @@ class BridgeGate {
 @implementation RaccoonTaskQueue
 - (instancetype)init {
   if ((self = [super init])) {
-    _queue = dispatch_queue_create("dev.raccoon.plugin", DISPATCH_QUEUE_SERIAL);
+    // A pool per message, as the main queue has: on a plain serial queue
+    // what each message autoreleases stays until the queue goes idle, which
+    // a busy one never does (#231).
+    _queue = dispatch_queue_create(
+        "dev.raccoon.plugin", dispatch_queue_attr_make_with_autorelease_frequency(
+                                  DISPATCH_QUEUE_SERIAL, DISPATCH_AUTORELEASE_FREQUENCY_WORK_ITEM));
   }
   return self;
 }
@@ -284,6 +290,9 @@ struct TextureFrame {
   // it was given, so they go at the next populate, on the raster thread,
   // by when it has (#125).
   std::vector<std::unique_ptr<TextureFrame>> _retired;
+  // Textures whose pixel format was said once not to be drawn; the raster
+  // thread's alone.
+  std::unordered_set<int64_t> _unsupported;
   int64_t _nextId;
 }
 
@@ -405,7 +414,9 @@ struct TextureFrame {
     if (format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange) {
       color_space = kBT601FullRange;
     }
-  } else {
+  } else if (_unsupported.count(textureId) == 0) {
+    // Once a texture: it would say so every frame.
+    _unsupported.insert(textureId);
     std::fprintf(stderr, "🦝 texture %lld: pixel format %u not drawn\n",
                  static_cast<long long>(textureId), static_cast<unsigned>(format));
   }
@@ -538,7 +549,12 @@ void ReplayHeldStderr(int signal_number) {
       if (write(STDERR_FILENO, buffer, static_cast<size_t>(got)) < 0) break;
     }
   }
-  signal(signal_number, SIG_DFL);
+  // On to the handler there before: in serve, the stderr capture's, which
+  // drains its pipe, the text just written with it, before the process
+  // goes; without it the reason was lost more often than not (#231).
+  for (size_t i = 0; i < std::size(kFatalSignals); ++i) {
+    if (kFatalSignals[i] == signal_number) sigaction(signal_number, &g_previous[i], nullptr);
+  }
   raise(signal_number);
 }
 
@@ -719,22 +735,28 @@ bool PluginHost::Load(const PluginEntry& entry, std::string* error) {
     *error = "no library or class";
     return false;
   }
-  bool opened = false;
+  void* library = nullptr;
   std::vector<Shared> shared;
   HoldingStderr(
       [&] {
-        opened = dlopen(entry.library.c_str(), RTLD_NOW | RTLD_LOCAL) != nullptr;
-        if (!opened) *error = dlerror();
+        library = dlopen(entry.library.c_str(), RTLD_NOW | RTLD_LOCAL);
+        if (library == nullptr) *error = dlerror();
       },
       [&](const char* line) {
         if (!Fold(line, &shared)) std::fputs(line, stderr);
       });
   PrintFolded(shared);
-  if (!opened) return false;
+  if (library == nullptr) return false;
   NSString* name = @(entry.plugin_class.c_str());
   Class cls = nil;
   if (!entry.module.empty()) {
     cls = NSClassFromString([NSString stringWithFormat:@"%s.%@", entry.module.c_str(), name]);
+  }
+  // This library's own class first: one another library carries too (its
+  // sources vendored there) may be the copy NSClassFromString picks (#231).
+  if (cls == nil) {
+    const std::string symbol = "OBJC_CLASS_$_" + entry.plugin_class;
+    if (void* own = dlsym(library, symbol.c_str())) cls = (__bridge Class)own;
   }
   if (cls == nil) cls = NSClassFromString(name);
   if (cls == nil || ![cls respondsToSelector:@selector(registerWithRegistrar:)]) {
