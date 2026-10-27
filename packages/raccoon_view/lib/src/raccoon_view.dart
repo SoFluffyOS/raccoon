@@ -68,6 +68,13 @@ class _RaccoonViewState extends State<RaccoonView> {
   bool _creatingTexture = false;
   // Whether frames arrive as GPU buffers, and the buffer the texture shows.
   bool _gpuLive = false;
+
+  /// The view that shows each connection's ring (#205).
+  static final _ringHolders = Expando<Object>('raccoon view ring holders');
+
+  /// Whether this view asked its connection for pixel frames, another view
+  /// holding its ring.
+  bool _askedPixels = false;
   // When the last GPU frame came; pixel frames are dropped while the ring
   // is live, and the ring counts as live for this long after that.
   DateTime? _lastGpuFrame;
@@ -172,6 +179,18 @@ class _RaccoonViewState extends State<RaccoonView> {
     if (!connection.gpuBuffers) return;
     final gpu = widget.gpuTextures ?? HostGpuTextures.forHost();
     if (gpu == null) return;
+    // The runner serves a connection's ring to one view at a time; another
+    // view of it takes pixel frames meanwhile, which the first then shows
+    // too (#205).
+    if (_ringHolders[connection] case final holder?
+        when !identical(holder, this)) {
+      if (connection case final CaptureConnection capture) {
+        capture.wantPixels(true);
+        _askedPixels = true;
+      }
+      return;
+    }
+    _ringHolders[connection] = this;
     _gpu = gpu;
     _gpuSets = connection.gpuBufferSets.listen(
       (set) => unawaited(_onGpuSet(set)),
@@ -221,6 +240,13 @@ class _RaccoonViewState extends State<RaccoonView> {
   /// Lets go of the GPU texture and gives [connection], the one the
   /// buffers came from, back what the view still holds.
   void _unsubscribeGpu(RunnerConnection connection) {
+    if (identical(_ringHolders[connection], this)) {
+      _ringHolders[connection] = null;
+    }
+    if (_askedPixels && connection is CaptureConnection) {
+      connection.wantPixels(false);
+    }
+    _askedPixels = false;
     _gpuGeneration++;
     unawaited(_gpuSets?.cancel());
     _gpuSets = null;

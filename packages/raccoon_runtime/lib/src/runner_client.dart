@@ -65,6 +65,7 @@ final class RunnerClient
   /// frame has none of. Each [on] is undone by an [on] false, and pixels go
   /// on until the last. The runner reads them back meanwhile, and a view
   /// goes on showing its ring. Nothing for a client without GPU buffers.
+  @override
   void wantPixels(bool on) {
     if (!gpuBuffers) return;
     final before = _pixelWants;

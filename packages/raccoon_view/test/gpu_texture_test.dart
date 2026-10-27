@@ -88,6 +88,21 @@ class _GatedTextures extends _FakeTextures {
 class _CapturingConnection extends _GpuConnection implements CaptureConnection {
   @override
   bool get pixelsWanted => true;
+
+  @override
+  void wantPixels(bool on) {}
+}
+
+/// A connection that counts what its views ask for (#205).
+class _CountingConnection extends _GpuConnection implements CaptureConnection {
+  final asked = <bool>[];
+
+  @override
+  bool get pixelsWanted =>
+      asked.where((on) => on).length > asked.where((on) => !on).length;
+
+  @override
+  void wantPixels(bool on) => asked.add(on);
 }
 
 rc.GpuBuffers _set(String socket) => rc.GpuBuffers(
@@ -488,6 +503,35 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(find.byType(RaccoonFrameView), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a second view of one connection takes pixels, not a ring', (
+    tester,
+  ) async {
+    final connection = _CountingConnection();
+    final textures = _FakeTextures(releases: true);
+    Widget views(int count) => Directionality(
+      textDirection: TextDirection.ltr,
+      child: Row(
+        children: [
+          for (var i = 0; i < count; i++)
+            Expanded(
+              child: RaccoonView(connection: connection, gpuTextures: textures),
+            ),
+        ],
+      ),
+    );
+    await tester.pumpWidget(views(2));
+    connection.sets.add(_set('/run/r.gpu'));
+    await tester.pump();
+    await tester.pump();
+    // One texture, on the runner's one socket; the other view asked for
+    // pixels.
+    expect(textures.calls.where((call) => call == 'create'), hasLength(1));
+    expect(connection.asked, [true]);
+    await tester.pumpWidget(views(1));
+    expect(connection.asked, [true, false]);
     await tester.pumpWidget(const SizedBox());
   });
 

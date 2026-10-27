@@ -78,4 +78,9 @@ abstract interface class ChannelConnection implements RunnerConnection {
 abstract interface class CaptureConnection implements RunnerConnection {
   /// Whether a capture wants pixel frames now.
   bool get pixelsWanted;
+
+  /// Asks for pixel frames while [on], each true undone by a false: a
+  /// capture, or a second view of the connection, which the runner serves
+  /// no ring of its own (#205).
+  void wantPixels(bool on);
 }
