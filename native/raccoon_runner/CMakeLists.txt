@@ -310,6 +310,19 @@ BEGIN
 END
 ")
   target_sources(raccoon_runner PRIVATE ${CMAKE_BINARY_DIR}/raccoon_runner.rc)
+  # UTF-8 as the process's code page (Windows 10 1903 on): argv, the A
+  # functions and the engine then agree on paths a user's name puts outside
+  # ASCII, where the ANSI code page would garble them (#126).
+  file(WRITE ${CMAKE_BINARY_DIR}/raccoon_runner.manifest "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>
+<assembly manifestVersion=\"1.0\" xmlns=\"urn:schemas-microsoft-com:asm.v1\">
+  <application xmlns=\"urn:schemas-microsoft-com:asm.v3\">
+    <windowsSettings>
+      <activeCodePage xmlns=\"http://schemas.microsoft.com/SMI/2019/WindowsSettings\">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>
+")
+  target_sources(raccoon_runner PRIVATE ${CMAKE_BINARY_DIR}/raccoon_runner.manifest)
   target_include_directories(raccoon_runner PRIVATE
     ${CMAKE_SOURCE_DIR}/third_party/flutter_windows/include)
   target_compile_definitions(raccoon_runner PRIVATE RACCOON_HAS_PLUGINS=1)

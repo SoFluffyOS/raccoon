@@ -135,6 +135,20 @@ jobs:
             --out build/frame.ppm
           test -s build/frame.ppm
 
+      # A path the ANSI code page can't spell: on Windows the runner takes
+      # its arguments as UTF-8, as the engine reads them (#126).
+      - name: Render example/hello from a non-ASCII path
+        run: |
+          dir="build/José 猫"
+          mkdir -p "$dir"
+          cp -R example/hello/build/flutter_assets "$dir/"
+          build/raccoon_runner render \
+            --engine-dir "$RACCOON_ENGINE_DIR" \
+            --assets "$dir/flutter_assets" \
+            --icu "$RACCOON_ICU" \
+            --out "$dir/frame.ppm"
+          test -s "$dir/frame.ppm"
+
       # Views mode (#182): one engine, a view beside the first, each written.
       - name: Render example/views in two views
         run: |
