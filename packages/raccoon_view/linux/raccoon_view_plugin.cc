@@ -21,6 +21,7 @@
 #include <flutter_linux/flutter_linux.h>
 #include <glib-unix.h>
 #include <gtk/gtk.h>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -524,6 +525,10 @@ static void close_socket(RaccoonGpuTexture* self) {
     g_source_remove(self->watch);
     self->watch = 0;
   }
+  // What came and was not taken yet is no message's any more.
+  for (int fd : self->fds_in_flight) close(fd);
+  self->fds_in_flight.clear();
+  self->inbox.clear();
   std::lock_guard<std::mutex> lock(*self->mutex);
   if (self->socket_fd >= 0) {
     close(self->socket_fd);
@@ -541,18 +546,25 @@ static uint64_t read64(const uint8_t* at) {
          (static_cast<uint64_t>(read32(at + 4)) << 32);
 }
 
+// The most a GPU socket message may be: sets are far under it.
+constexpr uint32_t kMaxMessage = 1 << 20;
+
 // Parses the framed sets in the inbox; the descriptors received so far are
-// handed to them in order.
-static void parse_inbox(RaccoonGpuTexture* self) {
+// handed to them in order. False when the stream can't be trusted any more:
+// a length no message has, or a message without the descriptors it comes
+// with, after which every later one would be paired with the wrong ones
+// (raccoon#238).
+static bool parse_inbox(RaccoonGpuTexture* self) {
   size_t offset = 0;
   while (self->inbox.size() - offset >= 4) {
     const uint32_t length = read32(self->inbox.data() + offset);
+    if (length > kMaxMessage) return false;
     if (self->inbox.size() - offset - 4 < length) break;
     const uint8_t* payload = self->inbox.data() + offset + 4;
-    offset += 4 + length;
+    offset += 4 + static_cast<size_t>(length);
     if (length >= 12 && std::memcmp(payload, "RFEN", 4) == 0) {
       // A frame's fence, one descriptor, kept for its buffer until shown.
-      if (self->fds_in_flight.empty()) continue;
+      if (self->fds_in_flight.empty()) return false;
       const int fd = self->fds_in_flight.front();
       self->fds_in_flight.erase(self->fds_in_flight.begin());
       const uint32_t generation = read32(payload + 4);
@@ -575,8 +587,11 @@ static void parse_inbox(RaccoonGpuTexture* self) {
     set->height = read32(payload + 16);
     set->fourcc = read32(payload + 20);
     set->modifier = read64(payload + 24);
-    if (length < 32 + count * 8 || self->fds_in_flight.size() < count) {
-      continue;  // not whole, or its descriptors did not all arrive
+    // Its descriptors came with its first byte: fewer is a stream gone
+    // wrong. In 64 bits, so a bad count can't wrap.
+    if (length < 32 + static_cast<uint64_t>(count) * 8 ||
+        self->fds_in_flight.size() < count) {
+      return false;
     }
     for (uint32_t i = 0; i < count; ++i) {
       set->strides.push_back(read32(payload + 32 + i * 8));
@@ -602,6 +617,7 @@ static void parse_inbox(RaccoonGpuTexture* self) {
     }
   }
   self->inbox.erase(self->inbox.begin(), self->inbox.begin() + offset);
+  return true;
 }
 
 static gboolean on_socket_readable(gint fd, GIOCondition condition,
@@ -623,21 +639,29 @@ static gboolean on_socket_readable(gint fd, GIOCondition condition,
     const int* fds = reinterpret_cast<const int*>(CMSG_DATA(cmsg));
     self->fds_in_flight.insert(self->fds_in_flight.end(), fds, fds + count);
   }
-  // Hung up, or descriptors were lost (more than fit): the ones after would
-  // be matched to the wrong messages, so the socket is done with.
-  if (got <= 0 || (header.msg_flags & MSG_CTRUNC) != 0) {
+  // Hung up, descriptors lost (more than fit), or a stream that no longer
+  // pairs descriptors with their messages: the socket is done with.
+  bool done = got <= 0 || (header.msg_flags & MSG_CTRUNC) != 0;
+  if (!done) {
+    self->inbox.insert(self->inbox.end(), buffer, buffer + got);
+    done = !parse_inbox(self);
+  }
+  if (done) {
     // The source is removed by returning; close_socket must not remove it.
     self->watch = 0;
     close_socket(self);
     return G_SOURCE_REMOVE;
   }
-  self->inbox.insert(self->inbox.end(), buffer, buffer + got);
-  parse_inbox(self);
   return G_SOURCE_CONTINUE;
 }
 
 static bool connect_socket(RaccoonGpuTexture* self, const std::string& path) {
-  const int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  // A socket this texture had goes first, its watch with it.
+  close_socket(self);
+  // Without waiting: a runner that stopped (in a debugger, say) with its
+  // backlog full would hold the editor's main thread in connect for good;
+  // a full backlog fails at once instead (raccoon#238).
+  const int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
   if (fd < 0) return false;
   sockaddr_un address{};
   address.sun_family = AF_UNIX;
@@ -650,6 +674,8 @@ static bool connect_socket(RaccoonGpuTexture* self, const std::string& path) {
     close(fd);
     return false;
   }
+  // Blocking again from here, as the releases expect.
+  fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
   {
     std::lock_guard<std::mutex> lock(*self->mutex);
     self->socket_fd = fd;
