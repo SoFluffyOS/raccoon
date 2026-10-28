@@ -1,4 +1,5 @@
 import 'package:raccoon/raccoon.dart';
+import 'package:raccoon_runtime/src/raccoon_entrypoint.dart';
 
 /// Why a hosted app stopped before its first frame, as its log tells it:
 /// the exception `main()` died of, the channels nothing answered, and the
@@ -61,6 +62,9 @@ final class StartupFailure {
       final line = all[i];
       if (_unanswered.firstMatch(line) case final match?) {
         final channel = match.group(1) ?? '';
+        // The device the entry asks for is the client's to name, or not:
+        // no answer there is the host, not a failure (raccoon#235).
+        if (channel == RaccoonEntrypoint.channel) continue;
         if (!channels.contains(channel)) channels.add(channel);
         continue;
       }

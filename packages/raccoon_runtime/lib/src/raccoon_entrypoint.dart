@@ -142,11 +142,17 @@ class _RaccoonDeviceState extends State<_RaccoonDevice>
     } catch (_) {
       return;
     }
-    if (!mounted || reply is! Map) return;
+    if (!mounted) return;
+    // No answer (a client that has none, or no profile) is the host: what
+    // was set before goes (raccoon#235).
+    final named = switch (reply) {
+      final Map map => map,
+      _ => const {},
+    };
     // The platform is one for the whole app: view 0's says it, or views
     // that differ would flip it, a reassemble each time (#201).
-    if (_viewId == 0) _target(reply['platform']);
-    final padding = switch (reply['padding']) {
+    if (_viewId == 0) _target(named['platform']);
+    final padding = switch (named['padding']) {
       [final num top, final num right, final num bottom, final num left] =>
         EdgeInsets.fromLTRB(
           left.toDouble(),

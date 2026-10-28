@@ -201,4 +201,16 @@ void main() {
       'url_launcher_macos',
     );
   });
+
+  test('the device the entry asks for, unanswered, is no failure', () {
+    // raccoon#235: a client with no profile answers nothing there, which
+    // is the host, and an app slow to its first frame was reported failing.
+    expect(
+      StartupFailure.fromLog([
+        '🦝 nothing answered raccoon/device (the client has no handler); '
+            'the app sees no plugin',
+      ]),
+      isNull,
+    );
+  });
 }
