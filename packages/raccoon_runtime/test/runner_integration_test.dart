@@ -1499,13 +1499,15 @@ void main() {
             'endif()\n'
             'add_library(plugin_b SHARED plugin_b.cc)\n'
             'set(plugin_b_bundled_libraries "\$<TARGET_FILE:plugin_b>" '
-            '"\${CMAKE_CURRENT_SOURCE_DIR}/libs/libextra.so.1" PARENT_SCOPE)\n',
+            '"\${CMAKE_CURRENT_SOURCE_DIR}/libs/libextra.so.1" '
+            '"\${CMAKE_CURRENT_SOURCE_DIR}/libs/model.bin" PARENT_SCOPE)\n',
       );
       write(
         'plugin_b/linux/plugin_b.cc',
         'int plugin_b_value() { return 1; }\n',
       );
       write('plugin_b/linux/libs/libextra.so.1', 'not really a library\n');
+      write('plugin_b/linux/libs/model.bin', 'data the plugin finds\n');
       plugin('plugin_n', 'cmake_minimum_required(VERSION 3.14)\n');
       plugin(
         'plugin_c',
@@ -1563,7 +1565,7 @@ void main() {
           Directory(
             p.join(plugins, 'lib'),
           ).listSync().map((file) => p.basename(file.path)),
-          containsAll(['libplugin_b.so', 'libextra.so.1']),
+          containsAll(['libplugin_b.so', 'libextra.so.1', 'model.bin']),
         );
         // Its build tree goes once it is cached.
         expect(
@@ -1576,12 +1578,12 @@ void main() {
         expect(second['plugin_n'], startsWith('built_nothing: '));
         expect(second['plugin_n'], contains('kept from'));
         expect(second['plugin_c'], isNot(contains('kept')));
-        // The cache keeps the versioned library too.
+        // The cache keeps the versioned library and the data too.
         expect(
           Directory(
             p.join(plugins, 'lib'),
           ).listSync().map((file) => p.basename(file.path)),
-          contains('libextra.so.1'),
+          containsAll(['libextra.so.1', 'model.bin']),
         );
       } finally {
         temp.deleteSync(recursive: true);

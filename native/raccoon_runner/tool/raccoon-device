@@ -384,8 +384,12 @@ LIBRARY = re.compile(r'\.so(\.\d+)*$')
 
 
 def libraries(folder):
+    """A cache entry's files: its libraries and whatever else the plugin
+    bundles beside them (data it finds by its library's place), all of
+    which go to lib/, as the desktop template installs them."""
     try:
-        return sorted(os.path.join(folder, f) for f in os.listdir(folder) if LIBRARY.search(f))
+        return sorted(os.path.join(folder, f) for f in os.listdir(folder)
+                      if not f.startswith('.') and os.path.isfile(os.path.join(folder, f)))
     except OSError:
         return []
 
@@ -519,8 +523,11 @@ def fetch_prebuilt():
             raise
         try:
             with tarfile.open(archive) as tar:
+                # An entry's files, not the failures kept beside them.
                 members = [m for m in tar.getmembers()
-                           if m.isfile() and LIBRARY.search(m.name) and '..' not in m.name]
+                           if m.isfile() and '..' not in m.name
+                           and len(parts := os.path.normpath(m.name).split('/')) == 2
+                           and parts[0] != 'failed' and not parts[1].startswith('.')]
                 tar.extractall(staging, members=members)
         except (tarfile.TarError, EOFError, zlib.error, gzip.BadGzipFile):
             remember = True
@@ -784,7 +791,8 @@ for plugin in wanted:
         clone(so, os.path.join(out, 'lib'))
     if plugin['symbol'] is not None and libs:
         # The plugin's own library is the one named after it.
-        main = [so for so in libs if os.path.basename(so) == 'lib%s_plugin.so' % name] or libs
+        main = ([so for so in libs if os.path.basename(so) == 'lib%s_plugin.so' % name]
+                or [so for so in libs if LIBRARY.search(so)] or libs)
         entries.append({'name': name, 'library': os.path.join(out, 'lib', os.path.basename(main[0])),
                         'symbol': plugin['symbol']})
 
