@@ -238,9 +238,10 @@ final class RunnerDownloader {
     _deleteIfAny(aside);
   }
 
-  /// Moves [staging] in as [target]. Windows refuses for a moment while
-  /// antivirus holds the runner just written: tried again there for a few
-  /// seconds, rather than download it again, as the runtime store does.
+  /// Moves [staging] in as [target]. Windows refuses for a while as
+  /// antivirus scans the runner just written (a whole executable, seconds
+  /// on a busy machine): tried again there for up to ten seconds, rather
+  /// than download it again.
   static Future<void> _moveIn(Directory staging, String target) async {
     for (var attempt = 0; ; attempt++) {
       try {
@@ -248,7 +249,7 @@ final class RunnerDownloader {
         return;
       } on FileSystemException {
         if (!Platform.isWindows ||
-            attempt >= 30 ||
+            attempt >= 100 ||
             Directory(target).existsSync()) {
           rethrow;
         }
