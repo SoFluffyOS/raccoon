@@ -394,13 +394,30 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
 
 // The socket's queue.
 - (void)closeSocket {
-  if (_reader != nil) {
-    // Cancelling closes the descriptor, from the cancel handler.
-    dispatch_source_cancel(_reader);
-    _reader = nil;
+  [self closeSocketThen:nil];
+}
+
+// The socket's queue. Cancelling closes the descriptor, from the cancel
+// handler, after whatever the queue is running: |then| runs there, once it
+// is closed.
+- (void)closeSocketThen:(dispatch_block_t)then {
+  int fd;
+  {
+    std::lock_guard<std::mutex> lock(_mutex);
+    fd = _socket;
+    _socket = -1;
   }
-  std::lock_guard<std::mutex> lock(_mutex);
-  _socket = -1;
+  dispatch_source_t reader = _reader;
+  _reader = nil;
+  if (reader == nil) {
+    if (then != nil) then();
+    return;
+  }
+  dispatch_source_set_cancel_handler(reader, ^{
+    close(fd);
+    if (then != nil) then();
+  });
+  dispatch_source_cancel(reader);
 }
 
 - (BOOL)connectToSocket:(NSString*)path {
@@ -456,12 +473,13 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
   // connected while this one still held the runner's one place, and was
   // turned away (raccoon#234).
   dispatch_async(_queue, ^{
-    [self closeSocket];
     if (self->_service != MACH_PORT_NULL) {
       mach_port_deallocate(mach_task_self(), self->_service);
       self->_service = MACH_PORT_NULL;
     }
-    if (done != nil) dispatch_async(dispatch_get_main_queue(), done);
+    [self closeSocketThen:^{
+      if (done != nil) dispatch_async(dispatch_get_main_queue(), done);
+    }];
   });
 }
 

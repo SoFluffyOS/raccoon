@@ -87,6 +87,9 @@ class _RaccoonCanvasState extends State<RaccoonCanvas> {
   Size _area = Size.zero;
   double _fit = 1;
 
+  /// The least [_fit]: an app this small shows as nothing anyway.
+  static const _leastFit = 0.01;
+
   double get _scale => _zoom ?? _fit;
 
   /// Where the app sits in [area] at [scale] with [origin] asked for:
@@ -182,11 +185,16 @@ class _RaccoonCanvasState extends State<RaccoonCanvas> {
           child: LayoutBuilder(
             builder: (context, constraints) {
               _area = widget.padding.deflateSize(constraints.biggest);
-              _fit = math.min(
-                1,
+              // Never nothing: a pane collapsed below its padding has no
+              // area, and a zoom of 0 kept from it would stay after it grows.
+              _fit = math.max(
+                _leastFit,
                 math.min(
-                  _area.width / widget.size.width,
-                  _area.height / widget.size.height,
+                  1,
+                  math.min(
+                    _area.width / widget.size.width,
+                    _area.height / widget.size.height,
+                  ),
                 ),
               );
               final scale = _scale;

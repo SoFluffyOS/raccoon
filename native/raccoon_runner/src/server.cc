@@ -125,6 +125,11 @@ bool WaitWritable(int fd, int timeout_ms) {
   return WSAPoll(&wait, 1, timeout_ms) > 0;
 }
 
+bool ReadableNow(int fd) {
+  WSAPOLLFD wait{AsSocket(fd), POLLRDNORM, 0};
+  return WSAPoll(&wait, 1, 0) > 0;
+}
+
 #else
 
 void CloseFd(int fd) { close(fd); }
@@ -150,6 +155,11 @@ void ShutWrite(int fd) { shutdown(fd, SHUT_WR); }
 bool WaitWritable(int fd, int timeout_ms) {
   pollfd wait{fd, POLLOUT, 0};
   return poll(&wait, 1, timeout_ms) > 0;
+}
+
+bool ReadableNow(int fd) {
+  pollfd wait{fd, POLLIN, 0};
+  return poll(&wait, 1, 0) > 0;
 }
 
 #endif
@@ -215,6 +225,10 @@ void RunnerServer::OnListenReadable() {
     handler_.on_accept(fd);
     return;
   }
+  // The client may have hung up in the same pass, its hang-up not handled
+  // yet: hear it first, or the newcomer is told a client that is gone has
+  // the runner (a view's host closing one socket and opening the next).
+  if (client_fd_ >= 0 && ReadableNow(client_fd_)) OnClientReadable(0);
   if (client_fd_ >= 0) {
     // One client at a time: tell the newcomer who has the runner, then hang
     // up, so it can say so instead of showing a dead pane.

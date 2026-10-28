@@ -45,6 +45,39 @@ void main() {
     ),
   );
 
+  testWidgets('a zoom taken while the pane is collapsed still shows the app '
+      'once it grows', (tester) async {
+    Future<void> pumpSized(double side) => tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Center(
+          child: SizedBox(
+            width: side,
+            height: side,
+            child: const RaccoonCanvas(
+              size: Size(390, 844),
+              pixelRatio: 3,
+              child: ColoredBox(color: Color(0xFF123456)),
+            ),
+          ),
+        ),
+      ),
+    );
+    // Smaller than the canvas's padding: no area at all.
+    await pumpSized(20);
+    final mouse = TestPointer(1, PointerDeviceKind.mouse);
+    mouse.hover(tester.getCenter(find.byType(RaccoonCanvas)));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendEventToBinding(mouse.scroll(const Offset(0, 100)));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    await pumpSized(600);
+    final app = tester.getRect(find.byType(ColoredBox));
+    expect(app.height.isFinite && app.height > 0, isTrue);
+    expect(app.left.isFinite && app.top.isFinite, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('the zoom control steps the zoom and goes back to fitting', (
     tester,
   ) async {
