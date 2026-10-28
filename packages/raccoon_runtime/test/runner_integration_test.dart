@@ -1459,6 +1459,12 @@ void main() {
         linuxSource(compiles: false, broken: full);
         expect(await install(), startsWith('did not build'));
         expect(await install(), isNot(contains('kept')));
+        // Nor is one that failed for want of a network (#255).
+        const offline = '#error Could not resolve host: cdn.cocoapods.org';
+        source(compiles: false, broken: offline);
+        linuxSource(compiles: false, broken: offline);
+        expect(await install(), startsWith('did not build'));
+        expect(await install(), isNot(contains('kept')));
       } finally {
         temp.deleteSync(recursive: true);
       }

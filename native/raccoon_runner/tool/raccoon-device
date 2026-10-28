@@ -654,11 +654,19 @@ def kept_failure(plugin):
         kept.get('why', 'failed'), time.strftime('%Y-%m-%d %H:%M', time.localtime(kept['at'])))
 
 
+# What says the machine stopped a build, not the plugin: a full disk, an
+# interrupted build, a compiler killed for memory, or no network for a
+# fetch (a Swift package, a pod's CDN, a CMake download step).
+STOPPED = ('No space left on device', 'disk I/O error', '** BUILD INTERRUPTED **',
+           'ninja: build stopped: interrupted', 'Killed signal terminated program',
+           'Could not resolve host', 'The Internet connection appears to be offline',
+           'The network connection was lost', 'Connection timed out', 'Failed to connect to',
+           'Temporary failure in name resolution', "CDN: trunk URL couldn't be downloaded")
+
+
 def machine_stopped(log):
     text = open(log, errors='replace').read()
-    return any(sign in text for sign in
-               ('No space left on device', 'disk I/O error', '** BUILD INTERRUPTED **',
-                'ninja: build stopped: interrupted', 'Killed signal terminated program'))
+    return any(sign in text for sign in STOPPED)
 
 
 def keep_failure(plugin, why, log, state='failed'):
@@ -1201,10 +1209,19 @@ def kept_failure(plugin):
         kept.get('why', 'failed'), time.strftime('%Y-%m-%d %H:%M', time.localtime(kept['at'])))
 
 
+# What says the machine stopped a build, not the plugin: a full disk, an
+# interrupted build, a compiler killed for memory, or no network for a
+# fetch (a Swift package, a pod's CDN, a CMake download step).
+STOPPED = ('No space left on device', 'disk I/O error', '** BUILD INTERRUPTED **',
+           'ninja: build stopped: interrupted', 'Killed signal terminated program',
+           'Could not resolve host', 'The Internet connection appears to be offline',
+           'The network connection was lost', 'Connection timed out', 'Failed to connect to',
+           'Temporary failure in name resolution', "CDN: trunk URL couldn't be downloaded")
+
+
 def machine_stopped(log):
     text = open(log, errors='replace').read()
-    return any(sign in text for sign in
-               ('No space left on device', 'disk I/O error', '** BUILD INTERRUPTED **'))
+    return any(sign in text for sign in STOPPED)
 
 
 def keep_failure(plugin, why, log):
