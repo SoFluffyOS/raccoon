@@ -1808,7 +1808,14 @@ if misses:
     with concurrent.futures.ThreadPoolExecutor(workers) as pool:
         running = {pool.submit(xcodebuild, p['name']): p for p in targets}
         for done in concurrent.futures.as_completed(running):
-            take(running[done], done.result())
+            plugin = running[done]
+            # One plugin's trouble (a full disk while it is cached, a
+            # vendored path gone) fails that plugin, not the install; not
+            # kept, it being the machine's.
+            try:
+                take(plugin, done.result())
+            except OSError as error:
+                broken[plugin['name']] = 'could not be cached: %s' % error
     order = {p['name']: i for i, p in enumerate(misses)}
     built.sort(key=lambda name: order.get(name, len(order)))
     empty.sort(key=lambda name: order.get(name, len(order)))
