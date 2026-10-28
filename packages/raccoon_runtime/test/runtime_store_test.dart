@@ -135,6 +135,26 @@ void main() {
     );
   });
 
+  test(
+    'keeps engines where RACCOON_ENGINE_CACHE says, as engine_dir.sh does',
+    () {
+      expect(
+        RuntimeStore.forHost({
+          'HOME': '/h',
+          'RACCOON_ENGINE_CACHE': '/elsewhere/engines',
+        }).cacheDirectory,
+        '/elsewhere/engines',
+      );
+      expect(
+        RuntimeStore.forHost({
+          'HOME': '/h',
+          'RACCOON_ENGINE_CACHE': '',
+        }).cacheDirectory,
+        p.join('/h', '.cache', 'raccoon', 'engines'),
+      );
+    },
+  );
+
   test('reads the engine revision from the sdk stamp', () {
     final sdk = Directory(p.join(temp.path, 'sdk', 'bin', 'cache'))
       ..createSync(recursive: true);

@@ -245,7 +245,14 @@ final class CustomDevicesFile {
     final staged = File('${file.path}.$pid.tmp')..writeAsStringSync(
       '${const JsonEncoder.withIndent('  ').convert(contents)}\n',
     );
-    staged.renameSync(file.path);
+    try {
+      staged.renameSync(file.path);
+    } on FileSystemException {
+      // A file Windows holds, or one made read-only: the file stays as it
+      // was, and so does nothing beside it.
+      staged.deleteSync();
+      rethrow;
+    }
   }
 
   /// [file]'s contents; null when it is empty, which is no devices. Throws

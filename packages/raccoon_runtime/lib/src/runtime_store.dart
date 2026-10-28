@@ -54,6 +54,10 @@ final class RuntimeStore {
   /// `RACCOON_ENGINE_CACHE` says otherwise. Windows programs rarely
   /// see a `HOME`; the user's profile is the home Git Bash gives that tool.
   factory RuntimeStore.forHost(Map<String, String> environment) {
+    if (environment['RACCOON_ENGINE_CACHE'] case final cache?
+        when cache.isNotEmpty) {
+      return RuntimeStore(cacheDirectory: cache);
+    }
     final cacheHome = switch (environment['XDG_CACHE_HOME']) {
       final dir? when dir.isNotEmpty => dir,
       _ => p.join(homeOf(environment), '.cache'),
