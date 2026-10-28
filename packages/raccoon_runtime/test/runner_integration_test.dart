@@ -4055,10 +4055,13 @@ class Report extends StatelessWidget {
         await busy.cancel();
         expect(frames, greaterThan(20));
         // The count is taken as a frame is read and the listener hears of
-        // it later, so a frame at either end may fall on the other side.
+        // it later, so a frame at either end may fall on the other side;
+        // and a frame that waited out the runner's inline hold (100 ms) for
+        // a buffer goes inline by design, which a slow host sees now and
+        // then. Nine in ten through the buffers: before, most went inline.
         expect(
           client.sharedFrames - sharedBefore,
-          greaterThanOrEqualTo(frames - 2),
+          greaterThanOrEqualTo(frames * 9 ~/ 10 - 2),
         );
       } finally {
         client.shutdown();
