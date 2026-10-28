@@ -34,6 +34,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <cmath>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -402,10 +403,11 @@ raccoon::EngineOptions EngineOptionsFromEnvironment(raccoon::EngineOptions engin
 
 // How long the loop may sleep: until the next platform task or frame, at
 // most |cap| milliseconds.
-int NextWait(raccoon::EngineHost& host, int cap) {
+int NextWait(raccoon::EngineHost& host, int cap, bool inline_due = true) {
   int wait = cap;
   for (int next : {host.platform().MillisUntilNextTask(), host.MillisUntilVsync(),
-                   host.MillisUntilCamera(), host.frame().MillisUntilInline()}) {
+                   host.MillisUntilCamera(),
+                   inline_due ? host.frame().MillisUntilInline() : -1}) {
     if (next >= 0 && next < wait) wait = next;
   }
   return wait;
@@ -676,7 +678,15 @@ struct Client {
   bool composes = false;
   // A view's client that hung up, let go after the turn.
   bool gone = false;
+  // Its pointers down now, by id: what it leaves down is cancelled when it
+  // goes, or the next client's taps meet a press that never ended
+  // (raccoon#244).
+  std::unordered_map<int64_t, raccoon::v1::PointerEvent> down;
 };
+
+#if !defined(_WIN32)
+pid_t g_parent_at_start = 0;
+#endif
 
 int Serve(const Options& options) {
   raccoon::EventLoop loop;
@@ -795,7 +805,10 @@ int Serve(const Options& options) {
   bool had_client = false;
   // A client put the app in the background or back (#199): the next one
   // must not find it with its frames off (#201).
-  bool lifecycle_from_client = false;
+  // The clients that last set the app's lifecycle and its settings: each
+  // goes back to the host's when that client goes, not another (raccoon#244).
+  Client* lifecycle_from = nullptr;
+  Client* settings_from = nullptr;
 
   // The app's platform messages go to the first client, which serves them
   // for every view.
@@ -903,7 +916,9 @@ int Serve(const Options& options) {
     return 0;
   };
 #else
-  const pid_t parent = getppid();
+  // The parent at the start of main: taken here, after the engine and the
+  // plugins started, a parent gone meanwhile was init already (raccoon#244).
+  const pid_t parent = g_parent_at_start;
   const pid_t tool = tool_env == nullptr ? 0 : static_cast<pid_t>(std::atoi(tool_env));
   auto GonePid = [parent, tool]() -> int {
     if (getppid() != parent) return static_cast<int>(parent);
@@ -956,30 +971,37 @@ int Serve(const Options& options) {
   auto ClientHandler = [&](Client* client) {
     raccoon::RunnerServer::Handler handler;
     handler.on_resize = [&host, client](const raccoon::v1::Resize& resize) {
+      // Not Infinity or NaN: a ratio that is no number is the host's own.
+      const double ratio = std::isfinite(resize.pixel_ratio()) && resize.pixel_ratio() > 0
+                               ? resize.pixel_ratio()
+                               : 1.0;
       if (std::getenv("RACCOON_TRACE") != nullptr) {
         std::fprintf(stderr, "🦝 resize view %lld %ux%u @%.2f\n",
                      static_cast<long long>(client->view), resize.width(), resize.height(),
                      resize.pixel_ratio());
       }
-      host.Resize(client->view, resize.width(), resize.height(),
-                  resize.pixel_ratio() > 0 ? resize.pixel_ratio() : 1.0,
+      host.Resize(client->view, resize.width(), resize.height(), ratio,
                   {resize.view_inset_top(), resize.view_inset_right(),
                    resize.view_inset_bottom(), resize.view_inset_left()});
     };
-    handler.on_app_message = [&host, &lifecycle_from_client](
+    handler.on_app_message = [&host, &lifecycle_from, client](
                                  const raccoon::v1::AppMessage& message) {
-      if (message.channel() == "flutter/lifecycle") lifecycle_from_client = true;
+      if (message.channel() == "flutter/lifecycle") lifecycle_from = client;
       host.SendPlatformMessage(message.channel(),
                                reinterpret_cast<const uint8_t*>(message.data().data()),
                                message.data().size());
     };
-    handler.on_settings = [&host](const raccoon::v1::Settings& settings) {
+    handler.on_settings = [&host, &settings_from, client](const raccoon::v1::Settings& settings) {
+      settings_from = client;
       raccoon::SettingsOverride device;
       for (const std::string& tag : settings.locales()) {
         raccoon::HostLocale locale = raccoon::ParseLocale(tag);
         if (!locale.language.empty()) device.locales.push_back(std::move(locale));
       }
-      if (settings.has_text_scale_factor() && settings.text_scale_factor() > 0) {
+      // A scale that is no number would reach the app as null and fail the
+      // whole update (raccoon#244).
+      if (settings.has_text_scale_factor() && std::isfinite(settings.text_scale_factor()) &&
+          settings.text_scale_factor() > 0) {
         device.text_scale = settings.text_scale_factor();
       }
       if (settings.has_dark()) device.dark = settings.dark();
@@ -995,10 +1017,31 @@ int Serve(const Options& options) {
                      pointer.x(), pointer.y(), static_cast<long long>(pointer.buttons()),
                      pointer.pointer_id());
       }
-      if (pointer.phase() == raccoon::v1::POINTER_PHASE_DOWN) Focus(*client);
+      switch (pointer.phase()) {
+        case raccoon::v1::POINTER_PHASE_DOWN:
+          Focus(*client);
+          client->down[pointer.pointer_id()] = pointer;
+          break;
+        case raccoon::v1::POINTER_PHASE_MOVE:
+          if (auto held = client->down.find(pointer.pointer_id()); held != client->down.end()) {
+            held->second = pointer;
+          }
+          break;
+        case raccoon::v1::POINTER_PHASE_UP:
+        case raccoon::v1::POINTER_PHASE_CANCEL:
+        case raccoon::v1::POINTER_PHASE_REMOVE:
+          client->down.erase(pointer.pointer_id());
+          break;
+        default:
+          break;
+      }
       host.SendPointer(client->view, ToFlutterPointer(pointer, host.NowMicros()));
     };
-    handler.on_key = [&host, trace](const raccoon::v1::KeyEvent& key) {
+    handler.on_key = [&host, &Focus, client, trace](const raccoon::v1::KeyEvent& key) {
+      // Typed in this client's view: it takes the focus a press would have
+      // given it, or the keys went to whichever view was pressed last
+      // (raccoon#244).
+      Focus(*client);
       if (trace) {
         std::fprintf(stderr, "🦝 key kind=%d logical=%llx character=%s\n",
                      static_cast<int>(key.kind()),
@@ -1007,7 +1050,8 @@ int Serve(const Options& options) {
       }
       host.SendKey(ToFlutterKey(key, host.NowMicros()));
     };
-    handler.on_text_editing = [&host](const raccoon::v1::TextEditing& editing) {
+    handler.on_text_editing = [&host, &Focus, client](const raccoon::v1::TextEditing& editing) {
+      Focus(*client);
       host.text_input().ApplyEditing(editing.text(), editing.selection_base(),
                                      editing.selection_extent(),
                                      editing.composing_base(),
@@ -1072,6 +1116,26 @@ int Serve(const Options& options) {
     };
     // What both sockets' clients leave behind when they go.
     handler.on_client_disconnected = [&, client]() {
+      for (const auto& [id, pressed] : client->down) {
+        raccoon::v1::PointerEvent cancel = pressed;
+        cancel.set_phase(raccoon::v1::POINTER_PHASE_CANCEL);
+        cancel.set_buttons(0);
+        cancel.set_timestamp_micros(0);
+        host.SendPointer(client->view, ToFlutterPointer(cancel, host.NowMicros()));
+      }
+      client->down.clear();
+      // What it showed the app as goes with it (#201), and only with it.
+      if (settings_from == client) {
+        host.ApplySettings({});
+        settings_from = nullptr;
+      }
+      if (lifecycle_from == client) {
+        static constexpr char kResumed[] = "AppLifecycleState.resumed";
+        host.SendPlatformMessage("flutter/lifecycle",
+                                 reinterpret_cast<const uint8_t*>(kResumed),
+                                 sizeof(kResumed) - 1);
+        lifecycle_from = nullptr;
+      }
       if (focus == client) {
         focus = &first;
         host.text_input().SetComposer(first.composes);
@@ -1173,14 +1237,6 @@ int Serve(const Options& options) {
       host.RespondNoPlugin(waiting.channel, waiting.handle, "the client went away");
     }
     pending.clear();
-    // What it showed the app as goes with it (#201).
-    host.ApplySettings({});
-    if (lifecycle_from_client) {
-      static constexpr char kResumed[] = "AppLifecycleState.resumed";
-      host.SendPlatformMessage("flutter/lifecycle", reinterpret_cast<const uint8_t*>(kResumed),
-                               sizeof(kResumed) - 1);
-      lifecycle_from_client = false;
-    }
     disconnected();
     if (focus == &first) host.text_input().SetComposer(false);
     std::fprintf(stderr, "🦝 client disconnected\n");
@@ -1424,9 +1480,17 @@ int Serve(const Options& options) {
   };
   // How long the loop may sleep: until the next platform task, frame or
   // reply due, at most a second.
+  // A client whose socket is full has its frames held (SendFrames): its
+  // inline deadline, past, would spin the loop until it reads again;
+  // its socket's room wakes the loop instead (raccoon#244).
+  auto Held = [](const Client& client) {
+    return (client.server && client.server->backlog() > 0) ||
+           (client.gpu_server && client.gpu_server->backlog() > 0);
+  };
   auto Wait = [&]() {
-    int wait = NextWait(host, ExpireReplies(1000));
+    int wait = NextWait(host, ExpireReplies(1000), !Held(first));
     for (const auto& client : views) {
+      if (Held(*client)) continue;
       raccoon::SoftwareFrame* frame = host.frame(client->view);
       const int next = frame == nullptr ? -1 : frame->MillisUntilInline();
       if (next >= 0 && next < wait) wait = next;
@@ -1468,6 +1532,9 @@ int Serve(const Options& options) {
 }  // namespace
 
 int main(int argc, char** argv) {
+#if !defined(_WIN32)
+  g_parent_at_start = getppid();
+#endif
 #if defined(__linux__)
   // RACCOON_PTRACE_ANY=1 lets any process of this user attach a debugger,
   // for a backtrace of a runner that a test harness started.
