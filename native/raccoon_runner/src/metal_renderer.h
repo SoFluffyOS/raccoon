@@ -58,6 +58,10 @@ class MetalRenderer : public GpuRenderer {
                     const uint8_t* bgra, FlutterMetalExternalTexture* out);
   // Drops texture |texture_id|'s textures; from any thread.
   void ForgetPixelTexture(int64_t texture_id);
+  // A frame went by: camera textures let go before it go. NextDrawable
+  // does it for its own; in views mode, where the root renderer draws no
+  // view, the host calls it once a frame (raccoon#242).
+  void CountFrame();
 
   const std::string& description() const override;
   bool EnablePool(size_t count, std::string* error) override;

@@ -56,6 +56,9 @@ struct MetalRenderer::Impl {
     uint32_t id = 0;
     uint32_t stride = 0;
     bool busy = false;
+    // Presented, and not yet handed on: the GPU may still be drawing it
+    // (raccoon#242).
+    bool presenting = false;
   };
 
   id<MTLDevice> device = nil;
@@ -96,9 +99,14 @@ struct MetalRenderer::Impl {
 
   // PixelTexture's, by id: two each, the one not drawn last filled next, so
   // the CPU never writes into a texture the GPU may still be reading.
+  // Three a camera texture, filled in turn: one is filled while frames the
+  // GPU has yet to run may still sample the others, and with two a frame
+  // two camera frames behind sampled the image after its own
+  // (raccoon#242).
+  static constexpr int kPixelSlots = 3;
   struct Pixels {
-    id<MTLTexture> textures[2] = {nil, nil};
-    FlutterMetalTextureHandle handles[2] = {nullptr, nullptr};
+    id<MTLTexture> textures[kPixelSlots] = {nil, nil, nil};
+    FlutterMetalTextureHandle handles[kPixelSlots] = {nullptr, nullptr, nullptr};
     int current = 0;
     uint64_t number = 0;
     bool filled = false;
@@ -257,7 +265,7 @@ bool MetalRenderer::PixelTexture(int64_t texture_id, size_t width, size_t height
   std::unique_ptr<Impl::Pixels>& slot = impl_->pixels[texture_id];
   if (!slot) slot = std::make_unique<Impl::Pixels>();
   Impl::Pixels& kept = *slot;
-  if (kept.filled && kept.number != number) kept.current = 1 - kept.current;
+  if (kept.filled && kept.number != number) kept.current = (kept.current + 1) % Impl::kPixelSlots;
   id<MTLTexture> texture = kept.textures[kept.current];
   if (texture == nil || texture.width != width || texture.height != height) {
     MTLTextureDescriptor* descriptor =
@@ -393,6 +401,9 @@ void MetalRenderer::Release(uint32_t generation, int index, int fence_fd) {
       static_cast<size_t>(index) >= m.pool.size() || index == m.current) {
     return;
   }
+  // Nor has one still on its way: presented, the GPU not done with it
+  // (raccoon#242).
+  if (m.pool[index].presenting) return;
   m.pool[index].busy = false;
   if (kTrace) std::fprintf(stderr, "🦝 metal release pool %d\n", index);
 }
@@ -401,20 +412,23 @@ void MetalRenderer::ReleaseAll() {
   Impl& m = *impl_;
   std::lock_guard<std::mutex> lock(m.mutex);
   for (size_t i = 0; i < m.pool.size(); ++i) {
-    // The one being drawn stays taken until it is presented.
-    if (static_cast<int>(i) == m.current) continue;
+    // The one being drawn stays taken until it is presented, and one being
+    // presented until it is handed on.
+    if (static_cast<int>(i) == m.current || m.pool[i].presenting) continue;
     m.pool[i].busy = false;
   }
   if (kTrace) std::fprintf(stderr, "🦝 metal release pool all\n");
 }
 
+void MetalRenderer::CountFrame() {
+  std::lock_guard<std::mutex> lock(impl_->pixels_mutex);
+  impl_->retired.clear();
+}
+
 bool MetalRenderer::NextDrawable(size_t width, size_t height, int64_t* texture_id,
                                  const void** texture) {
   if (width == 0 || height == 0) return false;
-  {
-    std::lock_guard<std::mutex> lock(impl_->pixels_mutex);
-    impl_->retired.clear();
-  }
+  CountFrame();
   Impl& m = *impl_;
   std::lock_guard<std::mutex> lock(m.mutex);
   // A drawable the engine took and never presented (a frame it dropped)
@@ -472,11 +486,25 @@ bool MetalRenderer::Present(int64_t texture_id, const FrameCallback& callback) {
       m.current = -1;
       if (index < 0 || m.stopping) return false;
       ++m.in_flight;
+      if (static_cast<size_t>(index) < m.pool.size()) m.pool[index].presenting = true;
     }
     // The engine submitted its drawing on this queue; a command buffer after
     // it completes once that is done, and only then does the frame leave.
     Impl* impl = impl_.get();
     id<MTLCommandBuffer> commands = [m.queue commandBuffer];
+    if (commands == nil) {
+      // None to wait on: the frame doesn't go, its buffer is free again,
+      // and nothing is left in flight for Shutdown to wait on for good
+      // (raccoon#242).
+      std::lock_guard<std::mutex> lock(m.mutex);
+      if (static_cast<size_t>(index) < m.pool.size()) {
+        m.pool[index].presenting = false;
+        m.pool[index].busy = false;
+      }
+      --m.in_flight;
+      m.drained.notify_all();
+      return false;
+    }
     [commands addCompletedHandler:^(id<MTLCommandBuffer>) {
       GpuFrameCallback frame;
       {
@@ -487,6 +515,10 @@ bool MetalRenderer::Present(int64_t texture_id, const FrameCallback& callback) {
       if (frame) frame(generation, index, width, height, -1);
       {
         std::lock_guard<std::mutex> lock(impl->mutex);
+        // Handed on: the frame is the client's to give back from here.
+        if (generation == impl->generation && static_cast<size_t>(index) < impl->pool.size()) {
+          impl->pool[index].presenting = false;
+        }
         --impl->in_flight;
         // Under the lock: once it is let go, Shutdown may return and the
         // renderer, |impl| with it, be freed (a retired view's, #229).

@@ -436,7 +436,8 @@ void GlRenderer::Release(uint32_t generation, int index, int fence_fd) {
   // late or a duplicate, and freeing it would let the next frame draw into
   // what the client shows (#124).
   if (generation != generation_ || index < 0 ||
-      static_cast<size_t>(index) >= pool_.size() || index == current_) {
+      static_cast<size_t>(index) >= pool_.size() || index == current_ ||
+      index == presenting_) {
     if (fence_fd >= 0) close(fence_fd);
     return;
   }
@@ -456,8 +457,9 @@ void GlRenderer::ReleaseAll() {
     Buffer& buffer = pool_[i];
     if (buffer.fence >= 0) close(buffer.fence);
     buffer.fence = -1;
-    // The one being drawn stays taken until it is presented.
-    if (static_cast<int>(i) == current_) continue;
+    // The one being drawn stays taken until it is presented, and one being
+    // presented until it is handed on.
+    if (static_cast<int>(i) == current_ || static_cast<int>(i) == presenting_) continue;
     buffer.busy = false;
   }
   if (kTrace) std::fprintf(stderr, "🦝 gl release pool all\n");
@@ -663,6 +665,7 @@ bool GlRenderer::Present(const FrameCallback& callback) {
     height = pool_height_;
     pooled = pool_wanted_;
     current_ = -1;
+    presenting_ = pooled ? index : -1;
     // A frame going by readback while a client takes the ring: it never
     // sees it. Marked here, where it goes, not where Skia took the
     // framebuffer for it a frame before.
@@ -681,6 +684,10 @@ bool GlRenderer::Present(const FrameCallback& callback) {
       gpu_frame_(generation, index, width, height, fence);
     } else if (fence >= 0) {
       close(fence);
+    }
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      presenting_ = -1;
     }
     return true;
   }

@@ -182,6 +182,11 @@ void SoftwareFrame::PresentGpu(uint32_t generation, int index, size_t width,
   if (presented_) presented_();
 }
 
+bool SoftwareFrame::HoldsGpu(uint32_t generation, int index) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return pending_gpu_.index == index && pending_gpu_.generation == generation;
+}
+
 bool SoftwareFrame::TakeGpu(Gpu* out) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (pending_gpu_.index < 0) return false;

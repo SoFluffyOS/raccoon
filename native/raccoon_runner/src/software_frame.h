@@ -64,6 +64,9 @@ class SoftwareFrame {
   void PresentGpu(uint32_t generation, int index, size_t width, size_t height,
                   int fence_fd);
   bool TakeGpu(Gpu* out);
+  // Whether buffer |index| of |generation| is the GPU frame waiting to be
+  // sent: the client can't have it yet.
+  bool HoldsGpu(uint32_t generation, int index) const;
   void SetGpuReleaseCallback(std::function<void(uint32_t, int)> callback) {
     release_gpu_ = std::move(callback);
   }

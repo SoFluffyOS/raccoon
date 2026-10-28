@@ -552,6 +552,9 @@ bool EngineHost::CreateBackingStore(const FlutterBackingStoreConfig* config,
 #endif
 #if RACCOON_HAS_METAL
   if (target.metal != nullptr) {
+    // Camera textures go through the root renderer, which draws no view
+    // here: it counts a frame with the first view's, as on GL (raccoon#242).
+    if (target.metal != host->metal_ && config->view_id == 0) host->metal_->CountFrame();
     FlutterMetalTexture texture{};
     texture.struct_size = sizeof(FlutterMetalTexture);
     if (!target.metal->NextDrawable(width, height, &texture.texture_id, &texture.texture)) {
@@ -841,6 +844,16 @@ bool EngineHost::GpuBufferSetNow(FlutterViewId view, GpuBufferSet* out) const {
 
 void EngineHost::ReleaseGpuBuffer(FlutterViewId view, uint32_t generation, int index,
                                   int fence_fd) {
+  // The frame waiting to be sent was never the client's: a release naming
+  // it is late or a duplicate, and would free a buffer about to be shown
+  // (raccoon#242).
+  if (SoftwareFrame* pending = frame(view);
+      pending != nullptr && pending->HoldsGpu(generation, index)) {
+#if !defined(_WIN32)
+    if (fence_fd >= 0) close(fence_fd);
+#endif
+    return;
+  }
   if (GpuRenderer* gpu = GpuOf(view)) {
     gpu->Release(generation, index, fence_fd);
     bool owed = false;
