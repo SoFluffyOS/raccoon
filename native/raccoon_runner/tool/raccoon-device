@@ -661,7 +661,8 @@ STOPPED = ('No space left on device', 'disk I/O error', '** BUILD INTERRUPTED **
            'ninja: build stopped: interrupted', 'Killed signal terminated program',
            'Could not resolve host', 'The Internet connection appears to be offline',
            'The network connection was lost', 'Connection timed out', 'Failed to connect to',
-           'Temporary failure in name resolution', "CDN: trunk URL couldn't be downloaded")
+           'Temporary failure in name resolution', "CDN: trunk URL couldn't be downloaded",
+           'The request timed out.')
 
 
 def machine_stopped(log):
@@ -1024,7 +1025,8 @@ def fetch_prebuilt():
         return
     # Once an install: a network that fails fails for every plugin alike.
     prebuilt_tried = True
-    marker = os.path.join(cache, 'prebuilt-%s-macos.done' % runner_version)
+    # By architecture too: an x86_64 install (Rosetta) has its own archive.
+    marker = os.path.join(cache, 'prebuilt-%s-macos-%s.done' % (runner_version, arch))
     if os.path.exists(marker):
         return
     os.makedirs(cache, exist_ok=True)
@@ -1216,7 +1218,8 @@ STOPPED = ('No space left on device', 'disk I/O error', '** BUILD INTERRUPTED **
            'ninja: build stopped: interrupted', 'Killed signal terminated program',
            'Could not resolve host', 'The Internet connection appears to be offline',
            'The network connection was lost', 'Connection timed out', 'Failed to connect to',
-           'Temporary failure in name resolution', "CDN: trunk URL couldn't be downloaded")
+           'Temporary failure in name resolution', "CDN: trunk URL couldn't be downloaded",
+           'The request timed out.')
 
 
 def machine_stopped(log):
@@ -1224,11 +1227,12 @@ def machine_stopped(log):
     return any(sign in text for sign in STOPPED)
 
 
-def keep_failure(plugin, why, log):
+def keep_failure(plugin, why, log, state='failed'):
     """Keeps [plugin]'s failure, with a copy of [log] beside it, which the
     reason names: the install's own is written over by the next. Not one
     the machine stopped (a full disk, an interrupted build): the plugin
-    would be held back for nothing."""
+    would be held back for nothing. One that built nothing is kept the
+    same way, so every install does not build it again."""
     if log and os.path.isfile(log) and machine_stopped(log):
         return
     record = failure_path(plugin)
@@ -1239,8 +1243,18 @@ def keep_failure(plugin, why, log):
         why = why.replace(log, kept_log)
     staging = record + '.partial-%d' % os.getpid()
     with open(staging, 'w') as f:
-        json.dump({'why': why, 'at': time.time(), 'toolchain': toolchain_identity()}, f)
+        json.dump({'why': why, 'at': time.time(), 'toolchain': toolchain_identity(), 'state': state}, f)
     os.replace(staging, record)
+
+
+def kept_state(plugin):
+    """The state [plugin]'s kept failure was kept as: 'failed', or
+    'built_nothing'."""
+    try:
+        with open(failure_path(plugin)) as f:
+            return json.load(f).get('state', 'failed')
+    except (OSError, ValueError):
+        return 'failed'
 
 
 def in_cache(plugin):
@@ -1332,7 +1346,8 @@ def build_packages(plugins, entry):
              # build as Xcode keeps a project's (#188): most of the time.
              '-clonedSourcePackagesDirPath', os.path.join(cache, 'swiftpm-sources'),
              'SYMROOT=' + products,
-             'FRAMEWORK_SEARCH_PATHS=' + os.path.realpath(os.path.dirname(os.path.dirname(flutter_framework))),
+             # Quoted: a list setting, which xcodebuild splits at spaces.
+             'FRAMEWORK_SEARCH_PATHS="%s"' % os.path.realpath(os.path.dirname(os.path.dirname(flutter_framework))),
              'LD_RUNPATH_SEARCH_PATHS=@loader_path/../../..',
              'CODE_SIGNING_ALLOWED=NO', 'build'],
             cwd=os.path.join(packages_dir, SWIFT_FRAMEWORK), env=env,
@@ -1480,7 +1495,9 @@ for name, root, pubspec in packages:
 
 if not wanted and not swift and not status:
     sys.exit(0)
-current_keys = {p['name']: p['key'] for p in wanted}
+# Every plugin's, the Swift package ones too: one that falls back to its
+# pod is a dependency of others like any (#225).
+current_keys = {p['name']: p['key'] for p in wanted + swift}
 
 os.makedirs(os.path.join(out, 'frameworks'), exist_ok=True)
 built, failed, empty, from_cache, skipped = [], [], [], [], []
@@ -1573,13 +1590,22 @@ broken = {}  # name: why, for the misses that did not build
 if misses and cached_only:
     broken = {p['name']: SKIPPED for p in misses}
     misses = []
+# Kept failures first: asking for the toolchain (xcodebuild -version)
+# takes most of a second, which an install that builds nothing then
+# skips.
+for plugin in misses:
+    if (why := kept_failure(plugin)) is None:
+        continue
+    if kept_state(plugin) == 'built_nothing':
+        empty.append(plugin['name'])
+        status.append({'name': plugin['name'], 'state': 'built_nothing', 'detail': why})
+        broken[plugin['name']] = None
+        continue
+    broken[plugin['name']] = why
+misses = [p for p in misses if p['name'] not in broken]
+toolchain = None
 if misses:
     toolchain = can_build()
-    if toolchain is None:
-        for plugin in misses:
-            if (why := kept_failure(plugin)) is not None:
-                broken[plugin['name']] = why
-        misses = [p for p in misses if p['name'] not in broken]
 if misses:
     pods = os.path.join(out, 'build')
     log_path = os.path.join(pods, 'pod-install.log')
@@ -1734,8 +1760,10 @@ if misses:
                     if 'dynamically linked shared library' in kind:
                         made.append((os.path.relpath(variant, release), f))
         if not any(f == name + '.framework' for _, f in made):
+            why = 'built and made no framework'
+            keep_failure(plugin, why, build_log, 'built_nothing')
             empty.append(name)
-            status.append({'name': name, 'state': 'built_nothing', 'detail': 'built and made no framework'})
+            status.append({'name': name, 'state': 'built_nothing', 'detail': why})
             broken[name] = None
             drop(symroot, objroot)
             return
