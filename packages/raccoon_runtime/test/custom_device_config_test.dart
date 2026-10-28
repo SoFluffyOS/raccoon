@@ -128,6 +128,16 @@ void main() {
     expect(entry['platform'], 'linux-x64');
   });
 
+  test('an empty file is no devices, and setup writes the entry', () {
+    final path = p.join(temp.path, 'custom_devices.json');
+    File(path).writeAsStringSync('  \n');
+    final file = CustomDevicesFile(path);
+    file.upsert(CustomDeviceConfig(deviceHelper: '/h/raccoon-device'));
+    expect(file.ids(), ['raccoon']);
+    File(path).writeAsStringSync('');
+    expect(file.remove('raccoon'), isFalse);
+  });
+
   // #132: one malformed file threw from every read, which kept the
   // simulator's setup spinning.
   test(

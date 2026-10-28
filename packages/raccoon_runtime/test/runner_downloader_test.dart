@@ -1,6 +1,7 @@
 import 'dart:ffi' show Abi;
 import 'dart:io';
 
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:path/path.dart' as p;
 import 'package:raccoon_runtime/raccoon_runtime.dart';
 import 'package:test/test.dart';
@@ -215,7 +216,13 @@ void main() {
       isTrue,
     );
     expect(File(p.join(prebuilt.directory, 'stale')).existsSync(), isFalse);
-    expect(Directory('${prebuilt.directory}.partial').existsSync(), isFalse);
+    expect(
+      Directory(p.dirname(prebuilt.directory))
+          .listSync()
+          .map((entry) => p.basename(entry.path))
+          .where((name) => name.contains('.partial')),
+      isEmpty,
+    );
     final ran = await _runScript(prebuilt.binary);
     expect(ran.stdout, 'raccoon_runner 0.3.1\n');
     final ping = await _runScript(prebuilt.deviceHelper);
@@ -281,7 +288,13 @@ void main() {
       ),
     );
     expect(Directory(prebuilt.directory).existsSync(), isFalse);
-    expect(Directory('${prebuilt.directory}.partial').existsSync(), isFalse);
+    expect(
+      Directory(p.dirname(prebuilt.directory))
+          .listSync()
+          .map((entry) => p.basename(entry.path))
+          .where((name) => name.contains('.partial')),
+      isEmpty,
+    );
   });
 
   test('refuses something that is not an archive', () async {
@@ -372,14 +385,104 @@ void main() {
     expect(RunnerVersion.read(file)?.text, RunnerVersion.current);
   });
 
-  test('a prebuilt runner has a version only with its binary', () {
+  test('a prebuilt runner has a version only with its binary and helper', () {
     expect(prebuilt.version, isNull);
     File(prebuilt.versionFile)
       ..createSync(recursive: true)
       ..writeAsStringSync('0.3.0-pre.5\n');
     expect(prebuilt.version, isNull);
     File(prebuilt.binary).createSync();
+    // Half unpacked: no device helper, no runner.
+    expect(prebuilt.version, isNull);
+    File(prebuilt.deviceHelper).createSync(recursive: true);
     expect(prebuilt.version?.text, '0.3.0-pre.5');
+  });
+
+  test('an archive whose SHA-256 is not the release\'s is refused', () async {
+    final archive = fakeRunnerArchive(version: '0.3.1');
+    server.addRelease(
+      'runner-v0.3.1',
+      platforms: ['linux-x64'],
+      archive: archive,
+      digest: 'sha256:${sha256.convert([...archive, 0])}',
+    );
+    final release =
+        await downloader.find(pinned) ?? (throw StateError('no release'));
+    await expectLater(
+      downloader.install(release, prebuilt),
+      throwsA(isA<DownloadFailed>()),
+    );
+    expect(prebuilt.version, isNull);
+  });
+
+  test('an archive whose SHA-256 is the release\'s installs', () async {
+    final archive = fakeRunnerArchive(version: '0.3.1');
+    server.addRelease(
+      'runner-v0.3.1',
+      platforms: ['linux-x64'],
+      archive: archive,
+      digest: 'sha256:${sha256.convert(archive)}',
+    );
+    final release =
+        await downloader.find(pinned) ?? (throw StateError('no release'));
+    expect(release.sha256, '${sha256.convert(archive)}');
+    await downloader.install(release, prebuilt);
+    expect(prebuilt.version?.text, '0.3.1');
+  });
+
+  test(
+    'an archive cut short is refused, not unpacked into fewer files',
+    () async {
+      final archive = fakeRunnerArchive(
+        version: '0.3.1',
+        entries: {'LICENSE': 'x' * 40000},
+      );
+      server.addRelease(
+        'runner-v0.3.1',
+        platforms: ['linux-x64'],
+        archive: archive.sublist(0, archive.length * 9 ~/ 10),
+      );
+      final release =
+          await downloader.find(pinned) ?? (throw StateError('no release'));
+      await expectLater(
+        downloader.install(release, prebuilt),
+        throwsA(isA<DownloadFailed>()),
+      );
+      expect(prebuilt.version, isNull);
+    },
+  );
+
+  test('installs at the same moment each leave a whole runner', () async {
+    server.addRelease(
+      'runner-v0.3.1',
+      platforms: ['linux-x64'],
+      archive: fakeRunnerArchive(version: '0.3.1'),
+    );
+    final release =
+        await downloader.find(pinned) ?? (throw StateError('no release'));
+    for (var round = 0; round < 5; round++) {
+      await Future.wait([
+        for (var i = 0; i < 3; i++)
+          downloader
+              .install(release, prebuilt)
+              .catchError(
+                (Object error) => expect(error, isA<DownloadFailed>()),
+              ),
+      ]);
+      expect(prebuilt.version?.text, '0.3.1', reason: 'round $round');
+      expect(
+        File(p.join(prebuilt.directory, 'tool', 'engine_dir.sh')).existsSync(),
+        isTrue,
+        reason: 'round $round',
+      );
+    }
+    // Nothing left beside it.
+    expect(
+      Directory(
+        p.dirname(prebuilt.directory),
+      ).listSync().map((entry) => p.basename(entry.path)),
+      ['runner'],
+    );
   });
 }
 

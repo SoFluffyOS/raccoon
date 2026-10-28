@@ -200,7 +200,7 @@ final class CustomDevicesFile {
     final devices = <Object?>[];
     Object? decoded;
     if (File(path).existsSync()) {
-      decoded = jsonDecode(File(path).readAsStringSync());
+      decoded = _readStrictly(File(path));
       if (decoded case {_key: final List<Object?> existing}) {
         devices.addAll(
           existing.where((d) => d is! Map || d['id'] != config.id),
@@ -216,7 +216,7 @@ final class CustomDevicesFile {
   bool remove(String id) {
     final file = File(path);
     if (!file.existsSync()) return false;
-    final decoded = jsonDecode(file.readAsStringSync());
+    final decoded = _readStrictly(file);
     if (decoded case {_key: final List<Object?> existing}) {
       final kept = existing.where((d) => d is! Map || d['id'] != id).toList();
       if (kept.length == existing.length) return false;
@@ -246,6 +246,15 @@ final class CustomDevicesFile {
       '${const JsonEncoder.withIndent('  ').convert(contents)}\n',
     );
     staged.renameSync(file.path);
+  }
+
+  /// [file]'s contents; null when it is empty, which is no devices. Throws
+  /// a [FormatException] when it is not JSON, rather than have it written
+  /// over with the user's other devices lost.
+  static Object? _readStrictly(File file) {
+    final text = file.readAsStringSync();
+    if (text.trim().isEmpty) return null;
+    return jsonDecode(text);
   }
 
   /// The file's contents; null when it is missing or not JSON, which reads

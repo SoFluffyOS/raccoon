@@ -6,6 +6,7 @@ import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:path/path.dart' as p;
 import 'package:raccoon_runtime/src/runner_version.dart';
 
@@ -25,6 +26,7 @@ final class RunnerRelease {
     required this.version,
     required this.asset,
     required this.prerelease,
+    this.sha256,
   });
 
   final RunnerVersion version;
@@ -33,6 +35,10 @@ final class RunnerRelease {
   final Uri asset;
 
   final bool prerelease;
+
+  /// The archive's SHA-256, in hex, as the release lists it; null for a
+  /// release that lists none.
+  final String? sha256;
 }
 
 /// Where a downloaded release of the runner unpacks: the binary beside
@@ -56,8 +62,10 @@ final class PrebuiltRunner {
   /// The version that was downloaded.
   String get versionFile => p.join(directory, 'VERSION');
 
-  /// Whether a runner is there, and which.
-  RunnerVersion? get version => switch (File(binary).existsSync()) {
+  /// Whether a runner is there, and which: its binary and its device
+  /// helper both, so a runner half unpacked is none.
+  RunnerVersion? get version => switch (File(binary).existsSync() &&
+      File(deviceHelper).existsSync()) {
     true => RunnerVersion.read(versionFile),
     false => null,
   };
@@ -89,7 +97,7 @@ final class RunnerDownloader {
 
   /// The Raccoon repository's releases, newest first, prereleases included.
   static final defaultReleases = Uri.parse(
-    'https://api.github.com/repos/SoFluffyOS/raccoon/releases?per_page=30',
+    'https://api.github.com/repos/SoFluffyOS/raccoon/releases?per_page=100',
   );
 
   /// What a runner release's tag starts with.
@@ -154,12 +162,13 @@ final class RunnerDownloader {
         continue;
       }
       if (best != null && !best.version.isOlderThan(candidate)) continue;
-      final url = _assetUrl(entry['assets'], assetName(candidate, platform));
-      if (url == null) continue;
+      final found = _asset(entry['assets'], assetName(candidate, platform));
+      if (found == null) continue;
       best = RunnerRelease(
         version: candidate,
-        asset: Uri.parse(url),
+        asset: Uri.parse(found.url),
         prerelease: entry['prerelease'] == true,
+        sha256: found.sha256,
       );
     }
     return best;
@@ -169,16 +178,37 @@ final class RunnerDownloader {
   /// what was there. The binary and the tools come out executable.
   Future<void> install(RunnerRelease release, PrebuiltRunner into) async {
     final bytes = await _get(release.asset);
+    // A download cut short, or changed on the way, is not unpacked.
+    if (release.sha256 case final expected?) {
+      final got = await Isolate.run(() => sha256.convert(bytes).toString());
+      if (got != expected.toLowerCase()) {
+        throw DownloadFailed(
+          '${release.asset} did not arrive whole (its SHA-256 is $got, '
+          'the release says $expected)',
+        );
+      }
+    }
     final directory = Directory(into.directory);
-    final staging = '${directory.path}.partial';
+    // A folder of its own: two hosts setting up at once (two editor
+    // windows, an editor and the simulator) each unpack apart.
+    final staging =
+        '${directory.path}.partial-$pid-${DateTime.now().microsecondsSinceEpoch}';
     // Decoding and writing a runner's archive takes long enough to freeze
     // the window, so it runs on its own isolate.
     final binary = p.basename(into.binary);
-    await Isolate.run(() => _unpack(bytes, release.asset, staging, binary));
+    try {
+      await Isolate.run(() => _unpack(bytes, release.asset, staging, binary));
+    } on FileSystemException catch (error) {
+      _deleteIfAny(Directory(staging));
+      throw DownloadFailed(
+        'cannot unpack the runner into $staging: '
+        '${error.osError?.message ?? error.message}',
+      );
+    }
     // The old runner moves aside whole before the new one moves in, and
     // comes back if that fails: a file held open (a running runner, on
     // Windows) stops the move, not a delete halfway through.
-    _deleteAsides(directory);
+    _deleteLeftovers(directory);
     final aside = Directory(
       '${directory.path}.old-$pid-${DateTime.now().microsecondsSinceEpoch}',
     );
@@ -194,9 +224,12 @@ final class RunnerDownloader {
       }
     }
     try {
-      Directory(staging).renameSync(directory.path);
+      await _moveIn(Directory(staging), directory.path);
     } on FileSystemException catch (error) {
-      if (aside.existsSync()) aside.renameSync(directory.path);
+      _deleteIfAny(Directory(staging));
+      if (aside.existsSync() && !directory.existsSync()) {
+        aside.renameSync(directory.path);
+      }
       throw DownloadFailed(
         'cannot move the runner into ${directory.path}: '
         '${error.osError?.message ?? error.message}',
@@ -205,14 +238,44 @@ final class RunnerDownloader {
     _deleteIfAny(aside);
   }
 
-  /// Deletes the runners earlier installs moved aside next to [directory]
-  /// and could not delete then.
-  static void _deleteAsides(Directory directory) {
+  /// Moves [staging] in as [target]. Windows refuses for a moment while
+  /// antivirus holds the runner just written: tried again there for a few
+  /// seconds, rather than download it again, as the runtime store does.
+  static Future<void> _moveIn(Directory staging, String target) async {
+    for (var attempt = 0; ; attempt++) {
+      try {
+        staging.renameSync(target);
+        return;
+      } on FileSystemException {
+        if (!Platform.isWindows ||
+            attempt >= 30 ||
+            Directory(target).existsSync()) {
+          rethrow;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+    }
+  }
+
+  /// Deletes what earlier installs left next to [directory]: runners moved
+  /// aside and not deleted then, and unpacked folders of installs killed
+  /// midway. Only those an hour old, by the time in their names: another
+  /// install may be using a newer one right now.
+  static void _deleteLeftovers(Directory directory) {
     final parent = directory.parent;
     if (!parent.existsSync()) return;
-    final prefix = '${p.basename(directory.path)}.old-';
+    final base = p.basename(directory.path);
+    final made = RegExp(
+      '^${RegExp.escape(base)}\\.(?:old|partial)-\\d+-(\\d+)\$',
+    );
+    final before = DateTime.now().subtract(const Duration(hours: 1));
     for (final entry in parent.listSync(followLinks: false)) {
-      if (entry is Directory && p.basename(entry.path).startsWith(prefix)) {
+      if (entry is! Directory) continue;
+      final micros = int.tryParse(
+        made.firstMatch(p.basename(entry.path))?.group(1) ?? '',
+      );
+      if (micros == null) continue;
+      if (DateTime.fromMicrosecondsSinceEpoch(micros).isBefore(before)) {
         _deleteIfAny(entry);
       }
     }
@@ -238,9 +301,15 @@ final class RunnerDownloader {
   ) {
     final Archive archive;
     try {
-      archive = TarDecoder().decodeBytes(
-        const GZipDecoder().decodeBytes(bytes),
-      );
+      final data = const GZipDecoder().decodeBytes(bytes);
+      // A cut archive decodes into fewer files without a word: what came
+      // out has to be what the gzip's trailer says went in.
+      if (!_wholeGzip(bytes, data)) {
+        throw DownloadFailed('$source arrived cut short');
+      }
+      archive = TarDecoder().decodeBytes(data);
+    } on DownloadFailed {
+      rethrow;
     } on Object catch (error) {
       throw DownloadFailed('$source is not a tar.gz archive: $error');
     }
@@ -268,14 +337,32 @@ final class RunnerDownloader {
 
   static const _ownerExecutable = 0x40;
 
-  static String? _assetUrl(Object? assets, String name) {
+  /// Whether [data] is all [gzip] holds: a gzip ends with its data's CRC-32
+  /// and length (little-endian), which a cut one has not.
+  static bool _wholeGzip(List<int> gzip, List<int> data) {
+    if (gzip.length < 18) return false;
+    int word(int at) =>
+        gzip[at] | gzip[at + 1] << 8 | gzip[at + 2] << 16 | gzip[at + 3] << 24;
+    final end = gzip.length;
+    return word(end - 4) == data.length & 0xffffffff &&
+        word(end - 8) == getCrc32(data);
+  }
+
+  /// The asset [name]'s download URL, and its SHA-256 when the release
+  /// lists one (GitHub's `digest`, `sha256:<hex>`).
+  static ({String url, String? sha256})? _asset(Object? assets, String name) {
     if (assets is! List) return null;
     for (final asset in assets) {
       if (asset case {
         'name': final String assetName,
         'browser_download_url': final String url,
       } when assetName == name) {
-        return url;
+        final digest = switch (asset['digest']) {
+          final String value when value.startsWith('sha256:') => value
+              .substring('sha256:'.length),
+          _ => null,
+        };
+        return (url: url, sha256: digest);
       }
     }
     return null;

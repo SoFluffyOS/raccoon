@@ -34,6 +34,7 @@ final class FakeReleaseServer {
     List<int>? archive,
     bool prerelease = false,
     bool draft = false,
+    String? digest,
   }) {
     final version = tag.replaceFirst(RegExp(r'^(?:runner-)?v'), '');
     _releases.add({
@@ -47,6 +48,7 @@ final class FakeReleaseServer {
             'browser_download_url':
                 'http://127.0.0.1:${_server.port}/download/'
                 'raccoon_runner-$version-$platform.tar.gz',
+            if (digest != null) 'digest': digest,
           },
       ],
     });
