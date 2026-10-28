@@ -114,10 +114,9 @@ class SoftwareFrame {
 
   size_t FrameCount() const;
 
-  // Writes the latest frame as a binary PPM. |bgra| says how the engine laid
-  // out the pixel bytes. Returns false when there is no frame or the file
-  // cannot be written.
-  // Writes the latest inline frame, in its own byte order unless |rgba|.
+  // Writes the latest inline frame as a binary PPM, reading its bytes in
+  // their own order unless |rgba|. Returns false when there is no frame or
+  // the file cannot be written.
   bool WritePpm(const std::string& path, bool rgba) const;
 
   size_t width() const { return width_; }
