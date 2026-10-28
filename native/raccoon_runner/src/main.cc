@@ -966,6 +966,10 @@ int Serve(const Options& options) {
   };
 #endif
 
+  // Whether the views socket listens: a hello says views only then, or a
+  // client would open them on a socket that is not there.
+  bool views_listening = false;
+
   // What every client's socket does with what it is sent; the first
   // client's adds the app's own channels below.
   auto ClientHandler = [&](Client* client) {
@@ -1104,11 +1108,11 @@ int Serve(const Options& options) {
       if (meant_for != 0 && meant_for != client->shared_generation) return;
       if (client->pool) client->pool->Release(static_cast<int>(release.index()));
     };
-    handler.on_client_connected = [&host, client]() {
+    handler.on_client_connected = [&host, &views_listening, client]() {
       raccoon::v1::RunnerMessage hello;
       hello.mutable_hello()->set_protocol_version(kProtocolVersion);
       hello.mutable_hello()->set_pid(ThisProcessId());
-      hello.mutable_hello()->set_views(host.views());
+      hello.mutable_hello()->set_views(host.views() && views_listening);
       hello.mutable_hello()->set_view_id(client->view);
       client->server->Send(hello);
       client->last_sent = 0;
@@ -1299,7 +1303,8 @@ int Serve(const Options& options) {
       std::fprintf(stderr, "🦝 view %lld opened\n", static_cast<long long>(view));
     };
     views_server = std::make_unique<raccoon::RunnerServer>(loop, views_handler);
-    if (!views_server->Listen(ViewsSocketPath(options.socket), &error)) {
+    views_listening = views_server->Listen(ViewsSocketPath(options.socket), &error);
+    if (!views_listening) {
       std::fprintf(stderr, "🦝 no views: %s\n", error.c_str());
       views_server.reset();
     }

@@ -2452,6 +2452,48 @@ void main() {
   );
 
   test(
+    'a runner whose views socket cannot listen says it takes no views',
+    () async {
+      // #251: a folder where the views socket goes, so it cannot bind.
+      final temp = Directory.systemTemp.createTempSync('raccoon_views');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      Directory(endpoint.views.path).createSync();
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: viewsAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          width: 390,
+          height: 300,
+          views: true,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        expect(client.takesViews, isFalse);
+        // The app still draws for its first client.
+        final frame = await client.frames.first.timeout(
+          const Duration(seconds: 15),
+        );
+        expect((frame.width, frame.height), (390, 300));
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready && Directory(viewsAssets).existsSync()
+            ? false
+            : 'build the runner and example/views first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'one run shows the app in a view per client, each its size and its taps',
     () async {
       // #182: example/views draws its root in every view, coloured by the
