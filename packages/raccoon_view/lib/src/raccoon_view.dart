@@ -74,6 +74,13 @@ class _RaccoonViewState extends State<RaccoonView> {
   int? _textureId;
   bool _creatingTexture = false;
   Completer<void>? _making;
+  // The GPU socket the texture reads, or is connecting to.
+  String? _textureSocket;
+
+  /// The textures being let go, by the GPU socket each read: a new texture
+  /// on the same socket (a reconnect to the same runner) connects only
+  /// after, the socket taking one client at a time.
+  static final _lettingGo = <String, Future<void>>{};
   // Whether frames arrive as GPU buffers, and the buffer the texture shows.
   bool _gpuLive = false;
 
@@ -248,6 +255,14 @@ class _RaccoonViewState extends State<RaccoonView> {
           if (current()) _creatingTexture = false;
           return;
         }
+        if (_lettingGo[set.socket] case final previous?) {
+          await previous;
+          if (!current()) {
+            await _letGo(gpu, id);
+            return;
+          }
+        }
+        _textureSocket = set.socket;
         final releases = await gpu.connect(id, set.socket);
         if (!current()) {
           await _letGo(gpu, id);
@@ -313,6 +328,16 @@ class _RaccoonViewState extends State<RaccoonView> {
       null when _creatingTexture => _making?.future,
       null => null,
     };
+    if ((_textureSocket, disposing) case (final socket?, final letGo?)) {
+      final done = letGo.catchError((Object _) {});
+      _lettingGo[socket] = done;
+      unawaited(
+        done.whenComplete(() {
+          if (identical(_lettingGo[socket], done)) _lettingGo.remove(socket);
+        }),
+      );
+    }
+    _textureSocket = null;
     _making = null;
     _textureId = null;
     _creatingTexture = false;

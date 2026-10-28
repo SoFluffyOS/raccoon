@@ -84,6 +84,27 @@ class _GatedTextures extends _FakeTextures {
   }
 }
 
+/// Textures whose dispose waits for the test, as a host's does until the
+/// texture's socket is closed.
+class _SlowDisposeTextures extends _FakeTextures {
+  var nextId = 1;
+  final disposing = <Completer<void>>[];
+
+  @override
+  Future<int> create() async {
+    calls.add('create');
+    return nextId++;
+  }
+
+  @override
+  Future<void> dispose(int textureId) {
+    calls.add('dispose $textureId');
+    final done = Completer<void>();
+    disposing.add(done);
+    return done.future;
+  }
+}
+
 /// A connection whose client asked for pixel frames for a capture (#204).
 class _CapturingConnection extends _GpuConnection implements CaptureConnection {
   @override
@@ -383,6 +404,46 @@ void main() {
 
     await tester.pumpWidget(const SizedBox());
     expect(textures.calls.last, 'dispose 2');
+  });
+
+  testWidgets('a new connection to the same runner connects its texture '
+      'only once the old one let go of the socket', (tester) async {
+    // A reconnect to the same runner names the same GPU socket, which takes
+    // one client at a time: connected before the old texture let go, the
+    // new one was turned away and the view stayed blank.
+    final first = _GpuConnection();
+    final second = _GpuConnection();
+    final textures = _SlowDisposeTextures();
+    await tester.pumpWidget(
+      RaccoonView(connection: first, gpuTextures: textures),
+    );
+    first.sets.add(_set('/run/app.gpu'));
+    await tester.pump();
+    await tester.pump();
+    expect(textures.calls, ['create', 'connect 1 /run/app.gpu']);
+
+    await tester.pumpWidget(
+      RaccoonView(connection: second, gpuTextures: textures),
+    );
+    second.sets.add(_set('/run/app.gpu'));
+    await tester.pump();
+    await tester.pump();
+    expect(textures.calls, isNot(contains('connect 2 /run/app.gpu')));
+
+    textures.disposing.single.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(textures.calls, [
+      'create',
+      'connect 1 /run/app.gpu',
+      'dispose 1',
+      'create',
+      'connect 2 /run/app.gpu',
+    ]);
+    await tester.pumpWidget(const SizedBox());
+    for (final done in textures.disposing) {
+      if (!done.isCompleted) done.complete();
+    }
   });
 
   testWidgets('a texture that fails to be made is tried again', (tester) async {
