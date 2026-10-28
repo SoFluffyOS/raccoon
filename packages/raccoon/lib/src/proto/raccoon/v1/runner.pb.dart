@@ -1568,6 +1568,9 @@ class Frame extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   void clearRowBytes() => $_clearField(4);
 
+  /// The pixels' byte order, frame by frame: a frame drawn in software comes
+  /// in the host's order, one a GPU renderer read back in the order it read
+  /// it, so one run can send both. Unspecified for a GPU-buffer frame.
   @$pb.TagNumber(5)
   PixelFormat get format => $_getN(4);
   @$pb.TagNumber(5)

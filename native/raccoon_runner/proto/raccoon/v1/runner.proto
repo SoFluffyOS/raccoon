@@ -208,6 +208,9 @@ message Frame {
   uint32 width = 2;
   uint32 height = 3;
   uint32 row_bytes = 4;
+  // The pixels' byte order, frame by frame: a frame drawn in software comes
+  // in the host's order, one a GPU renderer read back in the order it read
+  // it, so one run can send both. Unspecified for a GPU-buffer frame.
   PixelFormat format = 5;
   bytes pixels = 6;
   uint64 timestamp_micros = 7;
