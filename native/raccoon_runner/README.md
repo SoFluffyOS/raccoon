@@ -157,13 +157,17 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   libraries and their register symbols; `tool/raccoon-device install`
   writes that manifest after building the plugins the project resolves
   (`.dart_tool/package_config.json`, every package with a Linux
-  `pluginClass`) in one CMake project with what the desktop template gives
-  a plugin, and `run` passes it. Needs cmake, ninja, pkg-config and the
-  GTK development files, as the desktop target does; what built is cached
-  by plugin version, runner version and engine, and a release's archive of
-  the common plugins (`tool/plugins`, built by CI) drops into that cache
-  on the first install, so those cost nothing and a machine without a
-  toolchain still gets them. Without a toolchain for the rest, or when a
+  `pluginClass` or `ffiPlugin`), each in a CMake project of its own with
+  what the desktop template gives a plugin, a few at once, and `run`
+  passes it. What a plugin bundles (`<name>_bundled_libraries`) goes
+  beside its library, as the template installs it. Needs cmake, ninja,
+  pkg-config and the GTK development files, as the desktop target does;
+  what built is cached by plugin version and runner version (not by
+  engine: a plugin builds against the runner's own library), and a
+  release's archive of the common plugins (`tool/plugins`, built by CI)
+  drops into that cache on the first install, whatever the Flutter
+  version, so those cost nothing and a machine without a toolchain still
+  gets them. Without a toolchain for the rest, or when a
   plugin fails to build, it says so and the app sees no plugin. A
   loaded plugin's channels are answered before a client sees them, GLib's
   main context is pumped from the runner's loop, and a plugin's textures
@@ -186,7 +190,7 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   project: one scratch Pods project for what the cache misses, every pod
   a dynamic framework, each plugin's target built on its own. Needs Xcode
   and CocoaPods, as the macOS target does; cached the same way as on Linux,
-  and a release's archive of the common plugins (both Mac architectures)
+  and by engine too (a pod builds against the SDK's FlutterMacOS), and a release's archive of the common plugins (both Mac architectures)
   drops into that cache on the first install: the fifteen of `tool/plugins`
   in under a second instead of 2 min.
   A plugin with a Swift package (`macos/<name>/Package.swift`, or under
