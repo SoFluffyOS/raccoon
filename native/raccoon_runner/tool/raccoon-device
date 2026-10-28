@@ -681,6 +681,12 @@ def keep_failure(plugin, why, log, state='failed'):
     os.replace(staging, record)
 
 
+# A few plugins build at once (CMake's configure is mostly one process),
+# each with its share of the cores: ninja's own width is all of them.
+WORKERS = max(1, min(4, (os.cpu_count() or 2) // 2))
+JOBS = max(2, (os.cpu_count() or 2) // WORKERS)
+
+
 def build(plugin):
     """Configures and builds [plugin] in a CMake project of its own, and
     caches what it made: its state ('built', 'failed' or
@@ -700,7 +706,8 @@ def build(plugin):
     with open(log, 'w') as written:
         configured = subprocess.run(['cmake', '-S', project, '-B', os.path.join(project, 'out'), '-G', 'Ninja'],
                                     stdout=written, stderr=subprocess.STDOUT).returncode == 0
-        ok = configured and subprocess.run(['cmake', '--build', os.path.join(project, 'out')],
+        ok = configured and subprocess.run(['cmake', '--build', os.path.join(project, 'out'),
+                                            '--parallel', str(JOBS)],
                                            stdout=written, stderr=subprocess.STDOUT).returncode == 0
     if not ok:
         why = 'did not build; see ' + log
@@ -763,13 +770,11 @@ for plugin in wanted:
         outcome[name] = kept + ([],)
         continue
     misses.append(plugin)
-# A few at once, each in its own folder: CMake's configure is mostly one
-# process, and ninja keeps the cores busy for the rest.
+# A few at once, each in its own folder (WORKERS).
 if misses:
     toolchain_identity()  # read once, before the threads keep failures
     import concurrent.futures
-    workers = max(1, min(4, (os.cpu_count() or 2) // 2))
-    with concurrent.futures.ThreadPoolExecutor(workers) as pool:
+    with concurrent.futures.ThreadPoolExecutor(WORKERS) as pool:
         for plugin, result in zip(misses, pool.map(build, misses)):
             outcome[plugin['name']] = result
 for plugin in wanted:
