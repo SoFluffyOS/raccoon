@@ -40,7 +40,9 @@ class _ViewerAppState extends State<ViewerApp> {
             temporaryDirectory: Directory.systemTemp.path,
           );
     try {
-      final client = await RunnerClient.connect(endpoint);
+      // The view copies each frame as it shows it, so the shared buffers'
+      // pixels can be read into the same few buffers every frame.
+      final client = await RunnerClient.connect(endpoint, reusePixels: true);
       debugPrint('raccoon_viewer: connected to ${endpoint.uri}');
       if (!mounted) return;
       setState(() => _client = client);
