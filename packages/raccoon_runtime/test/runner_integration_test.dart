@@ -1471,6 +1471,130 @@ void main() {
     timeout: const Timeout(Duration(minutes: 8)),
   );
   test(
+    'on Linux a plugin gets its target platform and its bundled libraries; '
+    'one that made nothing is kept, a configure failure is not',
+    () async {
+      // #246: three FFI plugins. plugin_b bundles a versioned library and
+      // checks FLUTTER_TARGET_PLATFORM; plugin_n builds nothing (jni without
+      // a JDK); plugin_c stops CMake configuring (a missing -dev package).
+      final temp = Directory.systemTemp.createTempSync('raccoon_linux');
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      void plugin(String name, String cmake) {
+        write(
+          '$name/pubspec.yaml',
+          'name: $name\nversion: 1.0.0\nflutter:\n  plugin:\n    platforms:\n'
+              '      linux:\n        ffiPlugin: true\n',
+        );
+        write('$name/linux/CMakeLists.txt', cmake);
+      }
+
+      plugin(
+        'plugin_b',
+        'cmake_minimum_required(VERSION 3.14)\n'
+            'if(NOT FLUTTER_TARGET_PLATFORM MATCHES "^linux-(x64|arm64)\$")\n'
+            '  message(FATAL_ERROR "no target platform")\n'
+            'endif()\n'
+            'add_library(plugin_b SHARED plugin_b.cc)\n'
+            'set(plugin_b_bundled_libraries "\$<TARGET_FILE:plugin_b>" '
+            '"\${CMAKE_CURRENT_SOURCE_DIR}/libs/libextra.so.1" PARENT_SCOPE)\n',
+      );
+      write(
+        'plugin_b/linux/plugin_b.cc',
+        'int plugin_b_value() { return 1; }\n',
+      );
+      write('plugin_b/linux/libs/libextra.so.1', 'not really a library\n');
+      plugin('plugin_n', 'cmake_minimum_required(VERSION 3.14)\n');
+      plugin(
+        'plugin_c',
+        'cmake_minimum_required(VERSION 3.14)\n'
+            'message(FATAL_ERROR "a -dev package is missing")\n',
+      );
+      write(
+        'app/pubspec.yaml',
+        'name: app\ndependencies:\n  plugin_b:\n  plugin_n:\n  plugin_c:\n',
+      );
+      write(
+        'app/.dart_tool/package_config.json',
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+            for (final name in ['plugin_b', 'plugin_n', 'plugin_c'])
+              {'name': name, 'rootUri': '../../$name', 'packageUri': 'lib/'},
+          ],
+        }),
+      );
+      final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+        ..createSync(recursive: true);
+      final data = p.join(temp.path, 'data');
+      final plugins = p.join(data, 'raccoon', 'apps', 'app', 'plugins');
+      // Each plugin's state and detail.
+      Future<Map<String, String>> install() async {
+        final result = await Process.run(
+          p.join(runnerDir, 'tool', 'raccoon-device'),
+          ['install', bundle.path, 'app'],
+          environment: {
+            'RACCOON_RUNNER': binary!,
+            if (sdk != null) 'FLUTTER_ROOT': sdk,
+            'XDG_DATA_HOME': data,
+            'RACCOON_PLUGIN_CACHE': p.join(temp.path, 'cache'),
+            'RACCOON_NO_PREBUILT': '1',
+          },
+        );
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        final manifest =
+            jsonDecode(
+                  File(p.join(plugins, 'manifest.json')).readAsStringSync(),
+                )
+                as Map;
+        return {
+          for (final entry in (manifest['status'] as List).cast<Map>())
+            '${entry['name']}': '${entry['state']}: ${entry['detail']}',
+        };
+      }
+
+      try {
+        final first = await install();
+        expect(first.containsKey('plugin_b'), isFalse, reason: '$first');
+        expect(
+          Directory(
+            p.join(plugins, 'lib'),
+          ).listSync().map((file) => p.basename(file.path)),
+          containsAll(['libplugin_b.so', 'libextra.so.1']),
+        );
+        // Its build tree goes once it is cached.
+        expect(
+          Directory(p.join(plugins, 'build', 'plugin_b')).existsSync(),
+          isFalse,
+        );
+        expect(first['plugin_n'], 'built_nothing: built and made no library');
+        expect(first['plugin_c'], startsWith('failed: did not build'));
+        final second = await install();
+        expect(second['plugin_n'], startsWith('built_nothing: '));
+        expect(second['plugin_n'], contains('kept from'));
+        expect(second['plugin_c'], isNot(contains('kept')));
+        // The cache keeps the versioned library too.
+        expect(
+          Directory(
+            p.join(plugins, 'lib'),
+          ).listSync().map((file) => p.basename(file.path)),
+          contains('libextra.so.1'),
+        );
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isLinux)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'the Linux half of the helper',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 4)),
+  );
+  test(
     'on Windows a plugin is cached whole, and rebuilt when its sources change',
     () async {
       // #141: the echo plugin, copied under a folder named hosted (which is
