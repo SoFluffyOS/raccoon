@@ -65,7 +65,8 @@ struct Options {
   std::string socket;
   size_t frames = 1;
   int timeout_ms = 10000;
-  bool bgra = raccoon::kSoftwareFrameIsBgra;
+  // render: the frame read as RGBA whatever it says (--rgba).
+  bool rgba = false;
   // A manifest of native plugins to load (see plugins.h), or empty.
   std::string plugins;
   // render: views beside the app's own, each written beside --out as
@@ -93,9 +94,11 @@ constexpr auto kFirstClientWait = std::chrono::seconds(1);
 constexpr size_t kStartupLines = 200;
 
 constexpr uint32_t kProtocolVersion = 1;
-constexpr raccoon::v1::PixelFormat kPixelFormat =
-    raccoon::kSoftwareFrameIsBgra ? raccoon::v1::PIXEL_FORMAT_BGRA8888
-                                  : raccoon::v1::PIXEL_FORMAT_RGBA8888;
+// A frame's byte order as its message says it: the software renderer's,
+// or the one a GPU renderer read it back in.
+raccoon::v1::PixelFormat FormatOf(bool bgra) {
+  return bgra ? raccoon::v1::PIXEL_FORMAT_BGRA8888 : raccoon::v1::PIXEL_FORMAT_RGBA8888;
+}
 
 void Usage() {
   std::fprintf(stderr,
@@ -121,7 +124,7 @@ bool ParseOptions(int argc, char** argv, Options* options) {
       break;
     }
     if (arg == "--rgba") {
-      options->bgra = false;
+      options->rgba = true;
       continue;
     }
     if (arg == "--views") {
@@ -626,7 +629,7 @@ int Render(const Options& options) {
                host.frame().FrameCount(), host.frame().width(),
                host.frame().height());
   int exit_code = 0;
-  if (host.frame().WritePpm(options.out, options.bgra)) {
+  if (host.frame().WritePpm(options.out, options.rgba)) {
     std::fprintf(stderr, "🦝 wrote %s\n", options.out.c_str());
   } else {
     std::fprintf(stderr, "🦝 no frame written\n");
@@ -642,7 +645,7 @@ int Render(const Options& options) {
     std::fprintf(stderr, "🦝 view %lld: %zu frames presented, %zux%zu\n",
                  static_cast<long long>(view), frame.FrameCount(), frame.width(),
                  frame.height());
-    if (frame.WritePpm(out, options.bgra)) {
+    if (frame.WritePpm(out, options.rgba)) {
       std::fprintf(stderr, "🦝 wrote %s\n", out.c_str());
     } else {
       std::fprintf(stderr, "🦝 no frame written for view %lld\n", static_cast<long long>(view));
@@ -1391,7 +1394,7 @@ int Serve(const Options& options) {
       out->set_width(static_cast<uint32_t>(shared.width));
       out->set_height(static_cast<uint32_t>(shared.height));
       out->set_row_bytes(static_cast<uint32_t>(shared.row_bytes));
-      out->set_format(kPixelFormat);
+      out->set_format(FormatOf(shared.bgra));
       out->set_in_shared_buffer(true);
       out->set_buffer_index(static_cast<uint32_t>(shared.index));
       out->set_timestamp_micros(host.NowMicros());
@@ -1407,7 +1410,7 @@ int Serve(const Options& options) {
       out->set_width(static_cast<uint32_t>(copy.width));
       out->set_height(static_cast<uint32_t>(copy.height));
       out->set_row_bytes(static_cast<uint32_t>(copy.row_bytes));
-      out->set_format(kPixelFormat);
+      out->set_format(FormatOf(copy.bgra));
       out->set_pixels(std::move(copy.pixels));
       out->set_timestamp_micros(host.NowMicros());
       server.Send(message);

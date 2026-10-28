@@ -70,7 +70,6 @@ struct MetalRenderer::Impl {
   id<MTLBuffer> readback_buffer = nil;
   size_t readback_width = 0;
   size_t readback_height = 0;
-  std::vector<uint8_t> frame;
 
   mutable std::mutex mutex;
   // Global surfaces until the host takes them by Mach port (ShareByPort);
@@ -149,7 +148,6 @@ bool MetalRenderer::Impl::EnsureReadback(size_t width, size_t height) {
   }
   readback_width = width;
   readback_height = height;
-  frame.resize(width * height * 4);
   return true;
 }
 
@@ -547,16 +545,8 @@ destinationBytesPerImage:row_bytes * height];
   [blit endEncoding];
   [commands commit];
   [commands waitUntilCompleted];
-  // Metal drew BGRA, top row first; the frame path on this host wants RGBA.
-  const uint8_t* source = static_cast<const uint8_t*>(m.readback_buffer.contents);
-  uint8_t* target = m.frame.data();
-  for (size_t i = 0; i < width * height; ++i) {
-    target[i * 4 + 0] = source[i * 4 + 2];
-    target[i * 4 + 1] = source[i * 4 + 1];
-    target[i * 4 + 2] = source[i * 4 + 0];
-    target[i * 4 + 3] = source[i * 4 + 3];
-  }
-  callback(m.frame.data(), row_bytes, height);
+  // Metal drew BGRA, top row first: handed on as it is, the frame saying so.
+  callback(m.readback_buffer.contents, row_bytes, height, true);
   return true;
 }
 

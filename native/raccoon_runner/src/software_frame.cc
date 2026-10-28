@@ -19,7 +19,7 @@ constexpr auto kInlineHold = std::chrono::milliseconds(100);
 }  // namespace
 
 void SoftwareFrame::Present(const void* allocation, size_t row_bytes,
-                            size_t height) {
+                            size_t height, bool bgra) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     row_bytes_ = row_bytes;
@@ -41,7 +41,7 @@ void SoftwareFrame::Present(const void* allocation, size_t row_bytes,
       // A frame nobody sent yet is superseded; free its buffer.
       if (pending_shared_.index >= 0) pool_->Release(pending_shared_.index);
       std::memcpy(pool_->Data(index), allocation, bytes);
-      pending_shared_ = {index, width_, height_, row_bytes_, frame_count_};
+      pending_shared_ = {index, width_, height_, row_bytes_, frame_count_, bgra};
       inline_waits_ = false;
     } else {
       // No pool, a frame too big for it, or every buffer still with the
@@ -53,6 +53,7 @@ void SoftwareFrame::Present(const void* allocation, size_t row_bytes,
       }
       pixels_.resize(bytes);
       std::memcpy(pixels_.data(), allocation, bytes);
+      pixels_bgra_ = bgra;
       inline_sequence_ = frame_count_;
       inline_waits_ = pool_ != nullptr && bytes <= pool_->size();
       inline_at_ = std::chrono::steady_clock::now();
@@ -68,6 +69,7 @@ void SoftwareFrame::SetSharedPool(SharedBufferPool* pool) {
     const size_t bytes = pending_shared_.row_bytes * pending_shared_.height;
     pixels_.resize(bytes);
     std::memcpy(pixels_.data(), pool_->Data(pending_shared_.index), bytes);
+    pixels_bgra_ = pending_shared_.bgra;
     inline_sequence_ = pending_shared_.sequence;
     pool_->Release(pending_shared_.index);
   }
@@ -106,6 +108,7 @@ bool SoftwareFrame::CopyLatest(Copy* out, size_t after_sequence) {
   out->height = height_;
   out->row_bytes = row_bytes_;
   out->sequence = frame_count_;
+  out->bgra = pixels_bgra_;
   return true;
 }
 
@@ -118,7 +121,7 @@ bool SoftwareFrame::PromoteInline() {
   const int index = pool_->AcquireFree();
   if (index < 0) return false;
   std::memcpy(pool_->Data(index), pixels_.data(), pixels_.size());
-  pending_shared_ = {index, width_, height_, row_bytes_, inline_sequence_};
+  pending_shared_ = {index, width_, height_, row_bytes_, inline_sequence_, pixels_bgra_};
   inline_sequence_ = 0;
   inline_waits_ = false;
   return true;
@@ -137,9 +140,10 @@ size_t SoftwareFrame::FrameCount() const {
   return frame_count_;
 }
 
-bool SoftwareFrame::WritePpm(const std::string& path, bool bgra) const {
+bool SoftwareFrame::WritePpm(const std::string& path, bool rgba) const {
   std::lock_guard<std::mutex> lock(mutex_);
   if (pixels_.empty()) return false;
+  const bool bgra = pixels_bgra_ && !rgba;
   FILE* file = std::fopen(path.c_str(), "wb");
   if (file == nullptr) return false;
   std::fprintf(file, "P6\n%zu %zu\n255\n", width_, height_);

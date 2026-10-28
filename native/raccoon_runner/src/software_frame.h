@@ -37,6 +37,8 @@ class SoftwareFrame {
     size_t height = 0;
     size_t row_bytes = 0;
     size_t sequence = 0;
+    // Its byte order: BGRA, else RGBA.
+    bool bgra = kSoftwareFrameIsBgra;
   };
 
   // A frame that was presented into a shared buffer and not yet sent.
@@ -46,6 +48,7 @@ class SoftwareFrame {
     size_t height = 0;
     size_t row_bytes = 0;
     size_t sequence = 0;
+    bool bgra = kSoftwareFrameIsBgra;
   };
 
   // A frame the engine drew into a GPU buffer, not yet sent.
@@ -87,8 +90,11 @@ class SoftwareFrame {
     presented_ = std::move(callback);
   }
 
-  // Copies |allocation| (row_bytes * height bytes, 4 bytes per pixel).
-  void Present(const void* allocation, size_t row_bytes, size_t height);
+  // Copies |allocation| (row_bytes * height bytes, 4 bytes per pixel, BGRA
+  // when |bgra|, else RGBA): the software renderer's order, unless a
+  // renderer read it back in another.
+  void Present(const void* allocation, size_t row_bytes, size_t height,
+               bool bgra = kSoftwareFrameIsBgra);
 
   // Copies the latest frame into |out| when its sequence is newer than
   // |after_sequence|. Returns false otherwise, and while a frame that fits
@@ -111,7 +117,8 @@ class SoftwareFrame {
   // Writes the latest frame as a binary PPM. |bgra| says how the engine laid
   // out the pixel bytes. Returns false when there is no frame or the file
   // cannot be written.
-  bool WritePpm(const std::string& path, bool bgra) const;
+  // Writes the latest inline frame, in its own byte order unless |rgba|.
+  bool WritePpm(const std::string& path, bool rgba) const;
 
   size_t width() const { return width_; }
   size_t height() const { return height_; }
@@ -120,6 +127,7 @@ class SoftwareFrame {
   mutable std::mutex mutex_;
   std::function<void()> presented_;
   std::vector<uint8_t> pixels_;
+  bool pixels_bgra_ = kSoftwareFrameIsBgra;
   size_t width_ = 0;
   size_t height_ = 0;
   size_t row_bytes_ = 0;

@@ -705,22 +705,13 @@ bool GlRenderer::Present(const FrameCallback& callback) {
                reads_bgra_ ? GL_BGRA_EXT : GL_RGBA, GL_UNSIGNED_BYTE,
                readback_.data());
   // GL's rows come bottom first; the frame path wants the top row first.
+  // The byte order stays as read: the frame says which it is.
   const size_t row_bytes = width_ * 4;
   for (size_t row = 0; row < height_; ++row) {
-    const uint8_t* source = readback_.data() + (height_ - 1 - row) * row_bytes;
-    uint8_t* target = frame_.data() + row * row_bytes;
-    if (reads_bgra_) {
-      std::memcpy(target, source, row_bytes);
-      continue;
-    }
-    for (size_t x = 0; x < width_; ++x) {
-      target[x * 4 + 0] = source[x * 4 + 2];
-      target[x * 4 + 1] = source[x * 4 + 1];
-      target[x * 4 + 2] = source[x * 4 + 0];
-      target[x * 4 + 3] = source[x * 4 + 3];
-    }
+    std::memcpy(frame_.data() + row * row_bytes,
+                readback_.data() + (height_ - 1 - row) * row_bytes, row_bytes);
   }
-  callback(frame_.data(), row_bytes, height_);
+  callback(frame_.data(), row_bytes, height_, reads_bgra_);
   return true;
 }
 

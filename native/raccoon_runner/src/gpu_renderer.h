@@ -29,8 +29,10 @@ struct GpuBufferSet {
 
 class GpuRenderer {
  public:
+  // A frame read back for the CPU, top row first, in the byte order it was
+  // read in (|bgra|): the frame message says which, so nothing swizzles.
   using FrameCallback = std::function<void(const void* pixels, size_t row_bytes,
-                                           size_t height)>;
+                                           size_t height, bool bgra)>;
   // A frame drawn into pool buffer |index| of |generation|; |fence_fd| is
   // signalled when the draw is done, -1 when the draw was waited for
   // instead. The callback owns the descriptor.

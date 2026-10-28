@@ -440,7 +440,7 @@ bool VulkanRenderer::Present(VkImage image, const FrameCallback& callback) {
   range.memory = readback_memory_;
   range.size = VK_WHOLE_SIZE;
   vk_.InvalidateMappedMemoryRanges(device_, 1, &range);
-  callback(readback_pixels_, width_ * 4, height_);
+  callback(readback_pixels_, width_ * 4, height_, kFormat == VK_FORMAT_B8G8R8A8_UNORM);
   return true;
 }
 

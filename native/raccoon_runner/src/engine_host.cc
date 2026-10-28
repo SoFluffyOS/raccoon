@@ -599,9 +599,8 @@ bool EngineHost::PresentView(const FlutterPresentViewInfo* info) {
   }
   if (store == nullptr) return true;
   SoftwareFrame* frame = target.frame;
-  const auto readback = [frame](const void* pixels, size_t row_bytes, size_t height) {
-    frame->Present(pixels, row_bytes, height);
-  };
+  const auto readback = [frame](const void* pixels, size_t row_bytes, size_t height,
+                                bool bgra) { frame->Present(pixels, row_bytes, height, bgra); };
 #if RACCOON_HAS_GL
   if (target.gl != nullptr) {
     target.gl->EnsureCurrent();
@@ -739,8 +738,9 @@ uint32_t EngineHost::GlFbo(void* user_data, const FlutterFrameInfo* info) {
 bool EngineHost::GlPresent(void* user_data, const FlutterPresentInfo* /*info*/) {
   auto* host = static_cast<EngineHost*>(user_data);
   return host->gl_->Present(
-      [host](const void* pixels, size_t row_bytes, size_t height) {
-        OnPresent(host, pixels, row_bytes, height);
+      [host](const void* pixels, size_t row_bytes, size_t height, bool bgra) {
+        // In views mode frames come by PresentView, each to its view.
+        if (!host->views_mode_) host->frame_.Present(pixels, row_bytes, height, bgra);
       });
 }
 
@@ -764,8 +764,9 @@ bool EngineHost::MetalPresent(void* user_data, const FlutterMetalTexture* textur
   auto* host = static_cast<EngineHost*>(user_data);
   return host->metal_->Present(
       texture->texture_id,
-      [host](const void* pixels, size_t row_bytes, size_t height) {
-        OnPresent(host, pixels, row_bytes, height);
+      [host](const void* pixels, size_t row_bytes, size_t height, bool bgra) {
+        // In views mode frames come by PresentView, each to its view.
+        if (!host->views_mode_) host->frame_.Present(pixels, row_bytes, height, bgra);
       });
 }
 #endif
@@ -792,8 +793,9 @@ bool EngineHost::VulkanPresent(void* user_data, const FlutterVulkanImage* image)
   auto* host = static_cast<EngineHost*>(user_data);
   return host->vulkan_->Present(
       reinterpret_cast<VkImage>(image->image),
-      [host](const void* pixels, size_t row_bytes, size_t height) {
-        OnPresent(host, pixels, row_bytes, height);
+      [host](const void* pixels, size_t row_bytes, size_t height, bool bgra) {
+        // In views mode frames come by PresentView, each to its view.
+        if (!host->views_mode_) host->frame_.Present(pixels, row_bytes, height, bgra);
       });
 }
 #endif
