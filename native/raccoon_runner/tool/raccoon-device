@@ -667,11 +667,63 @@ def keep_failure(plugin, why, log, state='failed'):
     os.replace(staging, record)
 
 
+def build(plugin):
+    """Configures and builds [plugin] in a CMake project of its own, and
+    caches what it made: its state ('built', 'failed' or
+    'built_nothing'), why, and its cached libraries."""
+    name = plugin['name']
+    cached = os.path.join(cache, plugin['key'])
+    project = os.path.join(out, 'build', name)
+    os.makedirs(project, exist_ok=True)
+    with open(os.path.join(project, 'CMakeLists.txt'), 'w') as f:
+        f.write(PREAMBLE)
+        f.write('add_subdirectory("%s" "plugin")\n' % os.path.join(plugin['root'], 'linux'))
+        f.write('file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/bundled.txt" '
+                'CONTENT "$<JOIN:${%s_bundled_libraries},\\n>\\n")\n' % name)
+    log = os.path.join(project, 'build.log')
+    with open(log, 'w') as written:
+        configured = subprocess.run(['cmake', '-S', project, '-B', os.path.join(project, 'out'), '-G', 'Ninja'],
+                                    stdout=written, stderr=subprocess.STDOUT).returncode == 0
+        ok = configured and subprocess.run(['cmake', '--build', os.path.join(project, 'out')],
+                                           stdout=written, stderr=subprocess.STDOUT).returncode == 0
+    if not ok:
+        why = 'did not build; see ' + log
+        # Not one CMake stopped configuring: that is a missing package
+        # (a -dev one), which the next install should find once it is in.
+        if configured:
+            keep_failure(plugin, why, log)
+        return 'failed', why, []
+    # What its targets built, and what it bundles; a name once.
+    libs = {}
+    for so in sorted(glob.glob(os.path.join(project, 'out', 'plugin', '**', '*.so'), recursive=True)) + bundled(project):
+        libs.setdefault(os.path.basename(so), so)
+    if not libs:
+        # Built fine and made nothing: an FFI plugin whose library wants
+        # a toolchain this machine has not (jni without a JDK).
+        why = 'built and made no library'
+        keep_failure(plugin, why, log, 'built_nothing')
+        shutil.rmtree(project, ignore_errors=True)
+        return 'built_nothing', why, []
+    # Copied aside, then renamed into place: an interrupted copy leaves
+    # no entry that counts as cached (#122).
+    os.makedirs(cache, exist_ok=True)
+    staging = tempfile.mkdtemp(prefix=os.path.basename(cached) + '.partial-', dir=cache)
+    for so in libs.values():
+        shutil.copy2(so, staging)
+    settle(staging, cached, lambda: libraries(cached))
+    # Its build tree, once cached: the next install starts afresh.
+    shutil.rmtree(project, ignore_errors=True)
+    return 'built', None, libraries(cached)
+
+
 os.makedirs(os.path.join(out, 'lib'), exist_ok=True)
 built, failed, empty, from_cache, skipped = [], [], [], [], []
 entries = []
 toolchain = None  # looked up when a build is needed
 cached_only = os.environ.get('RACCOON_PLUGINS') == 'cached'
+# Each plugin's state, why and libraries; the ones to build wait for them.
+outcome = {}
+misses = []
 for plugin in wanted:
     name = plugin['name']
     cached = os.path.join(cache, plugin['key'])
@@ -681,76 +733,47 @@ for plugin in wanted:
         fetch_prebuilt()
         libs = libraries(cached)
     if libs:
-        from_cache.append(name)
-    elif cached_only:
-        skipped.append(name)
-        status.append({'name': name, 'state': 'skipped', 'detail': SKIPPED})
+        outcome[name] = ('cached', None, libs)
         continue
-    else:
-        if toolchain is None:
-            toolchain = can_build() or 'ok'
-        if toolchain != 'ok':
-            failed.append('%s (%s)' % (name, toolchain))
-            status.append({'name': name, 'state': 'failed', 'detail': toolchain + '; native plugins need the desktop toolchain'})
-            continue
-        if (kept := kept_failure(plugin)) is not None:
-            state, why = kept
-            if state == 'built_nothing':
-                empty.append(name)
-            else:
-                failed.append('%s (%s)' % (name, why))
-            status.append({'name': name, 'state': state, 'detail': why})
-            continue
-        project = os.path.join(out, 'build', name)
-        os.makedirs(project, exist_ok=True)
-        with open(os.path.join(project, 'CMakeLists.txt'), 'w') as f:
-            f.write(PREAMBLE)
-            f.write('add_subdirectory("%s" "plugin")\n' % os.path.join(plugin['root'], 'linux'))
-            f.write('file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/bundled.txt" '
-                    'CONTENT "$<JOIN:${%s_bundled_libraries},\\n>\\n")\n' % name)
-        log = os.path.join(project, 'build.log')
-        with open(log, 'w') as written:
-            configured = subprocess.run(['cmake', '-S', project, '-B', os.path.join(project, 'out'), '-G', 'Ninja'],
-                                        stdout=written, stderr=subprocess.STDOUT).returncode == 0
-            ok = configured and subprocess.run(['cmake', '--build', os.path.join(project, 'out')],
-                                               stdout=written, stderr=subprocess.STDOUT).returncode == 0
-        if not ok:
-            why = 'did not build; see ' + log
-            # Not one CMake stopped configuring: that is a missing package
-            # (a -dev one), which the next install should find once it is in.
-            if configured:
-                keep_failure(plugin, why, log)
-            failed.append('%s (see %s)' % (name, log))
-            status.append({'name': name, 'state': 'failed', 'detail': why})
-            continue
-        # What its targets built, and what it bundles; a name once.
-        libs = {}
-        for so in sorted(glob.glob(os.path.join(project, 'out', 'plugin', '**', '*.so'), recursive=True)) + bundled(project):
-            libs.setdefault(os.path.basename(so), so)
-        libs = list(libs.values())
-        if not libs:
-            # Built fine and made nothing: an FFI plugin whose library wants
-            # a toolchain this machine has not (jni without a JDK).
-            why = 'built and made no library'
-            keep_failure(plugin, why, log, 'built_nothing')
-            empty.append(name)
-            status.append({'name': name, 'state': 'built_nothing', 'detail': why})
-            shutil.rmtree(project, ignore_errors=True)
-            continue
-        # Copied aside, then renamed into place: an interrupted copy leaves
-        # no entry that counts as cached (#122).
-        os.makedirs(cache, exist_ok=True)
-        staging = tempfile.mkdtemp(prefix=os.path.basename(cached) + '.partial-', dir=cache)
-        for so in libs:
-            shutil.copy2(so, staging)
-        settle(staging, cached, lambda: libraries(cached))
-        libs = libraries(cached)
+    if cached_only:
+        outcome[name] = ('skipped', SKIPPED, [])
+        continue
+    if toolchain is None:
+        toolchain = can_build() or 'ok'
+    if toolchain != 'ok':
+        outcome[name] = ('failed', toolchain + '; native plugins need the desktop toolchain', [])
+        continue
+    if (kept := kept_failure(plugin)) is not None:
+        outcome[name] = kept + ([],)
+        continue
+    misses.append(plugin)
+# A few at once, each in its own folder: CMake's configure is mostly one
+# process, and ninja keeps the cores busy for the rest.
+if misses:
+    toolchain_identity()  # read once, before the threads keep failures
+    import concurrent.futures
+    workers = max(1, min(4, (os.cpu_count() or 2) // 2))
+    with concurrent.futures.ThreadPoolExecutor(workers) as pool:
+        for plugin, result in zip(misses, pool.map(build, misses)):
+            outcome[plugin['name']] = result
+for plugin in wanted:
+    name = plugin['name']
+    state, why, libs = outcome[name]
+    if state == 'cached':
+        from_cache.append(name)
+    elif state == 'built':
         built.append(name)
-        # Its build tree, once cached: the next install starts afresh.
-        shutil.rmtree(project, ignore_errors=True)
+    elif state == 'skipped':
+        skipped.append(name)
+    elif state == 'built_nothing':
+        empty.append(name)
+    else:
+        failed.append('%s (%s)' % (name, why))
+    if why is not None:
+        status.append({'name': name, 'state': state, 'detail': why})
     for so in libs:
         clone(so, os.path.join(out, 'lib'))
-    if plugin['symbol'] is not None:
+    if plugin['symbol'] is not None and libs:
         # The plugin's own library is the one named after it.
         main = [so for so in libs if os.path.basename(so) == 'lib%s_plugin.so' % name] or libs
         entries.append({'name': name, 'library': os.path.join(out, 'lib', os.path.basename(main[0])),
