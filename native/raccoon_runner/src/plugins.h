@@ -68,6 +68,9 @@ class PluginHost {
     std::function<bool(int64_t texture_id)> register_texture;
     std::function<bool(int64_t texture_id)> mark_texture_frame_available;
     std::function<bool(int64_t texture_id)> unregister_texture;
+    // Runs |task| on the engine's raster thread, after what the engine has
+    // queued there already; false when there is no engine to run it.
+    std::function<bool(std::function<void()> task)> post_render_task;
 #if defined(__APPLE__)
     // The id<MTLDevice> plugin textures are drawn with; null without Metal,
     // when textures are not drawn.

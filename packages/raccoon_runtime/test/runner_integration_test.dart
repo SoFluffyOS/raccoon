@@ -5854,6 +5854,67 @@ class Report extends StatelessWidget {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  test(
+    'a texture unregistered is told so on the raster thread',
+    () async {
+      // #231: FlutterMacOS tells a texture it was unregistered on the
+      // raster thread; the host told it on whichever thread unregistered
+      // it, and kept its last frame until another texture drew.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final manifest = File(p.join(temp.path, 'plugins.json'))
+        ..writeAsStringSync(
+          jsonEncode({
+            'flutter_framework': flutterFramework,
+            'plugins': [
+              _pluginEntry('raccoon_echo', pluginLibrary, 'RaccoonEchoPlugin'),
+            ],
+          }),
+        );
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: pluginsAppAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          plugins: manifest.path,
+        ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        await client.frames.first.timeout(const Duration(seconds: 15));
+        expect(output, contains(startsWith('TEXTURE:')));
+        client.sendToApp('raccoon_echo_app', utf8.encode('untexture'));
+        final deadline = DateTime.now().add(const Duration(seconds: 15));
+        while (!output.any((line) => line.startsWith('UNTEXTURE:')) &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        printOnFailure(output.join('\n'));
+        expect(output, contains('UNTEXTURE:raster'));
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        !Platform.isMacOS
+            ? 'onTextureUnregistered: is FlutterMacOS\'s'
+            : ready &&
+                flutterFramework != null &&
+                File(pluginLibrary).existsSync() &&
+                Directory(pluginsAppAssets).existsSync()
+            ? false
+            : 'build the runner with plugins and example/plugins_app first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   // Built beside the runner: the channels it answers itself, fed random
   // and broken input (test/channels_check.cc).
   final channelsCheck =

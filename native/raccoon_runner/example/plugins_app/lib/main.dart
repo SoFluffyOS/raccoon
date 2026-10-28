@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:raccoon_echo/raccoon_echo.dart';
 
@@ -5,9 +6,25 @@ import 'package:raccoon_echo/raccoon_echo.dart';
 /// back: ECHO:<answer>, APARTMENT:<COM apartment> (Windows),
 /// SECURE:<options> (macOS), then TEXTURE:<id>. With a
 /// texture it draws that full screen, orange; otherwise green when the
-/// plugin answered, red otherwise.
+/// plugin answered, red otherwise. Told `untexture` on `raccoon_echo_app`
+/// (a client's app message), it lets the texture go and prints
+/// UNTEXTURE:<where the host said so>.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  const BasicMessageChannel<String>(
+    'raccoon_echo_app',
+    StringCodec(),
+  ).setMessageHandler((message) async {
+    if (message != 'untexture') return '';
+    try {
+      // ignore: avoid_print
+      print('UNTEXTURE:${await RaccoonEcho.untexture()}');
+    } catch (error) {
+      // ignore: avoid_print
+      print('UNTEXTURE:error $error');
+    }
+    return '';
+  });
   String line;
   try {
     line = 'ECHO:${await RaccoonEcho.echo('hello')}';

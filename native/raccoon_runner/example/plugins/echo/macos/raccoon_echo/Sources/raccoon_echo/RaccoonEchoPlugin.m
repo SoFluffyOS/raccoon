@@ -10,6 +10,9 @@
 
 // An orange texture, 64 by 64: one BGRA pixel buffer, handed out each frame.
 @interface RaccoonEchoTexture : NSObject <FlutterTexture>
+// Told, on the main queue, whether the host's onTextureUnregistered: ran
+// on the main thread.
+@property(nonatomic, copy) void (^unregistered)(BOOL onMain);
 @end
 
 @implementation RaccoonEchoTexture {
@@ -46,6 +49,15 @@
 // On the raster thread; the caller releases what it gets.
 - (CVPixelBufferRef)copyPixelBuffer {
   return CVPixelBufferRetain(_buffer);
+}
+
+- (void)onTextureUnregistered:(NSObject<FlutterTexture>*)texture {
+  const BOOL onMain = [NSThread isMainThread];
+  void (^unregistered)(BOOL) = self.unregistered;
+  if (unregistered == nil) return;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    unregistered(onMain);
+  });
 }
 
 @end
@@ -108,6 +120,21 @@
       dispatch_resume(_timer);
     }
     result(@(_textureId));
+    return;
+  }
+  if ([call.method isEqualToString:@"untexture"]) {
+    // Answered once the host says the texture is gone: where it said so.
+    if (_texture == nil) {
+      result([FlutterError errorWithCode:@"no_texture" message:nil details:nil]);
+      return;
+    }
+    dispatch_source_cancel(_timer);
+    _timer = nil;
+    _texture.unregistered = ^(BOOL onMain) {
+      result(onMain ? @"main" : @"raster");
+    };
+    [_textures unregisterTexture:_textureId];
+    _texture = nil;
     return;
   }
   if ([call.method isEqualToString:@"modal"]) {

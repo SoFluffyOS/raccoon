@@ -354,8 +354,34 @@ struct TextureFrame {
       _frames.erase(frame);
     }
   }
-  if ([texture respondsToSelector:@selector(onTextureUnregistered:)]) {
+  // On the raster thread, as FlutterMacOS tells a texture, after the
+  // engine's own unregistering there: by then it reads none of the retired
+  // frame's handles, which go with it rather than at another texture's
+  // next draw (#231). Without an engine to run it, here.
+  RaccoonTextures* textures = self;
+  const bool posted = _gate->Use([&](const PluginHost::Bridge& bridge) {
+    return bridge.post_render_task != nullptr && bridge.post_render_task([textures, texture] {
+      [textures dropRetired];
+      [RaccoonTextures tellUnregistered:texture];
+    });
+  });
+  if (!posted) [RaccoonTextures tellUnregistered:texture];
+}
+
+- (void)dropRetired {
+  std::lock_guard<std::mutex> lock(_mutex);
+  for (auto& frame : _retired) frame->Clear();
+  _retired.clear();
+}
+
++ (void)tellUnregistered:(NSObject<FlutterTexture>*)texture {
+  if (![texture respondsToSelector:@selector(onTextureUnregistered:)]) return;
+  // Plugin code: an exception must not unwind into the engine.
+  @try {
     [texture onTextureUnregistered:texture];
+  } @catch (NSException* exception) {
+    std::fprintf(stderr, "🦝 onTextureUnregistered: threw %s\n",
+                 exception.name.UTF8String ?: "an exception");
   }
 }
 

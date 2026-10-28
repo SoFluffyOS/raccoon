@@ -13,6 +13,12 @@ abstract final class RaccoonEcho {
   /// a [Texture] widget. Fails where the host takes no texture.
   static Future<int?> texture() => _channel.invokeMethod<int>('texture');
 
+  /// Unregisters the [texture]; answers where the host then told the
+  /// texture so, as FlutterMacOS does on its raster thread: `raster` off
+  /// the main thread, `main` on it. macOS only.
+  static Future<String?> untexture() =>
+      _channel.invokeMethod<String>('untexture');
+
   /// The COM apartment of the thread the plugin is called on: Windows only.
   static Future<String?> apartment() =>
       _channel.invokeMethod<String>('apartment');
@@ -29,8 +35,8 @@ abstract final class RaccoonEcho {
   static Future<String?> secureStorageOptions(Map<String, String> options) =>
       const MethodChannel('plugins.it_nomads.com/flutter_secure_storage')
           .invokeMethod<String>('write', {
-            'key': 'k',
-            'value': 'v',
-            'options': options,
-          });
+        'key': 'k',
+        'value': 'v',
+        'options': options,
+      });
 }

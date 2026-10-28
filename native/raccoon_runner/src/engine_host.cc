@@ -1231,6 +1231,22 @@ bool EngineHost::LoadPlugins(const std::string& manifest, std::string* error) {
       return PluginCall(
           [&] { return loader_.procs().UnregisterExternalTexture(engine_, id) == kSuccess; });
     };
+    bridge.post_render_task = [this](std::function<void()> task) {
+      return PluginCall([&] {
+        auto* baton = new std::function<void()>(std::move(task));
+        const bool posted =
+            loader_.procs().PostRenderThreadTask(
+                engine_,
+                [](void* data) {
+                  auto* run = static_cast<std::function<void()>*>(data);
+                  (*run)();
+                  delete run;
+                },
+                baton) == kSuccess;
+        if (!posted) delete baton;
+        return posted;
+      });
+    };
 #if RACCOON_HAS_METAL
     bridge.metal_device = metal_ != nullptr ? metal_->device() : nullptr;
 #endif
