@@ -41,7 +41,12 @@ final class RunnerTransport {
   /// Whether file descriptors can arrive with the bytes.
   final bool receivesHandles;
 
-  final _inbound = StreamController<Inbound>();
+  late final _inbound = StreamController<Inbound>(
+    onListen: () => _listened = true,
+  );
+
+  /// Whether anyone listened yet: before, reads wait for them.
+  var _listened = false;
   // What the socket has not taken yet, written from the head: a runner that
   // stops reading costs each write nothing more than its place in line
   // (#227).
@@ -144,8 +149,11 @@ final class RunnerTransport {
   }
 
   void _read() {
-    // Closing: what still comes is read only so the runner can hang up.
-    if (_closed) {
+    // Closing, or nobody listening any more (a client that cancelled on a
+    // message it could not read): what still comes is read only so the
+    // runner can hang up, its descriptors closed rather than handed to no
+    // one.
+    if (_closed || (_listened && !_inbound.hasListener)) {
       if (!receivesHandles) {
         _socket.read();
         return;

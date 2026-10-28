@@ -11,6 +11,10 @@ abstract final class MessageFraming {
   /// (#227).
   static const int maxLength = 512 * 1024 * 1024;
 
+  /// The longest message a runner takes from its client (its
+  /// `kMaxMessage`): one longer and it lets the client go.
+  static const int maxToRunner = 64 * 1024 * 1024;
+
   /// Prepends the length prefix to [payload].
   static Uint8List frame(List<int> payload) {
     final out = Uint8List(prefixLength + payload.length);

@@ -556,12 +556,16 @@ bool RunnerServer::Enqueue(std::string bytes, std::vector<int> fds) {
 #endif
     return false;
   }
+  // What already waits behind the message being written, this one not
+  // counted: a single large one (a 4K frame inline, an app's big platform
+  // message) is no sign of a client that stopped (#146); a client that
+  // stopped trips it at its next message.
+  const size_t front_left =
+      outbox_.empty() ? 0 : outbox_.front().bytes.size() - outbox_sent_;
+  const size_t waiting = backlog_ - front_left;
   backlog_ += bytes.size();
   outbox_.push_back({std::move(bytes), std::move(fds)});
-  // What waits behind the message being written: a single large one, a
-  // 4K frame inline, is no sign of a client that stopped (#146).
-  const size_t front_left = outbox_.front().bytes.size() - outbox_sent_;
-  if (backlog_ - front_left > kMaxBacklog) {
+  if (waiting > kMaxBacklog) {
     std::fprintf(stderr, "🦝 the client stopped reading; letting it go\n");
     CloseClient();
     return false;

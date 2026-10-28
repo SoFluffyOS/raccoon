@@ -122,6 +122,22 @@ void main() {
     temp.deleteSync(recursive: true);
   });
 
+  test('a message longer than a runner takes is refused, and the client '
+      'goes on', () async {
+    final big = ClientMessage(
+      appMessage: AppMessage(
+        channel: 'big',
+        data: Uint8List(MessageFraming.maxToRunner + 1),
+      ),
+    );
+    expect(() => client.send(big), throwsArgumentError);
+    final next = runner.received
+        .firstWhere((message) => message.hasAppMessage())
+        .timeout(const Duration(seconds: 5));
+    client.send(ClientMessage(appMessage: AppMessage(channel: 'small')));
+    expect((await next).appMessage.channel, 'small');
+  });
+
   test(
     'a report takes the exception the Dart VM prints on the next line',
     () async {

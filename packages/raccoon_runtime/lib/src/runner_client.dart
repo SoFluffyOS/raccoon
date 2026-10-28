@@ -389,9 +389,19 @@ final class RunnerClient
   void unregisterChannel(String channel) => _channels.remove(channel);
 
   /// Frames [message] and writes it to the runner; nothing once closed.
+  /// Throws an [ArgumentError] for one longer than the runner takes
+  /// ([MessageFraming.maxToRunner]), which would end the connection
+  /// without a word.
   void send(ClientMessage message) {
     if (_closed.isCompleted) return;
-    _transport.write(MessageFraming.frame(message.writeToBuffer()));
+    final payload = message.writeToBuffer();
+    if (payload.length > MessageFraming.maxToRunner) {
+      throw ArgumentError(
+        'a ${payload.length}-byte message is longer than a runner takes '
+        '(${MessageFraming.maxToRunner} bytes)',
+      );
+    }
+    _transport.write(MessageFraming.frame(payload));
   }
 
   /// Hangs up: stops reading, lets the transport send what is still
