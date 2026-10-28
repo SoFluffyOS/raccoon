@@ -1,0 +1,5 @@
+# Shipped in the release archives and run by Git Bash on Windows, where a
+# checkout would otherwise turn them CRLF: LF everywhere.
+*.sh text eol=lf
+native/raccoon_runner/tool/raccoon-device text eol=lf
+native/raccoon_runner/VERSION text eol=lf

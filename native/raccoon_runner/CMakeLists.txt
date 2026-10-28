@@ -430,7 +430,10 @@ else()
       # The runner uses the library's private headers, as the embedding's own
       # engine would.
       target_compile_definitions(raccoon_runner PRIVATE RACCOON_HAS_PLUGINS=1 FLUTTER_LINUX_COMPILATION)
-      set_target_properties(raccoon_runner PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
+      # $ORIGIN alone, the build tree's own too: the archive ships this
+      # binary, and the CI machine's build path came with it.
+      set_target_properties(raccoon_runner PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN"
+        BUILD_WITH_INSTALL_RPATH ON)
       # What Flutter's desktop template gives a plugin, so one builds here as
       # it does there; example/plugins/echo proves it and the tests load it.
       function(APPLY_STANDARD_SETTINGS TARGET)

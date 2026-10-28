@@ -21,14 +21,27 @@ sdk_root() {
 }
 
 REV=""
-if SDK="$(sdk_root)" && [ -f "$SDK/bin/cache/engine.stamp" ]; then
-  REV="$(cat "$SDK/bin/cache/engine.stamp")"
+# The stamp, else the revision the SDK pins; either may end in CRLF on
+# Windows.
+if SDK="$(sdk_root)"; then
+  for stamp in "$SDK/bin/cache/engine.stamp" "$SDK/bin/internal/engine.version"; do
+    [ -f "$stamp" ] || continue
+    REV="$(tr -d '[:space:]' < "$stamp")"
+    [ -n "$REV" ] && break
+  done
 fi
 if [ -z "$REV" ]; then
+  if ! command -v flutter >/dev/null; then
+    echo "🦝 no Flutter SDK: set FLUTTER_ROOT or put flutter on PATH" >&2
+    exit 1
+  fi
   REV="$(flutter --version --machine 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin)["engineRevision"])')"
 fi
 
-BUCKET="https://storage.googleapis.com/flutter_infra_release/flutter/$REV"
+# Where Flutter itself downloads from: a mirror where Google's storage is
+# out of reach (storage.flutter-io.cn in mainland China).
+STORAGE="${FLUTTER_STORAGE_BASE_URL:-https://storage.googleapis.com}"
+BUCKET="${STORAGE%/}/flutter_infra_release/flutter/$REV"
 CACHE="${RACCOON_ENGINE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/engines}/$REV"
 case "$(uname -s)" in
   Darwin)
@@ -75,7 +88,9 @@ if ! installed; then
   trap 'rm -rf "$STAGE"' EXIT
   mkdir -p "$STAGE/dir${UNZIP_INTO#"$DIR"}"
   # Said plainly: offline, a first run with a new SDK fails here (#119).
-  if ! curl -sfLo "$STAGE/embedder.zip" "$URL" ||
+  # A connection that stalls fails rather than hold the launch silent.
+  if ! curl -sfL --connect-timeout 30 --speed-limit 1024 --speed-time 60 \
+      -o "$STAGE/embedder.zip" "$URL" ||
     ! unzip -q -o "$STAGE/embedder.zip" -d "$STAGE/dir${UNZIP_INTO#"$DIR"}"; then
     echo "🦝 could not download the Flutter engine $REV from $URL; check the network" >&2
     exit 1

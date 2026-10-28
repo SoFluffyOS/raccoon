@@ -119,17 +119,25 @@ final class RuntimeStore {
 
   final Downloader _download;
 
-  /// The bucket path of the embedder zip for [revision] and [platform].
-  static Uri artifactUri(String revision, {String? platform}) {
+  /// The bucket path of the embedder zip for [revision] and [platform],
+  /// under [base]: where Flutter itself downloads from, its
+  /// `FLUTTER_STORAGE_BASE_URL` when set (a mirror where Google's storage
+  /// is out of reach), else Google's.
+  static Uri artifactUri(String revision, {String? platform, String? base}) {
     final name = platform ?? hostPlatform;
     final file = switch (name) {
       'darwin' => 'darwin-x64/FlutterEmbedder.framework.zip',
       _ => '$name/$name-embedder.zip',
     };
-    return Uri.parse(
-      'https://storage.googleapis.com/flutter_infra_release/flutter/'
-      '$revision/$file',
-    );
+    final storage =
+        base ??
+        Platform.environment['FLUTTER_STORAGE_BASE_URL'] ??
+        'https://storage.googleapis.com';
+    final root =
+        storage.endsWith('/')
+            ? storage.substring(0, storage.length - 1)
+            : storage;
+    return Uri.parse('$root/flutter_infra_release/flutter/$revision/$file');
   }
 
   /// The engine revision an SDK at [sdkRoot] was built with, from its stamp.

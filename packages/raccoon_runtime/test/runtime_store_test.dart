@@ -368,4 +368,18 @@ void main() {
       ),
     );
   });
+
+  test('the engine comes from a mirror Flutter is told to use', () {
+    // Where Google's storage is out of reach Flutter downloads from
+    // FLUTTER_STORAGE_BASE_URL; the engine comes from there too.
+    expect(
+      RuntimeStore.artifactUri(
+        'abc123',
+        platform: 'linux-x64',
+        base: 'https://storage.flutter-io.cn/',
+      ).toString(),
+      'https://storage.flutter-io.cn/flutter_infra_release/flutter/abc123/'
+      'linux-x64/linux-x64-embedder.zip',
+    );
+  });
 }

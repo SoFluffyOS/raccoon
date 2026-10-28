@@ -27,7 +27,11 @@ void main(List<String> arguments) {
     case ['add', final name, ...final options]:
       exitCode = _add(file, name, options);
     case ['remove', final name]:
-      final id = name.startsWith('raccoon') ? name : 'raccoon-$name';
+      // As add names it: `raccoonish` is raccoon-raccoonish.
+      final id =
+          name == 'raccoon' || name.startsWith('raccoon-')
+              ? name
+              : 'raccoon-$name';
       if (file.remove(id)) {
         stdout.writeln('removed $id from ${file.path}');
       } else {
