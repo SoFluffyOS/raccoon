@@ -106,12 +106,12 @@ jobs:
       - name: Prebuild the common plugins
         if: runner.os != 'Windows'
         run: |
-          ENGINE="$(basename "$(dirname "$(tool/engine_dir.sh)")")"
+          # Linux plugins build against the runner's own library, so one
+          # archive serves every Flutter; macOS's against the SDK's.
           case "$(uname -s)" in
-            Darwin) HOST=macos ;;
-            *) HOST=linux ;;
+            Darwin) archive="dist/plugins-$(basename "$(dirname "$(tool/engine_dir.sh)")")-macos-$(uname -m).tar.gz" ;;
+            *) archive="dist/plugins-linux-$(uname -m).tar.gz" ;;
           esac
-          archive="dist/plugins-$ENGINE-$HOST-$(uname -m).tar.gz"
           tool/raccoon-device prebuild tool/plugins "$archive"
           # A prebuild whose plugins failed exits 0; a release without them
           # would be remembered as having none (#149). At least one library

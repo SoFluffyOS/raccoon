@@ -301,26 +301,27 @@ build_plugins_windows() {
 # The Linux half: the resolved packages (.dart_tool/package_config.json)
 # whose pubspec names a Linux pluginClass (registered) or ffiPlugin (its
 # libraries only), as the Flutter tool finds them. What built before is in a
-# cache by plugin version, runner version and engine; what the release
-# prebuilt comes from its archive, fetched once; the rest builds here, each
-# plugin in its own CMake project with what the desktop template gives a
-# plugin, so one that fails sinks nothing else. Every library lands flat in
+# cache by plugin version and runner version; what the release prebuilt
+# comes from its archive, fetched once; the rest builds here, each plugin
+# in its own CMake project with what the desktop template gives a plugin,
+# so one that fails sinks nothing else. Every library lands flat in
 # |out|/lib, which run puts on the runner's library path for the FFI ones. A
 # machine without a toolchain still gets the cached and prebuilt ones.
+# Not by engine: a Linux plugin builds against the runner's own library and
+# headers, which its version names, so one archive serves every Flutter.
 build_plugins_linux() {
-  local project="$1" out="$2" config="$3" lib headers engine version cache
+  local project="$1" out="$2" config="$3" lib headers version cache
   lib="$(plugin_library || true)"
   headers="$(plugin_headers || true)"
   if [ -z "$lib" ] || [ -z "$headers" ]; then
     echo "🦝 this runner has no plugin library; native plugins skipped" >&2
     return 0
   fi
-  engine="$(engine_revision)"
   version="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-  cache="${RACCOON_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/$engine}"
+  cache="${RACCOON_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/linux}"
   python3 - "$config" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS" \
     "$cache" "$version" "$(uname -m)" \
-    "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-$engine-linux-$(uname -m).tar.gz}" <<'PY'
+    "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-linux-$(uname -m).tar.gz}" <<'PY'
 import glob, hashlib, json, os, re, shutil, subprocess, sys, tarfile, tempfile, time
 started = time.time()
 from urllib.parse import unquote, urlparse
