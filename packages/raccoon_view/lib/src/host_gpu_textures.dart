@@ -41,11 +41,23 @@ final class MethodChannelGpuTextures implements HostGpuTextures {
   /// The plugin's channel, `raccoon_view/gpu`.
   static const channel = MethodChannel('raccoon_view/gpu');
 
+  // Once an isolate, before its first texture: a host's hot restart keeps
+  // the native plugin and the textures the old views made, each holding its
+  // runner's GPU socket, which takes one client; they go (raccoon#239). A
+  // plugin that predates it answers not implemented.
+  static Future<void>? _reset;
+
+  static Future<void> _resetOnce() =>
+      _reset ??= channel.invokeMethod<void>('reset').catchError((Object _) {});
+
   @override
   final bool bottomUp;
 
   @override
-  Future<int> create() async => await channel.invokeMethod<int>('create') ?? -1;
+  Future<int> create() async {
+    await _resetOnce();
+    return await channel.invokeMethod<int>('create') ?? -1;
+  }
 
   @override
   Future<bool> connect(int textureId, String socket) async =>

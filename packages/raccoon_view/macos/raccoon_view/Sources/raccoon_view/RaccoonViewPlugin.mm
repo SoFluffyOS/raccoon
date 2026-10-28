@@ -503,6 +503,26 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
     result(@(textureId));
     return;
   }
+  if ([call.method isEqualToString:@"reset"]) {
+    // A new isolate's first word: the textures an earlier one made (a hot
+    // restart keeps this plugin) go as a dispose lets one go, answered once
+    // every socket is closed (raccoon#239).
+    dispatch_group_t closed = dispatch_group_create();
+    for (NSNumber* textureId in _textures) {
+      RaccoonGpuTexture* texture = _textures[textureId];
+      texture.frameAvailable = nil;
+      [_registry unregisterTexture:textureId.longLongValue];
+      dispatch_group_enter(closed);
+      [texture disposeThen:^{
+        dispatch_group_leave(closed);
+      }];
+    }
+    [_textures removeAllObjects];
+    dispatch_group_notify(closed, dispatch_get_main_queue(), ^{
+      result(nil);
+    });
+    return;
+  }
   NSDictionary* arguments =
       [call.arguments isKindOfClass:[NSDictionary class]] ? call.arguments : @{};
   NSNumber* textureId = arguments[@"textureId"];

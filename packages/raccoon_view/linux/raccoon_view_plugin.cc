@@ -729,6 +729,21 @@ static void raccoon_view_plugin_handle_method_call(RaccoonViewPlugin* self,
       g_autoptr(FlValue) result = fl_value_new_int(id);
       response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
     }
+  } else if (strcmp(method, "reset") == 0) {
+    // A new isolate's first word: the textures an earlier one made (a hot
+    // restart keeps this plugin) go as a dispose lets one go (raccoon#239).
+    for (auto& entry : *self->textures) {
+      RaccoonGpuTexture* texture = entry.second;
+      fl_texture_registrar_unregister_texture(self->registrar, FL_TEXTURE(texture));
+      texture->registrar = nullptr;
+      close_socket(texture);
+      g_timeout_add_seconds(1, [](gpointer data) {
+        g_object_unref(data);
+        return G_SOURCE_REMOVE;
+      }, texture);
+    }
+    self->textures->clear();
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
   } else {
     const int64_t id = int_argument(args, "textureId", -1);
     const auto found = self->textures->find(id);

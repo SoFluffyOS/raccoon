@@ -269,6 +269,18 @@ class RaccoonViewPlugin : public flutter::Plugin {
       result->Success(EncodableValue(id));
       return;
     }
+    if (call.method_name() == "reset") {
+      // A new isolate's first word: the textures an earlier one made (a hot
+      // restart keeps this plugin) go as a dispose lets one go (raccoon#239).
+      for (auto& [id, texture] : live_) {
+        std::shared_ptr<GpuTexture> gone = texture;
+        gone->Close();
+        textures_->UnregisterTexture(id, [gone]() {});
+      }
+      live_.clear();
+      result->Success();
+      return;
+    }
     const auto* arguments = std::get_if<EncodableMap>(call.arguments());
     const int64_t id = Int(arguments, "textureId");
     const auto found = live_.find(id);
