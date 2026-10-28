@@ -93,7 +93,10 @@ jobs:
           SDK="$(cd "$(dirname "$(readlink -f "$(command -v flutter)")")/.." && pwd)"
           ICU="$SDK/bin/cache/artifacts/engine/${{ matrix.sdk-engine }}/icudtl.dat"
           if command -v cygpath >/dev/null; then ICU="$(cygpath -m "$ICU")"; fi
-          echo "RACCOON_ENGINE_DIR=$(tool/engine_dir.sh)" >> "$GITHUB_ENV"
+          # Its own line: a failed download inside the echo would pass the
+          # step and fail at Configure, saying something else.
+          ENGINE_DIR="$(tool/engine_dir.sh)"
+          echo "RACCOON_ENGINE_DIR=$ENGINE_DIR" >> "$GITHUB_ENV"
           echo "RACCOON_ICU=$ICU" >> "$GITHUB_ENV"
 
       - name: Install protoc
@@ -118,12 +121,14 @@ jobs:
         working-directory: native/raccoon_runner/example/native_assets_app
         run: flutter build bundle --target-platform=${{ matrix.target }}
 
-      # Libraries on Linux, frameworks on macOS: at least one, or it fails.
+      # Libraries on Linux, frameworks on macOS: every plugin, or it fails.
       # No native plugins on Windows yet (#36). Minutes (six on macOS x64),
       # and it only checks that the release's plugins still build, so only
       # when asked for; the release workflow always does it.
       - name: Prebuild the common plugins
         if: runner.os != 'Windows' && inputs.prebuild
+        env:
+          RACCOON_PREBUILD_ALL: '1'
         run: tool/raccoon-device prebuild tool/plugins build/plugins-test.tar.gz && tar tzf build/plugins-test.tar.gz | grep -c -E '\.so$|\.framework/$'
 
       - name: Render a frame of example/hello

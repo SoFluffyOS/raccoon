@@ -1995,6 +1995,17 @@ case "$verb" in
     # the whole set, which no other app's matches (#189).
     RACCOON_PLUGIN_CACHE="$stage/cache" RACCOON_NO_PREBUILT=1 RACCOON_NO_SWIFT_PACKAGES=1 \
       RACCOON_PLUGINS=build build_plugins "$(cd "$project" && pwd)" "$stage/out"
+    # What did not build, said by name; with RACCOON_PREBUILD_ALL=1 (CI's
+    # check) it fails the prebuild, which went on with one plugin of many.
+    failed="$(python3 -c '
+import json, sys
+try:
+    status = json.load(open(sys.argv[1])).get("status", [])
+except (OSError, ValueError):
+    status = []
+print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed"))
+' "$stage/out/manifest.json")"
+    [ -z "$failed" ] || echo "🦝 not prebuilt: $failed" >&2
     mkdir -p "$(dirname "$archive")"
     if [ -d "$stage/cache" ]; then
       # No AppleDouble ._ files for extended attributes: macOS's tar adds
@@ -2005,6 +2016,7 @@ case "$verb" in
       echo "🦝 nothing prebuilt" >&2
     fi
     rm -rf "$stage"
+    if [ -n "$failed" ] && [ "${RACCOON_PREBUILD_ALL:-}" = 1 ]; then exit 1; fi
     ;;
   install)
     local_path="$1"; key="$(app_key "$2")"

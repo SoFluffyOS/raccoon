@@ -1,5 +1,6 @@
 ## Unreleased
 
+- `RunnerHello.views` and `RunnerHello.view_id`: a runner in views mode says so, and which view a client is connected to (0 for the first). A runner that predates them sends neither: one view.
 - `PluginState` gains `SKIPPED`: a native plugin the install left out because it was told to take only what is cached (`RACCOON_PLUGINS=cached`). A client that predates it reads it as unspecified.
 - `AppMessage`: the client sends the app a platform message with no reply, as a device's own controls do (`flutter/lifecycle` to put it in the background, `flutter/navigation` to open a link). A runner that predates it ignores it.
 - `Resize.view_inset_top`, `_right`, `_bottom` and `_left`, and `Settings`: the client sets what covers the view's edges (an on-screen keyboard), and the device's locales, text scale, dark mode and hour format in place of the host's. A runner that predates them ignores both.

@@ -1642,8 +1642,16 @@ class Frame extends $pb.GeneratedMessage {
 /// like a message: 'RGPU', generation, count, width, height, fourcc (32 bits
 /// each), modifier (64), then count pairs of stride and offset. On Linux one
 /// descriptor per buffer rides along in index order; on macOS count
-/// IOSurface IDs follow the pairs, and on Windows count shared handles. A new set, with a higher generation,
-/// replaces the old one on resize.
+/// IOSurface IDs follow the pairs, and on Windows count shared handles. A
+/// new set, with a higher generation, replaces the old one on resize.
+///
+/// The socket carries more than sets: 'RFEN', generation, index, ahead of a
+/// frame that has a fence (Linux, the fence riding along, signalled when the
+/// draw is done); from the client 'RREL', generation, index, fenced (1 when
+/// a fence rides along) to give a buffer back. On macOS a client that takes
+/// surfaces by Mach port sends 'RPRT', and the runner answers 'RSVC', the
+/// length of a Mach service name, the name and a 16-byte token. A client
+/// skips what it does not know by its length.
 class GpuBuffers extends $pb.GeneratedMessage {
   factory GpuBuffers({
     $core.int? generation,
@@ -2288,8 +2296,9 @@ class TextField extends $pb.GeneratedMessage {
   void clearObscure() => $_clearField(9);
 }
 
-/// What became of the project's native plugins on this host. Sent after
-/// Hello, and again when it changes.
+/// What became of the project's native plugins on this host. Sent once,
+/// after the first client's Hello, and only when the project has native
+/// plugins: a client must not wait for it.
 class Plugins extends $pb.GeneratedMessage {
   factory Plugins({
     $core.Iterable<PluginReport>? plugins,
