@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 /// The host's native side for GPU buffers: a Flutter texture fed from the
@@ -47,8 +48,20 @@ final class MethodChannelGpuTextures implements HostGpuTextures {
   // plugin that predates it answers not implemented.
   static Future<void>? _reset;
 
+  /// How long a create waits for the reset: one that never answers (an old
+  /// texture whose socket won't close) would hold every view back for good.
+  @visibleForTesting
+  static Duration resetTimeout = const Duration(seconds: 2);
+
+  /// Forgets the reset, so the next create resets again; for tests.
+  @visibleForTesting
+  static void forgetReset() => _reset = null;
+
   static Future<void> _resetOnce() =>
-      _reset ??= channel.invokeMethod<void>('reset').catchError((Object _) {});
+      _reset ??= channel
+          .invokeMethod<void>('reset')
+          .timeout(resetTimeout)
+          .catchError((Object _) {});
 
   @override
   final bool bottomUp;
