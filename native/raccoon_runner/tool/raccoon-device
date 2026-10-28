@@ -682,9 +682,10 @@ def keep_failure(plugin, why, log, state='failed'):
 
 
 # A few plugins build at once (CMake's configure is mostly one process),
-# each with its share of the cores: ninja's own width is all of them.
+# each with its share of the cores and ninja's two more for the waits on
+# disk: ninja's own width is all of them.
 WORKERS = max(1, min(4, (os.cpu_count() or 2) // 2))
-JOBS = max(2, (os.cpu_count() or 2) // WORKERS)
+JOBS = (os.cpu_count() or 2) // WORKERS + 2
 
 
 def build(plugin):
