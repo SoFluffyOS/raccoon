@@ -970,8 +970,21 @@ void main() {
         await install();
         expect(log, contains('from the cache: plugin_a'));
         write('plugin_a/src/extra.c', 'int extra(void) { return 1; }\n');
-        await install();
+        final rebuilt = await install();
         expect(log, contains('built: plugin_a'));
+        expect(loaded(rebuilt), ['plugin_a', 'plugin_b']);
+        // #274: plugin_b built against the new plugin_a is an entry of its
+        // own, beside the one an app still on the old plugin_a uses.
+        expect(
+          Directory(p.join(temp.path, 'cache'))
+              .listSync()
+              .map((entry) => p.basename(entry.path))
+              .where(
+                (name) =>
+                    name.startsWith('plugin_b-') && !name.contains('.partial'),
+              ),
+          hasLength(2),
+        );
 
         // #183: a pod that wants a version no source has drops its plugin
         // only; CocoaPods lists both, the one it names still builds.

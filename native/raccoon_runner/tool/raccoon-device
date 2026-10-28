@@ -858,7 +858,7 @@ build_plugins_macos() {
     "$cache" "$version" "$(uname -m)" "$sdk/bin/cache/artifacts/engine/darwin-x64" \
     "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-$engine-macos-$(uname -m).tar.gz}" \
     "$project" <<'PY'
-import hashlib, json, os, re, shutil, subprocess, sys, tarfile, tempfile, time
+import glob, hashlib, json, os, re, shutil, subprocess, sys, tarfile, tempfile, time
 started = time.time()
 from urllib.parse import unquote, urlparse
 
@@ -1265,11 +1265,39 @@ def kept_state(plugin):
 
 
 def in_cache(plugin):
-    """Whether the cache holds the plugin, every framework and library its
-    frameworks load by @rpath included: helpers before #84 and #93 left out
-    the vendored ones, so such an entry is built again. Checked once, then
-    stamped."""
-    entry = os.path.join(cache, plugin['key'])
+    """Whether the cache holds the plugin, built against this app's
+    dependencies; see [entry_of]."""
+    return entry_of(plugin) is not None
+
+
+def entry_of(plugin):
+    """The cache entry that holds [plugin] built against this app's
+    dependencies, or None. An entry is the plugin's key, or its key and
+    the hash of the dependencies' keys it was built against (#274): two
+    apps whose dependencies differ (firebase_core 3 and 4) keep an entry
+    each, rather than build each other's again every install."""
+    base = os.path.join(cache, plugin['key'])
+    variants = sorted(glob.glob(glob.escape(base) + '~*'))
+    for entry in [base] + [v for v in variants if '.partial-' not in v]:
+        if entry_holds(entry):
+            return entry
+    return None
+
+
+def variant_of(plugin, carried):
+    """Where [plugin] built against [carried] (dependency: key) goes."""
+    base = os.path.join(cache, plugin['key'])
+    if not carried:
+        return base
+    digest = hashlib.sha256(json.dumps(carried, sort_keys=True).encode()).hexdigest()[:12]
+    return '%s~%s' % (base, digest)
+
+
+def entry_holds(entry):
+    """Whether [entry] holds a plugin whole, every framework and library its
+    frameworks load by @rpath included (helpers before #84 and #93 left out
+    the vendored ones), built against this app's dependencies. Checked
+    once, then stamped."""
     present = binaries(entry)
     if not any(f.endswith('.framework') for f in present):
         return False
@@ -1748,7 +1776,6 @@ if misses:
             keep_failure(plugin, broken[name], build_log)
             drop(symroot, objroot)
             return
-        cached = os.path.join(cache, plugin['key'])
         release = os.path.join(symroot, 'Release')
         made = [(d, f) for d in sorted(os.listdir(release))
                 if d not in ('FlutterMacOS', 'XCFrameworkIntermediates')
@@ -1778,7 +1805,7 @@ if misses:
         # Copied aside, then renamed into place: an interrupted copy leaves
         # no entry that counts as cached (#122).
         os.makedirs(cache, exist_ok=True)
-        staging = tempfile.mkdtemp(prefix=os.path.basename(cached) + '.partial-', dir=cache)
+        staging = tempfile.mkdtemp(prefix=plugin['key'] + '.partial-', dir=cache)
         for d, f in made:
             shutil.copytree(os.path.join(release, d, f), os.path.join(staging, f), symlinks=True,
                             dirs_exist_ok=True)
@@ -1790,9 +1817,11 @@ if misses:
             else:
                 shutil.copy2(path, target)
         carried = {f[:-len('.framework')] for _, f in made} - {name}
+        keys = {dep: current_keys[dep] for dep in sorted(carried) if dep in current_keys}
         with open(os.path.join(staging, '.plugins.json'), 'w') as f:
-            json.dump({dep: current_keys[dep] for dep in sorted(carried) if dep in current_keys}, f)
-        settle(staging, cached, lambda: in_cache(plugin))
+            json.dump(keys, f)
+        cached = variant_of(plugin, keys)
+        settle(staging, cached, lambda: entry_holds(cached))
         drop(symroot, objroot)
         built.append(name)
 
@@ -1831,7 +1860,7 @@ for plugin in wanted:
             failed.append('%s (%s)' % (name, broken[name]))
             status.append({'name': name, 'state': 'failed', 'detail': broken[name]})
         continue
-    cached = os.path.join(cache, plugin['key'])
+    cached = entry_of(plugin) or os.path.join(cache, plugin['key'])
     if name not in built:
         from_cache.append(name)
     for f in binaries(cached):
