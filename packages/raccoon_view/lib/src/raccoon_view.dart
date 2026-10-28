@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
-import 'package:flutter/gestures.dart' show PointerDeviceKind, PointerExitEvent;
+import 'package:flutter/gestures.dart'
+    show PointerDeviceKind, PointerExitEvent, PointerScrollEvent;
 import 'package:flutter/rendering.dart';
 import 'package:fixnum/fixnum.dart';
 import 'package:flutter/services.dart';
@@ -21,6 +22,7 @@ import 'package:raccoon_view/src/host_gpu_textures.dart';
 import 'package:raccoon_view/src/hosted_mouse_cursor.dart';
 import 'package:raccoon_view/src/hosted_text_input.dart';
 import 'package:raccoon_view/src/input_mapping.dart';
+import 'package:raccoon_view/src/zoom_control.dart';
 
 /// Shows the app a runner hosts and sends it the view's size, pointer and key
 /// events. The runner renders at this widget's size times the device pixel
@@ -530,6 +532,13 @@ class _RaccoonViewState extends State<RaccoonView> {
   }
 
   void _onPointer(PointerEvent event) {
+    // On a board or a canvas a scroll with Ctrl or Cmd zooms them, and is
+    // not the app's too (#233).
+    if (event is PointerScrollEvent &&
+        zoomModifierHeld() &&
+        ZoomsOnModifiedScroll.around(context)) {
+      return;
+    }
     // A click into the app is a click into the app: the keys follow it.
     if (event is PointerDownEvent && !_focus.hasFocus) _focus.requestFocus();
     final mapped = toRunnerPointer(

@@ -415,6 +415,16 @@ class RaccoonBoard extends StatefulWidget {
 }
 
 class _RaccoonBoardState extends State<RaccoonBoard> {
+  // A resize under way, by frame: the size it began at, and how far the
+  // pointer moved since.
+  final _resizing = <String, (Size, Offset)>{};
+
+  /// One frame a name: the last session given under it, as when a host
+  /// passes a run's starting session with its running one while it hands
+  /// over; two of a key would fail the build (#233).
+  Iterable<RaccoonBoardSession> get _sessions =>
+      {for (final session in widget.sessions) session.name: session}.values;
+
   Offset _pan = Offset.zero;
   double _zoom = 1;
   double _zoomAtStart = 1;
@@ -478,7 +488,7 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
     // Over an app the scroll is the app's; around the apps it pans, as on
     // a canvas (#232).
     final at = (event.localPosition - _pan) / _zoom;
-    for (final session in widget.sessions) {
+    for (final session in _sessions) {
       final frame = widget.layout.frameFor(session.name);
       if ((frame.position & frame.size).contains(at)) return;
     }
@@ -499,8 +509,7 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
   /// Every frame in view, as large as fits up to 100%, with a margin.
   void _showAll() {
     final frames = [
-      for (final session in widget.sessions)
-        widget.layout.frameFor(session.name),
+      for (final session in _sessions) widget.layout.frameFor(session.name),
     ];
     if (frames.isEmpty || _viewport.isEmpty) return;
     var bounds = _frameBounds(frames.first);
@@ -543,10 +552,19 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
         session: session?.name,
         position: position,
         zoom: _zoom,
-        zoomIn: () => _zoomTo(_zoom * zoomStep, center),
-        zoomOut: () => _zoomTo(_zoom / zoomStep, center),
-        resetZoom: () => _zoomTo(1, center),
-        showAll: _showAll,
+        // The host's menu may outlive the board (#233).
+        zoomIn: () {
+          if (mounted) _zoomTo(_zoom * zoomStep, center);
+        },
+        zoomOut: () {
+          if (mounted) _zoomTo(_zoom / zoomStep, center);
+        },
+        resetZoom: () {
+          if (mounted) _zoomTo(1, center);
+        },
+        showAll: () {
+          if (mounted) _showAll();
+        },
         sizes: [
           if ((session, frame) case (final session?, final frame?))
             for (final device in RaccoonDevice.presets)
@@ -588,80 +606,81 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
   Widget build(BuildContext context) {
     final controlStyle = (widget.titleStyle ?? const TextStyle(fontSize: 11))
         .copyWith(color: widget.titleStyle?.color ?? widget.ink);
-    return Listener(
-      onPointerSignal: _onScroll,
-      child: ClipRect(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            LayoutBuilder(
-              builder: (context, constraints) {
-                _viewport = constraints.biggest;
-                return const SizedBox.expand();
-              },
-            ),
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              dragStartBehavior: DragStartBehavior.down,
-              onScaleStart: _onScaleStart,
-              onScaleUpdate: _onScaleUpdate,
-              onSecondaryTapUp: (details) => _askMenu(details.globalPosition),
-              child: CustomPaint(
-                painter: _GridPainter(
-                  ink: widget.ink.withValues(alpha: 0.35),
-                  spacing: widget.spacing,
-                  pan: _pan,
+    return ZoomsOnModifiedScroll(
+      child: Listener(
+        onPointerSignal: _onScroll,
+        child: ClipRect(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  _viewport = constraints.biggest;
+                  return const SizedBox.expand();
+                },
+              ),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                dragStartBehavior: DragStartBehavior.down,
+                onScaleStart: _onScaleStart,
+                onScaleUpdate: _onScaleUpdate,
+                onSecondaryTapUp: (details) => _askMenu(details.globalPosition),
+                child: CustomPaint(
+                  painter: _GridPainter(
+                    ink: widget.ink.withValues(alpha: 0.35),
+                    spacing: widget.spacing,
+                    pan: _pan,
+                    zoom: _zoom,
+                  ),
+                ),
+              ),
+              OverflowBox(
+                alignment: Alignment.topLeft,
+                minWidth: 2 * RaccoonBoard.reach,
+                maxWidth: 2 * RaccoonBoard.reach,
+                minHeight: 2 * RaccoonBoard.reach,
+                maxHeight: 2 * RaccoonBoard.reach,
+                child: Transform(
+                  // Built from the old constructors, so it runs on the oldest
+                  // Flutter the package allows.
+                  transform:
+                      Matrix4.translationValues(_pan.dx, _pan.dy, 0) *
+                      Matrix4.diagonal3Values(_zoom, _zoom, 1) *
+                      Matrix4.translationValues(
+                        -RaccoonBoard.reach,
+                        -RaccoonBoard.reach,
+                        0,
+                      ),
+                  child: Stack(
+                    children: [
+                      for (final session in _sessions) _frame(context, session),
+                    ],
+                  ),
+                ),
+              ),
+              if (widget.sessions.isEmpty && widget.empty != null)
+                Center(child: widget.empty),
+              Positioned(
+                right: 12,
+                bottom: 8,
+                child: ZoomControl(
                   zoom: _zoom,
+                  style: controlStyle,
+                  onZoomOut:
+                      () => _zoomTo(
+                        _zoom / zoomStep,
+                        _viewport.center(Offset.zero),
+                      ),
+                  onZoomIn:
+                      () => _zoomTo(
+                        _zoom * zoomStep,
+                        _viewport.center(Offset.zero),
+                      ),
+                  onReset: () => _zoomTo(1, _viewport.center(Offset.zero)),
                 ),
               ),
-            ),
-            OverflowBox(
-              alignment: Alignment.topLeft,
-              minWidth: 2 * RaccoonBoard.reach,
-              maxWidth: 2 * RaccoonBoard.reach,
-              minHeight: 2 * RaccoonBoard.reach,
-              maxHeight: 2 * RaccoonBoard.reach,
-              child: Transform(
-                // Built from the old constructors, so it runs on the oldest
-                // Flutter the package allows.
-                transform:
-                    Matrix4.translationValues(_pan.dx, _pan.dy, 0) *
-                    Matrix4.diagonal3Values(_zoom, _zoom, 1) *
-                    Matrix4.translationValues(
-                      -RaccoonBoard.reach,
-                      -RaccoonBoard.reach,
-                      0,
-                    ),
-                child: Stack(
-                  children: [
-                    for (final session in widget.sessions)
-                      _frame(context, session),
-                  ],
-                ),
-              ),
-            ),
-            if (widget.sessions.isEmpty && widget.empty != null)
-              Center(child: widget.empty),
-            Positioned(
-              right: 12,
-              bottom: 8,
-              child: ZoomControl(
-                zoom: _zoom,
-                style: controlStyle,
-                onZoomOut:
-                    () => _zoomTo(
-                      _zoom / zoomStep,
-                      _viewport.center(Offset.zero),
-                    ),
-                onZoomIn:
-                    () => _zoomTo(
-                      _zoom * zoomStep,
-                      _viewport.center(Offset.zero),
-                    ),
-                onReset: () => _zoomTo(1, _viewport.center(Offset.zero)),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -679,11 +698,18 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
       widget.layout.move(session.name, current.position + delta);
     }
 
+    // From the size the drag began at and all it moved since: steps added
+    // to a size held at the least lost what was cut, and the corner came
+    // off the pointer (#233).
     void resizeBy(Offset delta) {
-      final current = widget.layout.frameFor(session.name);
+      final (start, moved) =
+          _resizing[session.name] ??
+          (widget.layout.frameFor(session.name).size, Offset.zero);
+      final total = moved + delta;
+      _resizing[session.name] = (start, total);
       widget.layout.resize(
         session.name,
-        Size(current.size.width + delta.dx, current.size.height + delta.dy),
+        Size(start.width + total.dx, start.height + total.dy),
       );
     }
 
@@ -736,7 +762,20 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
                           cursor: SystemMouseCursors.click,
                           child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 6),
-                            child: Text('${frame.label} ▾', style: titleStyle),
+                            // At most most of the title: a frame made as
+                            // narrow as it goes overflowed by its size
+                            // (#233).
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: frame.size.width * 0.6,
+                              ),
+                              child: Text(
+                                '${frame.label} ▾',
+                                style: titleStyle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -807,8 +846,13 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
                     key: RaccoonBoard.resizeKey(session.name),
                     behavior: HitTestBehavior.opaque,
                     dragStartBehavior: DragStartBehavior.down,
+                    onPanStart: (_) => _resizing.remove(session.name),
                     onPanUpdate: (details) => resizeBy(details.delta),
-                    onPanEnd: (_) => widget.layout.saveSize(session.name),
+                    onPanEnd: (_) {
+                      _resizing.remove(session.name);
+                      widget.layout.saveSize(session.name);
+                    },
+                    onPanCancel: () => _resizing.remove(session.name),
                     child: MouseRegion(
                       cursor: SystemMouseCursors.resizeDownRight,
                       child: CustomPaint(

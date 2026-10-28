@@ -16,6 +16,20 @@ bool zoomModifierHeld() =>
     HardwareKeyboard.instance.isControlPressed ||
     HardwareKeyboard.instance.isMetaPressed;
 
+/// Around what a board or a canvas shows: a scroll there with
+/// [zoomModifierHeld] zooms them, and a view inside leaves it to them
+/// rather than scroll its app too (#233).
+class ZoomsOnModifiedScroll extends InheritedWidget {
+  const ZoomsOnModifiedScroll({super.key, required super.child});
+
+  /// Whether [context] sits inside one.
+  static bool around(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<ZoomsOnModifiedScroll>() != null;
+
+  @override
+  bool updateShouldNotify(ZoomsOnModifiedScroll oldWidget) => false;
+}
+
 /// How much a scroll or drag of [dy] logical pixels with the modifier held
 /// zooms by: a wheel's notch of 100 is the old step of 1.1, and a
 /// trackpad's smaller steps add up to the same.

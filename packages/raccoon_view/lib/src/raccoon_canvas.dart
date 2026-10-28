@@ -108,7 +108,9 @@ class _RaccoonCanvasState extends State<RaccoonCanvas> {
   /// it stays put.
   void _zoomTo(double next, Offset focus) {
     final scale = _scale;
-    final zoom = next.clamp(minZoom, maxZoom);
+    // An app that fits only below the least zoom zooms out no further than
+    // that fit, rather than jump in to it (#233).
+    final zoom = next.clamp(math.min(minZoom, _fit), maxZoom).toDouble();
     final inArea = focus - widget.padding.topLeft;
     final placed = _placed(_area, scale, _origin);
     setState(() {
@@ -169,80 +171,82 @@ class _RaccoonCanvasState extends State<RaccoonCanvas> {
     final style = (widget.labelStyle ?? const TextStyle(fontSize: 11)).copyWith(
       color: widget.labelStyle?.color ?? widget.ink.withValues(alpha: 0.7),
     );
-    return Listener(
-      onPointerSignal: _onScroll,
-      child: CustomPaint(
-        painter: _DotGridPainter(
-          ink: widget.ink.withValues(alpha: 0.28),
-          spacing: widget.spacing,
-        ),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            _area = widget.padding.deflateSize(constraints.biggest);
-            _fit = math.min(
-              1,
-              math.min(
-                _area.width / widget.size.width,
-                _area.height / widget.size.height,
-              ),
-            );
-            final scale = _scale;
-            final placed = _placed(_area, scale, _origin);
-            return Stack(
-              alignment: Alignment.topLeft,
-              children: [
-                Positioned.fill(
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onScaleStart: _onScaleStart,
-                    onScaleUpdate: _onScaleUpdate,
-                  ),
+    return ZoomsOnModifiedScroll(
+      child: Listener(
+        onPointerSignal: _onScroll,
+        child: CustomPaint(
+          painter: _DotGridPainter(
+            ink: widget.ink.withValues(alpha: 0.28),
+            spacing: widget.spacing,
+          ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              _area = widget.padding.deflateSize(constraints.biggest);
+              _fit = math.min(
+                1,
+                math.min(
+                  _area.width / widget.size.width,
+                  _area.height / widget.size.height,
                 ),
-                Positioned(
-                  left: widget.padding.left + placed.dx,
-                  top: widget.padding.top + placed.dy,
-                  width: widget.size.width * scale,
-                  height: widget.size.height * scale,
-                  child: FittedBox(
-                    fit: BoxFit.fill,
-                    child: DecoratedBox(
-                      position: DecorationPosition.foreground,
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: widget.ink.withValues(alpha: 0.55),
+              );
+              final scale = _scale;
+              final placed = _placed(_area, scale, _origin);
+              return Stack(
+                alignment: Alignment.topLeft,
+                children: [
+                  Positioned.fill(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onScaleStart: _onScaleStart,
+                      onScaleUpdate: _onScaleUpdate,
+                    ),
+                  ),
+                  Positioned(
+                    left: widget.padding.left + placed.dx,
+                    top: widget.padding.top + placed.dy,
+                    width: widget.size.width * scale,
+                    height: widget.size.height * scale,
+                    child: FittedBox(
+                      fit: BoxFit.fill,
+                      child: DecoratedBox(
+                        position: DecorationPosition.foreground,
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: widget.ink.withValues(alpha: 0.55),
+                          ),
                         ),
-                      ),
-                      child: SizedBox(
-                        width: widget.size.width,
-                        height: widget.size.height,
-                        child: widget.child,
+                        child: SizedBox(
+                          width: widget.size.width,
+                          height: widget.size.height,
+                          child: widget.child,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                Positioned(
-                  left: widget.padding.left,
-                  bottom: widget.padding.bottom / 2 - 2,
-                  child: ZoomControl(
-                    zoom: scale,
-                    style: style,
-                    onZoomOut: () => _step(1 / zoomStep),
-                    onZoomIn: () => _step(zoomStep),
-                    onReset: () => setState(() => _zoom = null),
+                  Positioned(
+                    left: widget.padding.left,
+                    bottom: widget.padding.bottom / 2 - 2,
+                    child: ZoomControl(
+                      zoom: scale,
+                      style: style,
+                      onZoomOut: () => _step(1 / zoomStep),
+                      onZoomIn: () => _step(zoomStep),
+                      onReset: () => setState(() => _zoom = null),
+                    ),
                   ),
-                ),
-                Positioned(
-                  right: widget.padding.right,
-                  bottom: widget.padding.bottom / 2,
-                  child: Text(
-                    widget.label,
-                    style: style,
-                    textDirection: TextDirection.ltr,
+                  Positioned(
+                    right: widget.padding.right,
+                    bottom: widget.padding.bottom / 2,
+                    child: Text(
+                      widget.label,
+                      style: style,
+                      textDirection: TextDirection.ltr,
+                    ),
                   ),
-                ),
-              ],
-            );
-          },
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
