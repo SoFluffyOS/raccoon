@@ -476,12 +476,15 @@ void main() {
         reason: 'round $round',
       );
     }
-    // Nothing left beside it.
+    // No half-unpacked folder left beside it. A runner moved aside may be
+    // (Windows won't delete a folder another install still has a file of
+    // open); a later install deletes it.
     expect(
-      Directory(
-        p.dirname(prebuilt.directory),
-      ).listSync().map((entry) => p.basename(entry.path)),
-      ['runner'],
+      Directory(p.dirname(prebuilt.directory))
+          .listSync()
+          .map((entry) => p.basename(entry.path))
+          .where((name) => name != 'runner' && !name.startsWith('runner.old-')),
+      isEmpty,
     );
   });
 }
