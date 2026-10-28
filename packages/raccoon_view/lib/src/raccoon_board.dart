@@ -475,6 +475,13 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
       );
       return;
     }
+    // Over an app the scroll is the app's; around the apps it pans, as on
+    // a canvas (#232).
+    final at = (event.localPosition - _pan) / _zoom;
+    for (final session in widget.sessions) {
+      final frame = widget.layout.frameFor(session.name);
+      if ((frame.position & frame.size).contains(at)) return;
+    }
     setState(() => _pan -= event.scrollDelta);
   }
 

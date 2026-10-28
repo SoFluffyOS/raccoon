@@ -5,24 +5,51 @@ import 'package:raccoon_runtime/raccoon_runtime.dart' show ChannelConnection;
 /// (a text beam over a field, a hand over a link), as one of Flutter's own
 /// [SystemMouseCursors], for the view to show over the app.
 final class HostedMouseCursor {
+  /// Views of one connection share its channel, which has one handler:
+  /// each is told every change, and the channel goes with the last (#232).
   HostedMouseCursor(this._connection, this._onChanged) {
-    _connection.registerChannel(channel, _handle);
+    _watchers
+        .putIfAbsent(_connection, () {
+          _connection.registerChannel(
+            channel,
+            (data) => _handle(_connection, data),
+          );
+          return <HostedMouseCursor>{};
+        })
+        .add(this);
   }
 
   static const String channel = 'flutter/mousecursor';
   static const MethodCodec _codec = StandardMethodCodec();
 
+  static final _watchers =
+      Map<ChannelConnection, Set<HostedMouseCursor>>.identity();
+
   final ChannelConnection _connection;
   final void Function(MouseCursor cursor) _onChanged;
 
-  /// Stops taking the app's cursor; the connection answers "no plugin" again.
-  void detach() => _connection.unregisterChannel(channel);
+  /// Stops taking the app's cursor; once no view of the connection takes
+  /// it, the connection answers "no plugin" again.
+  void detach() {
+    final watchers = _watchers[_connection];
+    if (watchers == null || !watchers.remove(this) || watchers.isNotEmpty) {
+      return;
+    }
+    _watchers.remove(_connection);
+    _connection.unregisterChannel(channel);
+  }
 
-  Future<Uint8List?> _handle(Uint8List data) async {
+  static Future<Uint8List?> _handle(
+    ChannelConnection connection,
+    Uint8List data,
+  ) async {
     final call = _codec.decodeMethodCall(ByteData.sublistView(data));
     if (call.method != 'activateSystemCursor') return null;
     final kind = (call.arguments as Map?)?['kind'] as String?;
-    _onChanged(_byKind[kind] ?? SystemMouseCursors.basic);
+    final cursor = _byKind[kind] ?? SystemMouseCursors.basic;
+    for (final watcher in [...?_watchers[connection]]) {
+      watcher._onChanged(cursor);
+    }
     final reply = _codec.encodeSuccessEnvelope(null);
     return reply.buffer.asUint8List(reply.offsetInBytes, reply.lengthInBytes);
   }

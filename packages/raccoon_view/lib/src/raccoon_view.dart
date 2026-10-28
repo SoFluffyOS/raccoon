@@ -71,6 +71,7 @@ class _RaccoonViewState extends State<RaccoonView> {
   HostGpuTextures? _gpu;
   int? _textureId;
   bool _creatingTexture = false;
+  Completer<void>? _making;
   // Whether frames arrive as GPU buffers, and the buffer the texture shows.
   bool _gpuLive = false;
 
@@ -145,8 +146,9 @@ class _RaccoonViewState extends State<RaccoonView> {
     _unsubscribeCursor();
     _sentSize = null;
     _mouseIn = false;
-    // The new runner saw none of them go down.
-    _pressed.clear();
+    // The old runner's go up there; the new one saw none of them go down
+    // (#232).
+    _releaseKeys(oldWidget.connection);
     _subscribe();
   }
 
@@ -184,7 +186,14 @@ class _RaccoonViewState extends State<RaccoonView> {
     if (!connection.composes) return;
     final text = HostedTextInput(connection, _focus);
     _text = text;
-    _fields = connection.textFields.listen(text.field);
+    // The fields end with the runner: the host's input method lets go of
+    // one the app no longer has (#232).
+    _fields = connection.textFields.listen(
+      text.field,
+      onDone: () {
+        if (identical(_text, text)) _unsubscribeText();
+      },
+    );
   }
 
   /// A connection that carries GPU buffers shows them through the host's
@@ -225,17 +234,21 @@ class _RaccoonViewState extends State<RaccoonView> {
       // gone, is let go: the new connection makes its own (#133).
       final generation = _gpuGeneration;
       bool current() => mounted && generation == _gpuGeneration;
+      // Done once the texture is made, or let go again: a view that goes
+      // meanwhile hands the ring on only then, as the texture may hold the
+      // runner's GPU socket, which takes one connection at a time (#232).
+      final making = _making = Completer<void>();
       var id = -1;
       try {
         id = await gpu.create();
         if (id < 0 || !current()) {
-          if (id >= 0) unawaited(gpu.dispose(id));
+          if (id >= 0) await _letGo(gpu, id);
           if (current()) _creatingTexture = false;
           return;
         }
         final releases = await gpu.connect(id, set.socket);
         if (!current()) {
-          unawaited(gpu.dispose(id));
+          await _letGo(gpu, id);
           return;
         }
         // Frames name the texture only once the host reads the socket, so
@@ -245,14 +258,25 @@ class _RaccoonViewState extends State<RaccoonView> {
         _creatingTexture = false;
       } on Object {
         // The next set tries again.
-        if (id >= 0) unawaited(gpu.dispose(id));
+        if (id >= 0) await _letGo(gpu, id);
         if (current()) _creatingTexture = false;
         return;
+      } finally {
+        making.complete();
       }
     }
     if (_unshownGpu case final frame?) {
       _unshownGpu = null;
       await _showGpuFrame(frame);
+    }
+  }
+
+  /// Disposes texture [id], an error from the host aside.
+  static Future<void> _letGo(HostGpuTextures gpu, int id) async {
+    try {
+      await gpu.dispose(id);
+    } on Object {
+      return;
     }
   }
 
@@ -284,8 +308,10 @@ class _RaccoonViewState extends State<RaccoonView> {
     _hostReleases = false;
     final disposing = switch (_textureId) {
       final id? => _gpu?.dispose(id),
+      null when _creatingTexture => _making?.future,
       null => null,
     };
+    _making = null;
     _textureId = null;
     _creatingTexture = false;
     _gpu = null;
@@ -410,6 +436,10 @@ class _RaccoonViewState extends State<RaccoonView> {
     final shown = (frame.gpuGeneration, frame.bufferIndex);
     _shown = shown;
     final generation = _gpuGeneration;
+    // Read before the show: a view that goes meanwhile clears it, and the
+    // host, which gives its buffers back itself, would get one back twice
+    // (#232).
+    final hostReleases = _hostReleases;
     await gpu.show(id, frame.gpuGeneration, frame.bufferIndex);
     // The buffer shown before, unless it is this one again: a view made
     // anew on a connection first shows the last frame, which the view
@@ -418,7 +448,7 @@ class _RaccoonViewState extends State<RaccoonView> {
     if (previous case (
       final generation,
       final index,
-    ) when !_hostReleases && previous != shown) {
+    ) when !hostReleases && previous != shown) {
       connection.releaseGpuBuffer(generation, index);
     }
     // A show that ends after a swap says nothing of the new connection.
@@ -576,10 +606,11 @@ class _RaccoonViewState extends State<RaccoonView> {
 
   /// Lets go of every key the runner still holds down: their ups go to
   /// whatever took focus, or nowhere.
-  void _releaseKeys() {
+  void _releaseKeys([RunnerConnection? to]) {
+    final connection = to ?? widget.connection;
     final now = Int64(DateTime.now().microsecondsSinceEpoch);
     for (final MapEntry(key: physical, value: logical) in _pressed.entries) {
-      widget.connection.sendKey(
+      connection.sendKey(
         rc.KeyEvent(
           kind: rc.KeyKind.KEY_KIND_UP,
           physical: Int64(physical.usbHidUsage),
