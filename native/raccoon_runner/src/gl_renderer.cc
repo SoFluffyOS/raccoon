@@ -1,5 +1,6 @@
 #include "gl_renderer.h"
 
+#include <poll.h>
 #include <unistd.h>
 
 #include <cstdio>
@@ -191,6 +192,14 @@ void GlRenderer::Shutdown() {
   if (MakeCurrent()) {
     std::lock_guard<std::mutex> lock(mutex_);
     DestroyPool();
+  } else {
+    // No context for the GL names, but the descriptors need none.
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (Buffer& buffer : pool_) {
+      if (buffer.fence >= 0) close(buffer.fence);
+      if (buffer.fd >= 0) close(buffer.fd);
+      buffer.fence = buffer.fd = -1;
+    }
   }
   eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
   if (resource_context_ != EGL_NO_CONTEXT) {
@@ -226,8 +235,46 @@ void* GlRenderer::ProcAddress(const char* name) const {
   return reinterpret_cast<void*>(eglGetProcAddress(name));
 }
 
+namespace {
+
+// The texture and framebuffer bound before, bound again on the way out: the
+// engine's context is Skia's, whose cache of what is bound is not told, and
+// without views mode nothing resets it around the framebuffer callback; a
+// texture left bound here could be sampled for another (raccoon#241).
+class BindingsKept {
+ public:
+  BindingsKept() {
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture_);
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer_);
+  }
+  ~BindingsKept() {
+    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(texture_));
+    glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(framebuffer_));
+  }
+  BindingsKept(const BindingsKept&) = delete;
+  BindingsKept& operator=(const BindingsKept&) = delete;
+
+ private:
+  GLint texture_ = 0;
+  GLint framebuffer_ = 0;
+};
+
+// Whether the GPU takes a texture of |width| by |height|: past its most,
+// glTexImage2D fails and leaves the old storage, which the frame's size
+// would then overrun on readback (raccoon#241).
+bool FitsTexture(size_t width, size_t height) {
+  GLint most = 0;
+  glGetIntegerv(GL_MAX_TEXTURE_SIZE, &most);
+  return most <= 0 ||
+         (width <= static_cast<size_t>(most) && height <= static_cast<size_t>(most));
+}
+
+}  // namespace
+
 bool GlRenderer::EnsureSize(size_t width, size_t height) {
   if (fbo_ != 0 && width == width_ && height == height_) return true;
+  if (!FitsTexture(width, height)) return false;
+  BindingsKept kept;
   if (fbo_ == 0) {
     glGenTextures(1, &texture_);
     glGenFramebuffers(1, &fbo_);
@@ -338,6 +385,8 @@ bool GlRenderer::EnablePool(size_t count, std::string* error) {
   }
   pool_wanted_ = true;
   pool_count_ = count;
+  // A new client tries every size afresh.
+  failed_width_ = failed_height_ = 0;
   return true;
 }
 
@@ -427,8 +476,17 @@ int GlRenderer::ExportFence() {
 }
 
 void GlRenderer::WaitFence(int fence_fd) {
-  if (!has_fences_) {
+  // Without native fences here, the client's is still a sync file, which
+  // polls readable once signalled: waited on so, bounded as below, rather
+  // than dropped while the client may still be reading the buffer
+  // (raccoon#241).
+  const auto poll_fence = [fence_fd] {
+    pollfd ready{fence_fd, POLLIN, 0};
+    poll(&ready, 1, 100);
     close(fence_fd);
+  };
+  if (!has_fences_) {
+    poll_fence();
     return;
   }
   const EGLint attributes[] = {EGL_SYNC_NATIVE_FENCE_FD_ANDROID, fence_fd, EGL_NONE};
@@ -436,7 +494,7 @@ void GlRenderer::WaitFence(int fence_fd) {
   const EGLSyncKHR sync =
       create_sync_(display_, EGL_SYNC_NATIVE_FENCE_ANDROID, attributes);
   if (sync == EGL_NO_SYNC_KHR) {
-    close(fence_fd);
+    poll_fence();
     return;
   }
   if (has_wait_sync_) {
@@ -467,6 +525,8 @@ void GlRenderer::DestroyPool() {
 
 bool GlRenderer::BuildPool(size_t width, size_t height) {
   DestroyPool();
+  if (!FitsTexture(width, height)) return false;
+  BindingsKept kept;
   glGenFramebuffers(1, &pool_fbo_);
   std::vector<Buffer> buffers(pool_count_);
   for (Buffer& buffer : buffers) {
@@ -546,12 +606,21 @@ uint32_t GlRenderer::Fbo(size_t width, size_t height) {
     current_ = -1;
     if (!pool_wanted_ && !pool_.empty()) DestroyPool();
     if (pool_wanted_ && can_export_) {
-      if (pool_.empty() || pool_width_ != width || pool_height_ != height) {
+      const bool stale = pool_.empty() || pool_width_ != width || pool_height_ != height;
+      // One that can't be built at a size is tried again at the next:
+      // turned off for good, a window back at a size that works stayed on
+      // readback (raccoon#241). Back at the size that failed, a pool of
+      // another size goes, as a failed build left none.
+      if (stale && width == failed_width_ && height == failed_height_) {
+        if (!pool_.empty()) DestroyPool();
+      } else if (stale) {
         if (!BuildPool(width, height)) {
-          pool_wanted_ = false;
+          failed_width_ = width;
+          failed_height_ = height;
           std::fprintf(stderr,
-                       "🦝 no GPU buffers: the pool could not be "
-                       "built; frames by readback\n");
+                       "🦝 no GPU buffers at %zux%zu: the pool could not be "
+                       "built; frames by readback\n",
+                       width, height);
         }
       }
       for (size_t i = 0; i < pool_.size(); ++i) {

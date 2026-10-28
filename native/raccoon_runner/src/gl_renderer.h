@@ -167,6 +167,10 @@ class GlRenderer : public GpuRenderer {
   // frame: the engine keeps rendering only while the id it is given stays
   // the same.
   GLuint pool_fbo_ = 0;
+  // The size a pool could not be built at: frames of that size go by
+  // readback, and a pool is tried again at the next size (raccoon#241).
+  size_t failed_width_ = 0;
+  size_t failed_height_ = 0;
   size_t pool_width_ = 0;
   size_t pool_height_ = 0;
   uint32_t generation_ = 0;
