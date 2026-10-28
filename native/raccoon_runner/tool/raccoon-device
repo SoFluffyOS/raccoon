@@ -396,7 +396,7 @@ def bundled(project):
     or builds outside its own target."""
     try:
         with open(os.path.join(project, 'out', 'bundled.txt')) as f:
-            return [path for path in f.read().splitlines() if path and os.path.isfile(path)]
+            return [path for path in f.read().split(';') if path and os.path.isfile(path)]
     except OSError:
         return []
 
@@ -487,8 +487,8 @@ prebuilt_tried = False
 
 
 def fetch_prebuilt():
-    """The release's prebuilt plugins into the cache, once per runner version
-    and engine; a marker remembers a miss so it is not asked again."""
+    """The release's prebuilt plugins into the cache, once per runner
+    version; a marker remembers a miss so it is not asked again."""
     global prebuilt_tried
     if os.environ.get('RACCOON_NO_PREBUILT') or prebuilt_tried:
         return
@@ -607,14 +607,20 @@ toolchain_id = None
 def toolchain_identity():
     global toolchain_id
     if toolchain_id is None:
+        import shlex
         versions = []
-        # The C++ compiler CMake picks: $CXX, else c++.
-        for command in (['cmake', '--version'], [os.environ.get('CXX') or 'c++', '--version']):
+        # The compilers CMake picks ($CC else cc, $CXX else c++, either
+        # perhaps behind ccache), and the JDK a plugin that made nothing
+        # without one (jni) wants.
+        for command in ('cmake', os.environ.get('CC') or 'cc', os.environ.get('CXX') or 'c++'):
             try:
-                found = subprocess.run(command, capture_output=True, text=True).stdout
+                found = subprocess.run(shlex.split(command) + ['--version'],
+                                       capture_output=True, text=True).stdout
                 versions.append(found.splitlines()[0] if found else '')
-            except OSError:
+            except (OSError, IndexError, ValueError):
                 versions.append('')
+        javac = shutil.which('javac')
+        versions.append(os.environ.get('JAVA_HOME') or (os.path.realpath(javac) if javac else ''))
         toolchain_id = ' / '.join(versions)
     return toolchain_id
 
@@ -679,8 +685,10 @@ def build(plugin):
     with open(os.path.join(project, 'CMakeLists.txt'), 'w') as f:
         f.write(PREAMBLE)
         f.write('add_subdirectory("%s" "plugin")\n' % os.path.join(plugin['root'], 'linux'))
+        # As the list it is, ;-separated: a $<JOIN> would take a comma in a
+        # path for its own and fail on a >.
         f.write('file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/bundled.txt" '
-                'CONTENT "$<JOIN:${%s_bundled_libraries},\\n>\\n")\n' % name)
+                'CONTENT "${%s_bundled_libraries}")\n' % name)
     log = os.path.join(project, 'build.log')
     with open(log, 'w') as written:
         configured = subprocess.run(['cmake', '-S', project, '-B', os.path.join(project, 'out'), '-G', 'Ninja'],
