@@ -41,6 +41,8 @@ using flutter::EncodableValue;
 
 // More buffers than a ring will ever have.
 constexpr uint32_t kMaxBuffers = 16;
+// The most a GPU socket message may be: sets are far under it.
+constexpr uint32_t kMaxMessage = 1 << 20;
 
 uint32_t Read32(const uint8_t* at) {
   return static_cast<uint32_t>(at[0]) | (static_cast<uint32_t>(at[1]) << 8) |
@@ -82,6 +84,9 @@ class GpuTexture {
   }
 
   bool Connect(const std::string& path) {
+    // A socket this texture had goes first, its reader with it: assigning
+    // a thread over one still joinable would end the editor (raccoon#240).
+    Close();
     sockaddr_un address{};
     address.sun_family = AF_UNIX;
     if (path.size() >= sizeof(address.sun_path)) return false;
@@ -187,12 +192,22 @@ class GpuTexture {
     std::vector<uint8_t> inbox;
     char buffer[16 * 1024];
     while (true) {
+      // Still this texture's: Close clears it before closing, and the
+      // number closed may be handed to another socket at once, whose bytes
+      // this would read (raccoon#240).
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (socket_ != socket) return;
+      }
       const int got = recv(socket, buffer, sizeof(buffer), 0);
       if (got <= 0) return;
       inbox.insert(inbox.end(), buffer, buffer + got);
       size_t offset = 0;
       while (inbox.size() - offset >= 4) {
         const uint32_t length = Read32(inbox.data() + offset);
+        // No set comes near this: a runner that sends more is not one, and
+        // the editor would hold it all (raccoon#240).
+        if (length > kMaxMessage) return;
         if (inbox.size() - offset - 4 < length) break;
         const uint8_t* payload = inbox.data() + offset + 4;
         offset += 4 + length;
@@ -254,7 +269,14 @@ class RaccoonViewPlugin : public flutter::Plugin {
   }
 
   ~RaccoonViewPlugin() override {
-    for (auto& [id, texture] : live_) texture->Close();
+    // Unregistered, each kept until the engine lets go of it: it is still
+    // running, and a frame could sample a texture freed here (raccoon#240).
+    for (auto& [id, texture] : live_) {
+      std::shared_ptr<GpuTexture> gone = texture;
+      gone->Close();
+      textures_->UnregisterTexture(id, [gone]() {});
+    }
+    live_.clear();
     WSACleanup();
   }
 
