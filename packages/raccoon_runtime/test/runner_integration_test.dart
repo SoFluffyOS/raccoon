@@ -3276,6 +3276,17 @@ class Report extends StatelessWidget {
         await key(0x69, 0x0007000c, 'i');
         // Backspace is the framework's: its shortcut deletes, not the runner.
         await key(0x100000008, 0x0007002a, '');
+        // Typed only once the field shows the deletion: the framework sends
+        // the edited text after its frame, which a slow host may not have
+        // drawn 60 ms on, and a key before it edits the text before it.
+        final deleted = DateTime.now().add(const Duration(seconds: 10));
+        while (output
+                    .where((line) => line.trimRight().endsWith('TEXT:h'))
+                    .length <
+                2 &&
+            DateTime.now().isBefore(deleted)) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
         await key(0x79, 0x0007001c, 'y');
         final deadline = DateTime.now().add(const Duration(seconds: 10));
         while (!output.any((line) => line.contains('TEXT:hy')) &&
