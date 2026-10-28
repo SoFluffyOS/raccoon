@@ -9,6 +9,7 @@ import 'package:raccoon/raccoon.dart';
 import 'package:raccoon_runtime/src/message_framing.dart';
 import 'package:raccoon_runtime/src/runner_connection.dart';
 import 'package:raccoon_runtime/src/runner_endpoint.dart';
+import 'package:raccoon_runtime/src/runner_message_decoder.dart';
 import 'package:raccoon_runtime/src/runner_transport.dart';
 import 'package:raccoon_runtime/src/startup_failure.dart';
 
@@ -406,7 +407,7 @@ final class RunnerClient
     for (final payload in _unframer.add(inbound.bytes)) {
       final RunnerMessage message;
       try {
-        message = RunnerMessage.fromBuffer(payload);
+        message = decodeRunnerMessage(payload);
       } on Exception catch (error, stackTrace) {
         // Not the protocol: what follows can't be trusted to be framed
         // right either. The listeners hear why, and the client ends.
