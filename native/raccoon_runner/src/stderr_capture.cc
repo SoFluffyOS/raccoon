@@ -77,6 +77,12 @@ void OnCrash(int signal) {
   const int from = g_read_fd;
   const int to = g_saved_fd;
   if (from >= 0 && to >= 0) {
+#if !defined(_WIN32)
+    // The reader thread may take what Pending saw first, and a blocking
+    // read would then wait for good: the pipe's other end is stderr itself
+    // (raccoon#235).
+    fcntl(from, F_SETFL, fcntl(from, F_GETFL) | O_NONBLOCK);
+#endif
     char buffer[4096];
     while (Pending(from)) {
       const auto got = ReadFd(from, buffer, sizeof(buffer));
