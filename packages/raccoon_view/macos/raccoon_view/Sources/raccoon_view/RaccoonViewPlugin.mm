@@ -76,6 +76,9 @@ void Put32(uint8_t* at, uint32_t value) {
 constexpr mach_msg_id_t kPortRequestId = 0x52505254;  // 'RPRT'
 constexpr mach_msg_id_t kPortReplyId = 0x52505259;    // 'RPRY'
 constexpr size_t kTokenSize = 16;
+// The most a GPU socket message may be: sets and service names are far
+// under it.
+constexpr uint32_t kMaxMessage = 1 << 20;
 
 // The runner's surface ports for ring |generation|, in index order; empty
 // when it refused or did not answer.
@@ -113,12 +116,37 @@ std::vector<mach_port_t> AskPorts(mach_port_t service, uint32_t generation,
       (message.header.msgh_bits & MACH_MSGH_BITS_COMPLEX) != 0) {
     const auto* body = reinterpret_cast<const mach_msg_body_t*>(&message.header + 1);
     const auto* descriptors = reinterpret_cast<const mach_msg_port_descriptor_t*>(body + 1);
-    for (mach_msg_size_t i = 0; i < body->msgh_descriptor_count; ++i) {
-      ports.push_back(descriptors[i].name);
+    // Only send rights to ports: another kind of descriptor is sized
+    // otherwise, and read as one would hand back a name the runner chose
+    // (raccoon#234). Checked up to the first that isn't, as the stride
+    // holds that far; then the whole message goes.
+    bool ports_only = true;
+    for (mach_msg_size_t i = 0; i < body->msgh_descriptor_count && ports_only; ++i) {
+      ports_only = descriptors[i].type == MACH_MSG_PORT_DESCRIPTOR &&
+                   descriptors[i].disposition == MACH_MSG_TYPE_PORT_SEND;
+    }
+    if (ports_only) {
+      for (mach_msg_size_t i = 0; i < body->msgh_descriptor_count; ++i) {
+        ports.push_back(descriptors[i].name);
+      }
+    } else {
+      mach_msg_destroy(&message.header);
     }
   } else if (received == MACH_MSG_SUCCESS) {
     // Not the reply asked for: the rights it carried go (raccoon#127).
     mach_msg_destroy(&message.header);
+  } else if (received == MACH_SEND_TIMED_OUT || received == MACH_SEND_INTERRUPTED) {
+    // Not sent: the request's rights came back (raccoon#234). The send
+    // right to the service goes with the header; the reply's send-once
+    // comes back as the local port, which mach_msg_destroy leaves, and
+    // would turn into a dead name once the reply port goes.
+    const mach_port_t returned = message.header.msgh_local_port;
+    const bool send_once =
+        MACH_MSGH_BITS_LOCAL(message.header.msgh_bits) == MACH_MSG_TYPE_PORT_SEND_ONCE;
+    mach_msg_destroy(&message.header);
+    if (send_once && MACH_PORT_VALID(returned)) {
+      mach_port_deallocate(mach_task_self(), returned);
+    }
   }
   mach_port_mod_refs(mach_task_self(), reply, MACH_PORT_RIGHT_RECEIVE, -1);
   return ports;
@@ -160,7 +188,9 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
 @property(nonatomic, copy) void (^frameAvailable)(void);
 - (BOOL)connectToSocket:(NSString*)path;
 - (void)showGeneration:(uint32_t)generation index:(int)index;
-- (void)dispose;
+// Closes the socket, then calls |done| on the main queue: the next view
+// may connect only then, the runner taking one at a time.
+- (void)disposeThen:(dispatch_block_t)done;
 @end
 
 @implementation RaccoonGpuTexture {
@@ -187,6 +217,9 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
   // 'RPRT'; the socket's queue.
   mach_port_t _service;
   uint8_t _token[kTokenSize];
+  // Disposed: a set that comes after is dropped and nothing is handed out
+  // (raccoon#234). Under the mutex.
+  bool _disposed;
 }
 
 - (instancetype)init {
@@ -201,8 +234,15 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
     _socket = -1;
     _reader = nil;
     _service = MACH_PORT_NULL;
+    _disposed = false;
   }
   return self;
+}
+
+- (void)dealloc {
+  if (_reader != nil) dispatch_source_cancel(_reader);
+  if (_service != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), _service);
+  if (_boundBuffer != nullptr) CVPixelBufferRelease(_boundBuffer);
 }
 
 // Gives buffer |index| of |generation| back to the runner: 'RREL',
@@ -218,6 +258,7 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
 
 - (CVPixelBufferRef)copyPixelBuffer {
   std::lock_guard<std::mutex> lock(_mutex);
+  if (_disposed) return nullptr;
   if (_pending) _current = std::move(_pending);
   if (!_current || _current->buffers.empty()) return nullptr;
   const BufferSet& set = *_current;
@@ -268,6 +309,13 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
   size_t offset = 0;
   while (_inbox.size() - offset >= 4) {
     const uint32_t length = Read32(_inbox.data() + offset);
+    // No set comes near this: a runner that sends more is not one, and
+    // would have the editor hold it all (raccoon#234).
+    if (length > kMaxMessage) {
+      _inbox.clear();
+      [self closeSocket];
+      return;
+    }
     if (_inbox.size() - offset - 4 < length) break;
     const uint8_t* payload = _inbox.data() + offset + 4;
     offset += 4 + length;
@@ -302,6 +350,7 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
     bool named;
     {
       std::lock_guard<std::mutex> lock(_mutex);
+      if (_disposed) break;
       named = set->generation == _shownGeneration;
       _pending = std::move(set);
     }
@@ -375,8 +424,11 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
   }
   _reader = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, static_cast<uintptr_t>(fd), 0,
                                    _queue);
+  // Weakly: the texture would keep itself, and its socket, for good when
+  // nobody disposes it (raccoon#234).
+  __weak RaccoonGpuTexture* weakSelf = self;
   dispatch_source_set_event_handler(_reader, ^{
-    [self readSocket];
+    [weakSelf readSocket];
   });
   dispatch_source_set_cancel_handler(_reader, ^{
     close(fd);
@@ -388,22 +440,29 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
   return YES;
 }
 
-- (void)dispose {
+- (void)disposeThen:(dispatch_block_t)done {
+  {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _disposed = true;
+    _pending.reset();
+    _current.reset();
+    if (_boundBuffer != nullptr) {
+      CVPixelBufferRelease(_boundBuffer);
+      _boundBuffer = nullptr;
+    }
+  }
   // After whatever the queue is doing: an ask for ports may be under way.
+  // Done only once the socket is closed: answered at once, the next view
+  // connected while this one still held the runner's one place, and was
+  // turned away (raccoon#234).
   dispatch_async(_queue, ^{
     [self closeSocket];
     if (self->_service != MACH_PORT_NULL) {
       mach_port_deallocate(mach_task_self(), self->_service);
       self->_service = MACH_PORT_NULL;
     }
+    if (done != nil) dispatch_async(dispatch_get_main_queue(), done);
   });
-  std::lock_guard<std::mutex> lock(_mutex);
-  _pending.reset();
-  _current.reset();
-  if (_boundBuffer != nullptr) {
-    CVPixelBufferRelease(_boundBuffer);
-    _boundBuffer = nullptr;
-  }
 }
 
 @end
@@ -474,12 +533,25 @@ CVPixelBufferRef WrapSurfacePort(mach_port_t port) {
   if ([call.method isEqualToString:@"dispose"]) {
     texture.frameAvailable = nil;
     [_registry unregisterTexture:textureId.longLongValue];
-    [texture dispose];
     [_textures removeObjectForKey:textureId];
-    result(nil);
+    [texture disposeThen:^{
+      result(nil);
+    }];
     return;
   }
   result(FlutterMethodNotImplemented);
+}
+
+// The engine goes (a host's hot restart keeps this plugin, not the views
+// that made the textures): every texture lets its runner go (raccoon#234).
+- (void)detachFromEngineForRegistrar:(id<FlutterPluginRegistrar>)registrar {
+  for (NSNumber* textureId in _textures) {
+    RaccoonGpuTexture* texture = _textures[textureId];
+    texture.frameAvailable = nil;
+    [_registry unregisterTexture:textureId.longLongValue];
+    [texture disposeThen:nil];
+  }
+  [_textures removeAllObjects];
 }
 
 @end
