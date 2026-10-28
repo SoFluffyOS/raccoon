@@ -141,12 +141,19 @@ package_config() {
 # are named after it). Firebase's Apple SDKs read GoogleService-Info.plist
 # from its resources, as from an app's. For an app with native plugins or
 # native assets. Prints the path to run.
+# |1| as XML text.
+xml_text() {
+  printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
 app_bundle() {
-  local key="$1" bundle id version="" versions=""
+  local key="$1" bundle id name version="" versions=""
   bundle="$APPS/$key/$key.app/Contents"
   # The pubspec's version, as Flutter's macOS build gives it: package_info_plus
   # reads it here (#186).
-  [ -f "$APPS/$key/version" ] && version="$(cat "$APPS/$key/version")"
+  # As XML text: an instance's key or a version may hold & or <.
+  [ -f "$APPS/$key/version" ] && version="$(xml_text "$(cat "$APPS/$key/version")")"
+  name="$(xml_text "$key")"
   if [ -n "$version" ]; then
     versions="  <key>CFBundleShortVersionString</key><string>${version%%+*}</string>
   <key>CFBundleVersion</key><string>${version#*+}</string>"
@@ -164,7 +171,7 @@ app_bundle() {
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key><string>$id</string>
-  <key>CFBundleName</key><string>$key</string>
+  <key>CFBundleName</key><string>$name</string>
   <key>CFBundleExecutable</key><string>raccoon_runner</string>
   <key>CFBundlePackageType</key><string>APPL</string>
 $versions
