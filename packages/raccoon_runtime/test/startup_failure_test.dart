@@ -158,6 +158,29 @@ void main() {
     expect(StartupFailure.pluginOf('cameraman', reports), isNull);
   });
 
+  test('a channel two plugins match goes to the longer name', () {
+    final reports =
+        _report([
+          ('firebase_auth', PluginState.PLUGIN_STATE_NO_HOST, ''),
+          ('firebase_auth_web', PluginState.PLUGIN_STATE_FAILED, ''),
+        ]).plugins;
+
+    expect(
+      StartupFailure.pluginOf(
+        'plugins.flutter.io/firebase_auth_web',
+        reports,
+      )?.name,
+      'firebase_auth_web',
+    );
+    expect(
+      StartupFailure.pluginOf(
+        'plugins.flutter.io/firebase_auth_web',
+        reports.reversed,
+      )?.name,
+      'firebase_auth_web',
+    );
+  });
+
   test('says what became of a plugin in a line', () {
     String hint(PluginState state, String detail) => StartupFailure.hintFor(
       PluginReport(name: 'camera', state: state, detail: detail),
