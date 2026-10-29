@@ -409,6 +409,42 @@ void main() {
     timeout: const Timeout(Duration(minutes: 3)),
   );
 
+  test(
+    'the helper refuses an app name that names a folder outside the app\'s',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_names');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final apps = Directory(p.join(temp.path, 'data', 'raccoon', 'apps'));
+      final kept = Directory(p.join(apps.path, 'kept'))
+        ..createSync(recursive: true);
+      final helper = p.join(runnerDir, 'tool', 'raccoon-device');
+      final environment = {'XDG_DATA_HOME': p.join(temp.path, 'data')};
+      for (final name in ['', '.', '..', 'kept/..', r'kept\..']) {
+        for (final verb in ['uninstall', 'run']) {
+          final result = await Process.run(helper, [
+            verb,
+            name,
+          ], environment: environment);
+          expect(result.exitCode, 1, reason: '$verb "$name"');
+          expect('${result.stderr}', contains('not an app name'));
+        }
+      }
+      expect(kept.existsSync(), isTrue);
+
+      final result = await Process.run(helper, [
+        'uninstall',
+        'kept',
+      ], environment: environment);
+      expect(result.exitCode, 0, reason: '${result.stderr}');
+      expect(kept.existsSync(), isFalse);
+      expect(apps.existsSync(), isTrue);
+    },
+    skip: switch (Platform.isWindows) {
+      true => 'the helper runs in Git Bash on Windows',
+      false => false,
+    },
+  );
+
   // #118: a socket path must fit in 104 bytes on macOS. An app whose key
   // doesn't fit runs under a shorter socket name, its key in a .name file.
   test(

@@ -214,7 +214,14 @@ socket_path() {
 }
 
 app_key() {
-  if [ "$INSTANCE" = "1" ]; then echo "$1"; else echo "$1@$INSTANCE"; fi
+  local key="$1"
+  [ "$INSTANCE" = "1" ] || key="$1@$INSTANCE"
+  # A key that is empty, a dot or two, or holds a slash names a folder
+  # outside the app's own: uninstall would remove every app, or more.
+  case "$key" in
+    ''|.|..|*/*|*\\*) echo "🦝 not an app name: '$key'" >&2; return 1 ;;
+  esac
+  echo "$key"
 }
 
 # Prefixes each line with the time of day, to the millisecond.
@@ -2252,7 +2259,7 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
         break
       done
     fi
-    rm -rf "$APPS/$key"
+    rm -rf "${APPS:?}/$key"
     mkdir -p "$APPS/$key"
     clone_tree "$local_path" "$APPS/$key/flutter_assets"
     # The project is the nearest folder above its bundle with a pubspec:
@@ -2284,7 +2291,8 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
     build_native_assets "$project" "$APPS/$key" "$config"
     ;;
   uninstall)
-    rm -rf "$APPS/$(app_key "$1")"
+    key="$(app_key "$1")"
+    rm -rf "${APPS:?}/$key"
     ;;
   run)
     key="$(app_key "$1")"; shift
