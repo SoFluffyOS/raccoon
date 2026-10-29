@@ -373,6 +373,31 @@ void main() {
     await expectLater(downloader.find(pinned), throwsA(isA<DownloadFailed>()));
   });
 
+  test('reports a list that is not JSON, or not a list', () async {
+    server.releasesBody = '<html>';
+    await expectLater(
+      downloader.find(pinned),
+      throwsA(
+        isA<DownloadFailed>().having(
+          (error) => error.message,
+          'message',
+          contains('did not answer with JSON'),
+        ),
+      ),
+    );
+    server.releasesBody = '{"message": "Not Found"}';
+    await expectLater(
+      downloader.find(pinned),
+      throwsA(
+        isA<DownloadFailed>().having(
+          (error) => error.message,
+          'message',
+          contains('did not answer with a list of releases'),
+        ),
+      ),
+    );
+  });
+
   test('the current version is the runner\'s VERSION', () {
     final file = p.join(
       Directory.current.path,

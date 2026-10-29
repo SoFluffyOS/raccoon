@@ -22,6 +22,9 @@ final class FakeReleaseServer {
   /// The paths requested so far.
   final requests = <String>[];
 
+  /// What `/releases` answers instead of the list, when set.
+  String? releasesBody;
+
   Uri get releasesUri => Uri.parse('http://127.0.0.1:${_server.port}/releases');
 
   /// Adds a release tagged [tag] (`runner-v0.3.1`) with an archive for each of
@@ -64,7 +67,7 @@ final class FakeReleaseServer {
     final response = request.response;
     if (path == '/releases') {
       response.headers.contentType = ContentType.json;
-      response.write(jsonEncode(_releases));
+      response.write(releasesBody ?? jsonEncode(_releases));
       response.close();
       return;
     }
