@@ -3681,6 +3681,69 @@ class Report extends StatelessWidget {
   );
 
   test(
+    'a claim from a host gone as it is let in leaves the runner whole for the '
+    'next',
+    () async {
+      // raccoon#285: the runner's hello to it fails and closes it; what it
+      // sent must not be read, nor its place in the stream kept.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final holder = await RunnerClient.connect(endpoint, yields: true);
+      RunnerClient? next;
+      try {
+        await holder.hello.timeout(const Duration(seconds: 10));
+        await holder.frames.first.timeout(const Duration(seconds: 15));
+        // A claim that reads nothing back: on Linux the runner's hello to it
+        // fails.
+        final claimer = await Socket.connect(
+          InternetAddress(endpoint.path, type: InternetAddressType.unix),
+          0,
+        );
+        claimer.add(
+          MessageFraming.frame(
+            ClientMessage(
+              hello: ClientHello(
+                protocolVersion: 1,
+                claims: true,
+                clientName: 'x' * 2000,
+              ),
+            ).writeToBuffer(),
+          ),
+        );
+        await claimer.flush();
+        await claimer.close();
+        claimer.destroy();
+        await holder.closed.timeout(const Duration(seconds: 5));
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        // The next client has the runner, its messages read whole.
+        next = await RunnerClient.connect(endpoint);
+        await next.hello.timeout(const Duration(seconds: 10));
+        await next.frames.first.timeout(const Duration(seconds: 15));
+      } finally {
+        await holder.close();
+        final client = next;
+        if (client != null) {
+          client.shutdown();
+          await client.close();
+        }
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
+  test(
     'a host that claims a run takes it from one that yields; nobody else does',
     () async {
       // raccoon#281.

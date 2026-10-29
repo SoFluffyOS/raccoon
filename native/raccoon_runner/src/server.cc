@@ -320,6 +320,9 @@ void RunnerServer::OnPendingReadable() {
     CloseClient();
   }
   Adopt(fd);
+  // Gone already: the runner's hello to it failed and closed it, and what
+  // it sent is nobody's (raccoon#285).
+  if (client_fd_ != fd) return;
   inbox_ = std::move(sent);
   inbox_read_ = 0;
   DispatchInbox();
@@ -330,6 +333,7 @@ void RunnerServer::Refuse(int fd) { CloseFd(fd); }
 void RunnerServer::Adopt(int fd) {
   client_fd_ = fd;
   inbox_.clear();
+  inbox_read_ = 0;
   watching_writable_ = false;
   loop_.Watch(client_fd_, POLLIN,
               [this](short revents) { OnClientReadable(revents); });
