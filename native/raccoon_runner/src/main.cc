@@ -1055,6 +1055,12 @@ int Serve(const Options& options) {
                      static_cast<unsigned long long>(key.logical()),
                      key.character().c_str());
       }
+      // Flutter takes no key without both codes; a debug app asserts on
+      // each. The view always sends both.
+      if (key.physical() == 0 || key.logical() == 0) {
+        if (trace) std::fprintf(stderr, "🦝 key with no code dropped\n");
+        return;
+      }
       host.SendKey(ToFlutterKey(key, host.NowMicros()));
     };
     handler.on_text_editing = [&host, &Focus, client](const raccoon::v1::TextEditing& editing) {

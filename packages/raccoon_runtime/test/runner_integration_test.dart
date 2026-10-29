@@ -3417,6 +3417,84 @@ class Report extends StatelessWidget {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  // raccoon#298: Flutter takes no key without both codes, and a debug app
+  // asserted on each one a client sent.
+  test(
+    'a key with no code is dropped, and the next one still types',
+    () async {
+      final textAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'text',
+        'build',
+        'flutter_assets',
+      );
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: textAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      runner.stderr.listen(output.add);
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.frames.first.timeout(const Duration(seconds: 15));
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        for (final (logical, physical, character) in [
+          (0, 0x0007000b, 'x'),
+          (0x68, 0, 'x'),
+          (0x68, 0x0007000b, 'h'),
+        ]) {
+          for (final kind in [KeyKind.KEY_KIND_DOWN, KeyKind.KEY_KIND_UP]) {
+            client.sendKey(
+              KeyEvent(
+                kind: kind,
+                physical: Int64(physical),
+                logical: Int64(logical),
+                character: kind == KeyKind.KEY_KIND_DOWN ? character : '',
+                timestampMicros: Int64(DateTime.now().microsecondsSinceEpoch),
+              ),
+            );
+            await Future<void>.delayed(const Duration(milliseconds: 60));
+          }
+        }
+        final deadline = DateTime.now().add(const Duration(seconds: 10));
+        while (!output.any((line) => line.contains('TEXT:h')) &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+        final all = output.join();
+        expect(all, contains('TEXT:h'));
+        expect(all, isNot(contains('TEXT:x')));
+        expect(all, isNot(contains('Failed assertion')));
+      } finally {
+        client.shutdown();
+        await client.close();
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready &&
+                Directory(
+                  p.join(
+                    p.dirname(p.dirname(p.dirname(assets))),
+                    'text',
+                    'build',
+                    'flutter_assets',
+                  ),
+                ).existsSync()
+            ? false
+            : 'build the runner and the text example first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   test(
     'the deprecated RawKeyboard tells keys apart and keeps a modifier held '
     'on either side',
