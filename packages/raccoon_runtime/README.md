@@ -62,7 +62,10 @@ away.
 A machine with no checkout is set up from a release: `RunnerDownloader`
 finds the newest `runner-v*` release that goes with `RunnerVersion.current`
 and unpacks it into a `PrebuiltRunner`'s folder, whose `deviceHelper` the
-`raccoon` entry then names (`CustomDevicesFile.upsert`); `RuntimeStore`
+`raccoon` entry then names (`CustomDevicesFile.upsert`). The archive is
+checked against the SHA-256 the release lists and its own gzip trailer,
+each install unpacks apart, so two hosts setting up at once don't mix
+their files, and a runner counts as installed only with its device helper; `RuntimeStore`
 fetches the engine for the SDK, and `FlutterSettings` says whether the tool
 lists custom devices at all (`flutter config --enable-custom-devices`).
 Both of the tool's files are found where the tool itself keeps them
