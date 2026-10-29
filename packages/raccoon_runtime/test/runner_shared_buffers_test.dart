@@ -93,6 +93,99 @@ void main() {
     }
   });
 
+  // A broken runner's header would have had the client allocate what it
+  // said: a frame of 4 GiB rows, a million of them.
+  test(
+    'a shared frame bigger than its buffer is dropped and given back',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_shared');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final path = p.join(temp.path, 'app.sock');
+      final server = await RawServerSocket.bind(
+        InternetAddress(path, type: InternetAddressType.unix),
+        0,
+      );
+      addTearDown(server.close);
+      final buffers = [
+        for (var i = 0; i < 2; i++)
+          (File(p.join(temp.path, 'buffer$i'))
+            ..writeAsBytesSync([9, 8, 7, i])).openSync(mode: FileMode.append),
+      ];
+      final releases = StreamController<ReleaseBuffer>();
+      server.listen((socket) {
+        final unframer = MessageUnframer();
+        socket.listen((event) {
+          if (event != RawSocketEvent.read) return;
+          final bytes = socket.read();
+          if (bytes == null) return;
+          for (final payload in unframer.add(bytes)) {
+            final message = ClientMessage.fromBuffer(payload);
+            if (message.hasReleaseBuffer()) releases.add(message.releaseBuffer);
+          }
+        });
+        socket.write(
+          MessageFraming.frame(
+            RunnerMessage(
+              hello: RunnerHello(protocolVersion: 1),
+            ).writeToBuffer(),
+          ),
+        );
+        socket.sendMessage(
+          [
+            SocketControlMessage.fromHandles([
+              for (final buffer in buffers) ResourceHandle.fromFile(buffer),
+            ]),
+          ],
+          MessageFraming.frame(
+            RunnerMessage(
+              sharedBuffers: SharedBuffers(
+                count: 2,
+                size: Int64(4),
+                generation: 1,
+              ),
+            ).writeToBuffer(),
+          ),
+        );
+        for (final (sequence, rowBytes, height, index) in [
+          (1, 0xffffffff, 1 << 20, 0),
+          (2, 4, 1, 1),
+        ]) {
+          socket.write(
+            MessageFraming.frame(
+              RunnerMessage(
+                frame: Frame(
+                  sequence: Int64(sequence),
+                  width: 1,
+                  height: height,
+                  rowBytes: rowBytes,
+                  inSharedBuffer: true,
+                  bufferIndex: index,
+                ),
+              ).writeToBuffer(),
+            ),
+          );
+        }
+      });
+
+      final client = await RunnerClient.connect(UnixSocketEndpoint(path));
+      addTearDown(client.close);
+      final frame = await client.frames.first.timeout(
+        const Duration(seconds: 5),
+      );
+      expect(frame.sequence, Int64(2));
+      expect(frame.pixels, Uint8List.fromList([9, 8, 7, 1]));
+      final given = await releases.stream
+          .take(2)
+          .map((release) => release.index)
+          .toList()
+          .timeout(const Duration(seconds: 5));
+      expect(given, [0, 1]);
+      for (final buffer in buffers) {
+        buffer.closeSync();
+      }
+    },
+  );
+
   // #145: a set that came short of its descriptors left the client with no
   // buffers while the runner went on filling them.
   // #148: only a runner that numbers its sets drops its pool for that

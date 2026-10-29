@@ -184,6 +184,8 @@ final class RunnerClient
   // Which set _buffers is, as the runner named it; releases name it back,
   // so one meant for a set since replaced frees nothing in the new (#135).
   var _sharedGeneration = 0;
+  // The size of each of _buffers, as the runner gave it.
+  var _bufferSize = 0;
   var _sharedFrames = 0;
   final _unframer = MessageUnframer();
   final _messages = StreamController<RunnerMessage>.broadcast();
@@ -589,6 +591,7 @@ final class RunnerClient
       }
       return;
     }
+    _bufferSize = buffers.size.toInt();
     _buffers = _handles.sublist(0, count);
     _handles.removeRange(0, count);
   }
@@ -606,7 +609,16 @@ final class RunnerClient
       !_messages.hasListener &&
       frame.inSharedBuffer &&
       !frame.inGpuBuffer &&
-      frame.bufferIndex < _buffers.length;
+      frame.bufferIndex < _buffers.length &&
+      _fits(frame);
+
+  /// Whether [frame]'s rows fit in a shared buffer: a header that says
+  /// more, which only a broken runner sends, would have this client
+  /// allocate what it says.
+  bool _fits(Frame frame) {
+    final length = frame.rowBytes * frame.height;
+    return length > 0 && length <= _bufferSize;
+  }
 
   /// Reads the held frame's pixels into it and gives its buffer back.
   void _readHeld() {
@@ -626,9 +638,10 @@ final class RunnerClient
     if (frame.inGpuBuffer) return frame;
     if (!frame.inSharedBuffer) return frame;
     final index = frame.bufferIndex;
-    if (index >= _buffers.length) {
-      // Not one this client holds: dropped, but given back, or the runner
-      // would keep it busy and send every frame inline.
+    if (index >= _buffers.length || !_fits(frame)) {
+      // Not one this client holds, or more than it holds: dropped, but
+      // given back, or the runner would keep it busy and send every frame
+      // inline.
       _releaseShared(index);
       return null;
     }
