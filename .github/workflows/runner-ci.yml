@@ -107,6 +107,15 @@ jobs:
         run: ninja -C build
       - name: Version
         run: build/raccoon_runner --version
+      # Flutter's device ping, by the absolute path setup writes (C:/... on
+      # Windows): there it finds the runner only once the helper knows it
+      # runs in Git Bash.
+      - name: Ping the device helper
+        run: |
+          "$PWD/tool/raccoon-device" ping
+          if [ "$RUNNER_OS" = Windows ]; then
+            "$(cygpath -m "$PWD")/tool/raccoon-device" ping
+          fi
 
       - name: Build the example bundles
         run: |

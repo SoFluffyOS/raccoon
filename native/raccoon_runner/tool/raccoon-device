@@ -24,13 +24,27 @@
 # the host's default, as raccoon_runtime's AppPlugins saves them (#214).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+# Without a process where it can: Flutter pings every few seconds for each
+# device, and on Windows every process Git Bash starts costs tens of
+# milliseconds. An absolute path that is no link is the custom devices
+# entry's, as setup writes it.
+source_path="${BASH_SOURCE[0]}"
+source_dir="${source_path%/*}"
+case "$source_dir" in
+  /*/tool|[A-Za-z]:/*/tool) ;;
+  *) source_dir="" ;;
+esac
+if [ -n "$source_dir" ] && [ ! -L "$source_path" ]; then
+  ROOT="${source_dir%/tool}"
+else
+  ROOT="$(cd "$(dirname "$(readlink -f "$source_path")")/.." && pwd)"
+fi
 # On Windows this runs in Git Bash (the custom device entry starts it with
 # Git's bash.exe), the runner is an .exe, and the paths it is given are
-# written C:/..., as the Dart side writes them.
+# written C:/..., as the Dart side writes them. Git Bash's OSTYPE is msys.
 WINDOWS=""
 EXE=""
-case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) WINDOWS=1; EXE=.exe ;; esac
+case "${OSTYPE:-}" in msys*|cygwin*) WINDOWS=1; EXE=.exe ;; esac
 native_path() {
   if [ -n "$WINDOWS" ]; then cygpath -m "$1"; else echo "$1"; fi
 }
@@ -43,6 +57,8 @@ elif [ -x "$ROOT/build/raccoon_runner$EXE" ]; then
 else
   RUNNER="$ROOT/raccoon_runner$EXE"
 fi
+# The ping needs nothing more.
+if [ "${1:-}" = ping ]; then test -x "$RUNNER"; exit; fi
 APPS="$(native_path "${XDG_DATA_HOME:-$HOME/.local/share}")/raccoon/apps"
 # What an app keeps across runs (its shared preferences); install replaces the
 # app's bundle but leaves this.
