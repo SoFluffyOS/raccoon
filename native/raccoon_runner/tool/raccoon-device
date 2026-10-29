@@ -1854,6 +1854,39 @@ if misses:
     empty.sort(key=lambda name: order.get(name, len(order)))
 
 entries = []
+
+# Which plugin's entry each framework came from, to tell two versions of
+# one SDK pod apart: entries built weeks apart each carry their own, and
+# one process loads one.
+placed_by = {}
+clashes_said = set()
+
+
+def framework_version(path):
+    import plistlib
+    for plist in ('Resources/Info.plist', 'Versions/A/Resources/Info.plist'):
+        try:
+            with open(os.path.join(path, plist), 'rb') as f:
+                return plistlib.load(f).get('CFBundleShortVersionString')
+        except (OSError, ValueError, plistlib.InvalidFileException):
+            continue
+    return None
+
+
+def said_clash(framework, first, second, loaded, other):
+    """Says once when [second] carries another version of a framework than
+    the one [first] brought, which is the one that loads: [second] may fail
+    to find what it was built against."""
+    if first is None or framework in clashes_said:
+        return
+    have, wanted = framework_version(loaded), framework_version(other)
+    if have is None or wanted is None or have == wanted:
+        return
+    clashes_said.add(framework)
+    print('🦝 %s %s loads, from %s; %s was built against %s and may not '
+          'load' % (framework, have, first, second, wanted), file=sys.stderr)
+
+
 for plugin in wanted:
     name = plugin['name']
     if name in broken:
@@ -1873,9 +1906,11 @@ for plugin in wanted:
             # A plugin's own framework comes from its own entry, not from
             # one that carries it as a dependency, maybe an older one.
             if f != name + '.framework':
+                said_clash(f, placed_by.get(f), name, target, os.path.join(cached, f))
                 continue
             shutil.rmtree(target, ignore_errors=True)
         clone(os.path.join(cached, f), target)
+        placed_by.setdefault(f, name)
     library = os.path.join(out, 'frameworks', name + '.framework', name)
     if plugin['class'] is None:
         entries.append({'name': name, 'library': library, 'ffi': True})
