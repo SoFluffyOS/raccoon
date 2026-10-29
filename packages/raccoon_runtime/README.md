@@ -77,7 +77,8 @@ host's default for apps with no setting of their own, with `AppPlugins`.
 
 The same holds on Linux, macOS and Windows. On every host the runner is
 reached through a Unix socket in the host's socket folder, which
-`RunnerDiscovery` watches: `$XDG_RUNTIME_DIR/raccoon` on Linux,
+`RunnerDiscovery` watches: `$XDG_RUNTIME_DIR/raccoon` on Linux (else `$TMPDIR/raccoon`, then
+`/tmp/raccoon`),
 `$TMPDIR/raccoon` on macOS, `%TEMP%\raccoon` on Windows, where dart:io
 speaks AF_UNIX too but no handles cross, so pixel frames come inline. There the
 Flutter tool keeps its devices in `%APPDATA%\.flutter_custom_devices.json`,

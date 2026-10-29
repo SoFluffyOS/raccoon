@@ -11,13 +11,14 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   run time (`tool/engine_dir.sh` downloads it: `libflutter_engine.so` on
   Linux, `FlutterEmbedder.framework` on macOS, `flutter_engine.dll` on
   Windows), so one runner binary serves several runtimes.
-- Runs an app bundle (`build/flutter_assets`, no native build needed) with the
-  software renderer on a pumped platform task runner.
+- Runs an app bundle (`build/flutter_assets`, no native build needed) with a
+  GPU renderer where the host has one, else the software renderer, on a
+  pumped platform task runner.
 - `serve`: speaks runner protocol v1 (`proto/raccoon/v1/runner.proto`) over a
   Unix socket (Windows has them too): length-prefixed protobuf; frames out as
-  pixels in the host's native order (BGRA on Linux and Windows, RGBA on
-  macOS), through shared buffers when the client takes them, inline on
-  Windows; resize, pointer and key events in; the app's platform
+  pixels, each saying its byte order (BGRA read back from a GPU renderer; the
+  software renderer's BGRA on Linux and Windows, RGBA on macOS), through
+  shared buffers when the client takes them, inline on Windows; resize, pointer and key events in; the app's platform
   channel messages out and the client's answers back; the VM service URI;
   shutdown. A frame with a side over 8,192 pixels is scaled down to fit,
   its pixel ratio with it: the app keeps its logical size (#117).
@@ -123,8 +124,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
 - Rasterizes on the GPU where the host offers one without a window: through
   EGL on Linux (Mesa: the surfaceless platform or a render node), through
   Metal on macOS, through Vulkan on Windows. By default each frame is read back as pixels in the
-  host's order, so clients see the same frames as from the software
-  renderer; at 2400×1600 that halves the runner's CPU. A client that asks
+  order the GPU drew it (BGRA), which the frame says, so clients show it as
+  a frame from the software renderer; at 2400×1600 that halves the
+  runner's CPU. A client that asks
   for `gpu_buffers` gets a ring of four textures instead, exported as DRM
   dmabufs on Linux, backed by IOSurfaces on macOS and shared D3D11
   textures on Windows: the engine draws
@@ -190,8 +192,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   project: one scratch Pods project for what the cache misses, every pod
   a dynamic framework, each plugin's target built on its own. Needs Xcode
   and CocoaPods, as the macOS target does; cached the same way as on Linux,
-  and by engine too (a pod builds against the SDK's FlutterMacOS), and a release's archive of the common plugins (both Mac architectures)
-  drops into that cache on the first install: the fifteen of `tool/plugins`
+  and by engine too (a pod builds against the SDK's FlutterMacOS), and the release's archive of the common plugins for the SDK's engine
+  (both Mac architectures; for the Flutter versions the release builds
+  for) drops into that cache on the first install: the fifteen of `tool/plugins`
   in under a second instead of 2 min.
   A plugin with a Swift package (`macos/<name>/Package.swift`, or under
   `darwin/`) builds through it instead, as Flutter builds it (#187). All
@@ -256,8 +259,8 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   what it left out, as skipped; `off` has no native plugins at all
   (`RACCOON_PLUGINS=off flutter run -d raccoon`). The app's calls to a
   plugin it lacks fail as for a plugin with no implementation. Unset, the
-  app's own setting says (`<data>/<app>/plugins`), else the host's default
-  (`<data>/.plugins`), both as raccoon_runtime's `AppPlugins` saves them;
+  app's own setting says (`<data>/raccoon/data/<app>/plugins`), else the
+  host's default (`<data>/raccoon/data/.plugins`), both as raccoon_runtime's `AppPlugins` saves them;
   build otherwise (#214). Native assets (build hooks) build either way.
   Loading FlutterMacOS adds about 17 MB of resident memory and no
   measurable time to the first frame (184 to 188 ms, median of five); the
@@ -348,7 +351,8 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   frames inline from then on.
 - `render`: writes one frame to a PPM file, for tests and a quick look.
 - `tool/raccoon-device`: ping, install, uninstall and run for the Flutter
-  tool's custom device, so a stock `flutter run -d raccoon` works.
+  tool's custom device, so a stock `flutter run -d raccoon` works, and
+  `prebuild`, which CI uses to pack the common plugins.
   `--instance KEY` names everything `<app>@KEY`, which is how the
   `raccoon-2`, `raccoon-phone`, `raccoon-tablet` and `raccoon-desktop`
   devices keep their runs of the same project apart; `--size 820x1180@2`
@@ -395,7 +399,10 @@ Git Bash) on the [releases
 page](https://github.com/SoFluffyOS/raccoon/releases), packed by
 `tool/package.sh`: the binary, `tool/raccoon-device` with `engine_dir.sh`,
 `package_scope.dart` and `plugins_windows.dart`, `VERSION` and `LICENSE`,
-with the prebuilt common plugins beside them for Linux and macOS. The Mac
+with the plugin library and its headers on Linux and `flutter_windows.dll`
+on Windows. The common plugins are assets of their own:
+`plugins-linux-<arch>.tar.gz`, and `plugins-<engine>-macos-<arch>.tar.gz`
+for each Flutter version the release builds for. The Mac
 binaries run on macOS 12 and later, as the engine does; the Linux ones are
 built on Ubuntu 22.04, for its glibc and later. Unpacked into a folder it works as a runtime
 on its own, and the Raccoon Simulator fetches the archive for its host
