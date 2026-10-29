@@ -162,6 +162,58 @@ void main() {
     expect(errors, [isA<FileSystemException>()]);
   });
 
+  group('in a directory every user may write to, as /tmp is', () {
+    late Directory shared;
+
+    setUp(() {
+      shared = Directory(p.join(temp.path, 'tmp'))..createSync();
+      Process.runSync('chmod', ['1777', shared.path]);
+    });
+
+    test('runners in a directory others may enter are not taken', () async {
+      final dir = Directory(p.join(shared.path, 'raccoon'))..createSync();
+      Process.runSync('chmod', ['755', dir.path]);
+      final server = await _bind(p.join(dir.path, 'app.sock'));
+      addTearDown(server.close);
+      final discovery = RunnerDiscovery(dir.path);
+      expect(discovery.isOwn, isFalse);
+      expect(discovery.list(), isEmpty);
+
+      final seen = <List<String>>[];
+      final errors = <Object>[];
+      final subscription = discovery
+          .watch()
+          .map((e) => e.map(RunnerDiscovery.appNameOf).toList())
+          .listen(seen.add, onError: errors.add);
+      await _until(() => seen.isNotEmpty);
+      expect(seen.single, isEmpty);
+      expect(errors, [isA<FileSystemException>()]);
+      await subscription.cancel();
+
+      Process.runSync('chmod', ['700', dir.path]);
+      expect(discovery.isOwn, isTrue);
+      expect(discovery.list().map(RunnerDiscovery.appNameOf), ['app']);
+    });
+
+    test('a directory the watch makes there is this user\'s alone', () async {
+      final discovery = RunnerDiscovery(p.join(shared.path, 'raccoon'));
+      final errors = <Object>[];
+      final subscription = discovery.watch().listen(
+        (_) {},
+        onError: errors.add,
+      );
+      await _until(() => Directory(discovery.directory).existsSync());
+      expect(
+        FileStat.statSync(discovery.directory).mode & 0x1ff,
+        0x1c0,
+        reason: 'rwx------',
+      );
+      expect(discovery.isOwn, isTrue);
+      await subscription.cancel();
+      expect(errors, isEmpty);
+    });
+  }, testOn: '!windows');
+
   // #137: a watch that could not be set up, as when Linux runs out of
   // inotify watches, was set up again at once, for good, freezing the host.
   test('a watch that cannot be set up falls back to polling', () async {

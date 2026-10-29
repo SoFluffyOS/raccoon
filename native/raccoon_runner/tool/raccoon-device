@@ -2317,6 +2317,14 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
       exit 1
     fi
     mkdir -p "$SOCKETS" "$DATA/$key"
+    # For this user alone: in /tmp, where Linux puts it without an
+    # XDG_RUNTIME_DIR, another user could have made it first, and
+    # raccoon_runtime's discovery takes only a directory nobody else may
+    # enter there. One that is another user's can't be changed.
+    if ! chmod 700 "$SOCKETS" 2>/dev/null; then
+      echo "🦝 $SOCKETS is another user's: set XDG_RUNTIME_DIR (or TMPDIR) to a directory of your own" >&2
+      exit 1
+    fi
     # The run's output, timestamped, for the run that went wrong; the tool
     # keeps reading the untouched streams.
     log="$DATA/$key/runner.log"

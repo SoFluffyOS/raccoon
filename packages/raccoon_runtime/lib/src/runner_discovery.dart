@@ -87,10 +87,41 @@ final class RunnerDiscovery {
     _ => '1',
   };
 
-  /// Every runner socket present right now, sorted by path.
-  List<UnixSocketEndpoint> list() => [
-    for (final seen in _scan()) UnixSocketEndpoint(seen.path),
-  ];
+  /// Every runner socket present right now, sorted by path; none in a
+  /// directory that may be another user's (see [isOwn]).
+  List<UnixSocketEndpoint> list() => switch (isOwn) {
+    true => [for (final seen in _scan()) UnixSocketEndpoint(seen.path)],
+    false => const [],
+  };
+
+  /// Whether the runners in [directory] can only be this user's. In a
+  /// folder every user may write to, as `/tmp` is where Linux has no
+  /// `XDG_RUNTIME_DIR`, another user could have made the directory first,
+  /// with sockets of theirs that would be shown this user's taps and keys.
+  /// There it counts only when nobody else may enter it, as the device
+  /// helper leaves it: a directory another user made that way can't even
+  /// be listed. Windows says nothing of the kind, so there it counts.
+  bool get isOwn {
+    if (Platform.isWindows) return true;
+    final parent = FileStat.statSync(p.dirname(directory));
+    if (parent.type == FileSystemEntityType.notFound ||
+        parent.mode & _othersWrite == 0) {
+      return true;
+    }
+    final own = FileStat.statSync(directory);
+    return own.type == FileSystemEntityType.notFound ||
+        own.mode & _groupOrOthers == 0;
+  }
+
+  /// Makes [dir] for this user alone, as the device helper does: Dart
+  /// makes it open to others, which [isOwn] would refuse.
+  static void _make(Directory dir) {
+    dir.createSync(recursive: true);
+    if (!Platform.isWindows) Process.runSync('chmod', ['700', dir.path]);
+  }
+
+  static const _othersWrite = 0x2;
+  static const _groupOrOthers = 0x3f;
 
   /// The sockets with their stamps (see [_stampFrom]), one stat each: a
   /// watch that polls does this twice a second.
@@ -119,7 +150,7 @@ final class RunnerDiscovery {
   Stream<List<UnixSocketEndpoint>> watch() {
     final dir = Directory(directory);
     try {
-      if (!dir.existsSync()) dir.createSync(recursive: true);
+      if (!dir.existsSync()) _make(dir);
     } on FileSystemException catch (error, stackTrace) {
       // On the stream, as every other failure of the watch.
       return Stream.error(error, stackTrace);
@@ -128,9 +159,24 @@ final class RunnerDiscovery {
     Timer? timer;
     List<_Seen>? last;
     late final StreamController<List<UnixSocketEndpoint>> controller;
+    var refused = false;
     void emitIfChanged() {
       if (controller.isClosed) return;
-      final seen = _scan();
+      final own = isOwn;
+      if (!own && !refused) {
+        controller.addError(
+          FileSystemException(
+            'others may enter it, so its runners could be another user\'s: '
+            'chmod 700 it, or set XDG_RUNTIME_DIR',
+            directory,
+          ),
+        );
+      }
+      refused = !own;
+      final seen = switch (own) {
+        true => _scan(),
+        false => const <_Seen>[],
+      };
       if (last case final previous? when _sameRunners(previous, seen)) return;
       last = seen;
       controller.add([for (final one in seen) UnixSocketEndpoint(one.path)]);
@@ -145,7 +191,7 @@ final class RunnerDiscovery {
     // the same way at once, for good (#137).
     void startWatching() {
       try {
-        if (!dir.existsSync()) dir.createSync(recursive: true);
+        if (!dir.existsSync()) _make(dir);
       } on FileSystemException catch (error, stackTrace) {
         controller
           ..addError(error, stackTrace)

@@ -482,6 +482,11 @@ void main() {
         final found = discovery.list();
         expect(found, hasLength(1), reason: output.join());
         expect(RunnerDiscovery.appNameOf(found.single), name);
+        expect(
+          FileStat.statSync(p.join(temp.path, 'raccoon')).mode & 0x1ff,
+          0x1c0,
+          reason: 'the helper leaves its socket directory rwx------',
+        );
         final client = await RunnerClient.connect(found.single);
         try {
           await client.frames.first.timeout(const Duration(seconds: 15));
