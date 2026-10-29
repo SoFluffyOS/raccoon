@@ -238,7 +238,12 @@ void RunnerServer::OnListenReadable() {
   // timer, so it is looked at as the next newcomer comes.
   if (pending_fd_ >= 0 &&
       std::chrono::steady_clock::now() - pending_since_ > kPendingWait) {
-    DropPending();
+    // Told who has the runner, as any newcomer refused is.
+    const int silent = pending_fd_;
+    loop_.Unwatch(silent);
+    pending_fd_ = -1;
+    pending_inbox_.clear();
+    SendBusy(silent);
   }
   if (client_fd_ >= 0 && client_yields_ && pending_fd_ < 0) {
     pending_fd_ = fd;
@@ -317,7 +322,9 @@ void RunnerServer::OnPendingReadable() {
   }
   if (client_fd_ >= 0) {
     std::fprintf(stderr, "🦝 the run's own host claimed it; letting the other go\n");
-    CloseClient();
+    // Not heard further: a Shutdown it had queued would end the run the
+    // claimer takes.
+    CloseClient(/*hear_last=*/false);
   }
   Adopt(fd);
   // Gone already: the runner's hello to it failed and closed it, and what
@@ -500,13 +507,15 @@ void RunnerServer::Dispatch(const v1::ClientMessage& message) {
   }
 }
 
-void RunnerServer::CloseClient() {
+void RunnerServer::CloseClient(bool hear_last) {
   if (client_fd_ < 0 || closing_) return;
   closing_ = true;
   // What the client sent before hanging up still counts, a Shutdown above
   // all: a send that failed because the client is gone must not drop it.
-  ReadAvailable();
-  DispatchInbox();
+  if (hear_last) {
+    ReadAvailable();
+    DispatchInbox();
+  }
   closing_ = false;
   if (client_fd_ < 0) return;
   loop_.Unwatch(client_fd_);

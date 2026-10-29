@@ -77,7 +77,10 @@ class RunnerServer {
  private:
   void OnListenReadable();
   void OnClientReadable(short revents);
-  void CloseClient();
+  // With [hear_last], what the client sent before it went is still read
+  // and dispatched (a Shutdown right before a hang-up); a client let go
+  // for another is not heard further.
+  void CloseClient(bool hear_last = true);
   // Parses and dispatches every whole message in the inbox.
   void DispatchInbox();
   // Reads what the client sent until there is nothing more right now.

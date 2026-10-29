@@ -3782,11 +3782,23 @@ class Report extends StatelessWidget {
           InternetAddress(endpoint.path, type: InternetAddressType.unix),
           0,
         );
+        final heard = MessageUnframer();
+        final told = Completer<RunnerMessage>();
+        silent.listen((bytes) {
+          for (final payload in heard.add(bytes)) {
+            if (!told.isCompleted) {
+              told.complete(RunnerMessage.fromBuffer(payload));
+            }
+          }
+        }, onError: (_) {});
         await Future<void>.delayed(const Duration(milliseconds: 1200));
         // Its own host claims it: the holder goes, the owner has it.
         owner = await RunnerClient.connect(endpoint, claims: true);
         expect(await outcome(owner), 'hello');
         await holder.closed.timeout(const Duration(seconds: 5));
+        // The silent one was told who has the runner, not just hung up on.
+        final said = await told.future.timeout(const Duration(seconds: 5));
+        expect(said.hasBusy(), isTrue);
         await owner.frames.first.timeout(const Duration(seconds: 15));
         // A claim against a holder that doesn't yield: Busy, as before.
         final late = await RunnerClient.connect(endpoint, claims: true);
