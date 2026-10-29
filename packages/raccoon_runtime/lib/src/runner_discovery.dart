@@ -95,33 +95,67 @@ final class RunnerDiscovery {
   };
 
   /// Whether the runners in [directory] can only be this user's. In a
-  /// folder every user may write to, as `/tmp` is where Linux has no
+  /// folder others may write to, as `/tmp` is where Linux has no
   /// `XDG_RUNTIME_DIR`, another user could have made the directory first,
-  /// with sockets of theirs that would be shown this user's taps and keys.
-  /// There it counts only when nobody else may enter it, as the device
-  /// helper leaves it: a directory another user made that way can't even
-  /// be listed. Windows says nothing of the kind, so there it counts.
+  /// or left a link there, with sockets of theirs that would be shown this
+  /// user's taps and keys. There it counts only when it is a directory this
+  /// user owns, which nobody else can hand over, and nobody else may write
+  /// to. Windows says nothing of the kind, so there it counts.
   bool get isOwn {
     if (Platform.isWindows) return true;
     final parent = FileStat.statSync(p.dirname(directory));
     if (parent.type == FileSystemEntityType.notFound ||
-        parent.mode & _othersWrite == 0) {
+        parent.mode & _groupOrOthersWrite == 0) {
       return true;
     }
     final own = FileStat.statSync(directory);
-    return own.type == FileSystemEntityType.notFound ||
-        own.mode & _groupOrOthers == 0;
+    if (own.type == FileSystemEntityType.notFound) return true;
+    if (own.mode & _groupOrOthersWrite != 0) return false;
+    // Asked of `stat` once while the directory stays as it was: any change
+    // to it, its mode or its contents changes its ctime.
+    if (_owned[directory] == own.changed) return true;
+    final owned = _ownedByUser(directory);
+    if (owned) {
+      _owned[directory] = own.changed;
+    } else {
+      _owned.remove(directory);
+    }
+    return owned;
   }
 
-  /// Makes [dir] for this user alone, as the device helper does: Dart
-  /// makes it open to others, which [isOwn] would refuse.
+  static const _groupOrOthersWrite = 0x12;
+
+  static final _owned = <String, DateTime>{};
+
+  static final String? _uid = _run('id', ['-u']);
+
+  /// Whether [path] itself, not what a link there points to, is a
+  /// directory this process's user owns.
+  static bool _ownedByUser(String path) {
+    final said = switch (Platform.isMacOS) {
+      true => _run('stat', ['-f', '%u %HT', path]),
+      false => _run('stat', ['-c', '%u %F', path]),
+    };
+    if (said == null || _uid == null) return false;
+    final [owner, ...kind] = said.split(' ');
+    return owner == _uid && kind.join(' ').toLowerCase() == 'directory';
+  }
+
+  static String? _run(String executable, List<String> arguments) {
+    try {
+      final result = Process.runSync(executable, arguments);
+      if (result.exitCode != 0) return null;
+      return '${result.stdout}'.trim();
+    } on ProcessException {
+      return null;
+    }
+  }
+
+  /// Makes [dir] for this user alone, as the device helper does.
   static void _make(Directory dir) {
     dir.createSync(recursive: true);
     if (!Platform.isWindows) Process.runSync('chmod', ['700', dir.path]);
   }
-
-  static const _othersWrite = 0x2;
-  static const _groupOrOthers = 0x3f;
 
   /// The sockets with their stamps (see [_stampFrom]), one stat each: a
   /// watch that polls does this twice a second.
@@ -166,8 +200,8 @@ final class RunnerDiscovery {
       if (!own && !refused) {
         controller.addError(
           FileSystemException(
-            'others may enter it, so its runners could be another user\'s: '
-            'chmod 700 it, or set XDG_RUNTIME_DIR',
+            'not a directory of this user\'s alone, so its runners could be '
+            'another user\'s: set XDG_RUNTIME_DIR, or make it yours (chmod 700)',
             directory,
           ),
         );

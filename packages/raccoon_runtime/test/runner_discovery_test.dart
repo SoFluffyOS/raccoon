@@ -11,12 +11,7 @@ Future<ServerSocket> _bind(String path) =>
 void main() {
   late Directory temp;
 
-  setUp(() {
-    temp = Directory.systemTemp.createTempSync('raccoon_disc');
-    // As the device helper leaves a socket directory: Dart makes a temporary
-    // one open to others on Linux, which discovery refuses in /tmp.
-    if (!Platform.isWindows) Process.runSync('chmod', ['700', temp.path]);
-  });
+  setUp(() => temp = Directory.systemTemp.createTempSync('raccoon_disc'));
   tearDown(() => temp.deleteSync(recursive: true));
 
   test('resolves the socket directory for the host', () {
@@ -175,9 +170,9 @@ void main() {
       Process.runSync('chmod', ['1777', shared.path]);
     });
 
-    test('runners in a directory others may enter are not taken', () async {
+    test('runners in a directory others may write to are not taken', () async {
       final dir = Directory(p.join(shared.path, 'raccoon'))..createSync();
-      Process.runSync('chmod', ['755', dir.path]);
+      Process.runSync('chmod', ['775', dir.path]);
       final server = await _bind(p.join(dir.path, 'app.sock'));
       addTearDown(server.close);
       final discovery = RunnerDiscovery(dir.path);
@@ -195,9 +190,33 @@ void main() {
       expect(errors, [isA<FileSystemException>()]);
       await subscription.cancel();
 
-      Process.runSync('chmod', ['700', dir.path]);
+      // Others may read it, but not add a socket of theirs.
+      Process.runSync('chmod', ['755', dir.path]);
       expect(discovery.isOwn, isTrue);
       expect(discovery.list().map(RunnerDiscovery.appNameOf), ['app']);
+    });
+
+    test(
+      'a link there is not taken, even to a directory of this user\'s',
+      () async {
+        final own = Directory(p.join(temp.path, 'own'))..createSync();
+        final server = await _bind(p.join(own.path, 'app.sock'));
+        addTearDown(server.close);
+        final link = Link(p.join(shared.path, 'raccoon'))..createSync(own.path);
+        final discovery = RunnerDiscovery(link.path);
+        expect(discovery.isOwn, isFalse);
+        expect(discovery.list(), isEmpty);
+      },
+    );
+
+    test('a parent only a group may write to is checked too', () {
+      final group = Directory(p.join(temp.path, 'group'))..createSync();
+      Process.runSync('chmod', ['2775', group.path]);
+      final dir = Directory(p.join(group.path, 'raccoon'))..createSync();
+      Process.runSync('chmod', ['775', dir.path]);
+      expect(RunnerDiscovery(dir.path).isOwn, isFalse);
+      Process.runSync('chmod', ['700', dir.path]);
+      expect(RunnerDiscovery(dir.path).isOwn, isTrue);
     });
 
     test('a directory the watch makes there is this user\'s alone', () async {

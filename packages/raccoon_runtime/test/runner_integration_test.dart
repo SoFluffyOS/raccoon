@@ -445,6 +445,44 @@ void main() {
     },
   );
 
+  test(
+    'the helper runs nothing in a socket directory that is a link',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_link');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final target = Directory(p.join(temp.path, 'target'))..createSync();
+      Process.runSync('chmod', ['755', target.path]);
+      Link(p.join(temp.path, 'raccoon')).createSync(target.path);
+      final helper = p.join(runnerDir, 'tool', 'raccoon-device');
+      final environment = {
+        'RACCOON_RUNNER': binary!,
+        'XDG_DATA_HOME': p.join(temp.path, 'data'),
+        'XDG_RUNTIME_DIR': temp.path,
+        'TMPDIR': '${temp.path}/',
+      };
+      final install = await Process.run(helper, [
+        'install',
+        assets,
+        'linked',
+      ], environment: environment);
+      expect(install.exitCode, 0, reason: '${install.stderr}');
+
+      final run = await Process.run(helper, [
+        'run',
+        'linked',
+      ], environment: environment);
+      expect(run.exitCode, 1);
+      expect('${run.stderr}', contains('is a link someone left'));
+      expect(FileStat.statSync(target.path).mode & 0x1ff, 0x1ed);
+      expect(target.listSync(), isEmpty);
+    },
+    skip: switch ((ready, Platform.isWindows)) {
+      (false, _) => 'build the runner and example first',
+      (_, true) => 'the helper runs in Git Bash on Windows',
+      _ => false,
+    },
+  );
+
   // #118: a socket path must fit in 104 bytes on macOS. An app whose key
   // doesn't fit runs under a shorter socket name, its key in a .name file.
   test(
