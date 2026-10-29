@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -108,6 +109,10 @@ class RunnerServer {
   // hello, and what it sent so far (raccoon#281).
   int pending_fd_ = -1;
   std::vector<uint8_t> pending_inbox_;
+  // When the pending newcomer came: one silent past kPendingWait gives its
+  // place to the next.
+  std::chrono::steady_clock::time_point pending_since_;
+  static constexpr std::chrono::milliseconds kPendingWait{1000};
   void OnPendingReadable();
   void DropPending();
   void SendBusy(int fd);

@@ -3713,6 +3713,13 @@ class Report extends StatelessWidget {
         final other = await RunnerClient.connect(endpoint);
         expect(await outcome(other), isA<RunnerBusy>());
         await other.close();
+        // One that connects and says nothing holds the waiting place for a
+        // second at most.
+        final silent = await Socket.connect(
+          InternetAddress(endpoint.path, type: InternetAddressType.unix),
+          0,
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 1200));
         // Its own host claims it: the holder goes, the owner has it.
         owner = await RunnerClient.connect(endpoint, claims: true);
         expect(await outcome(owner), 'hello');
@@ -3722,6 +3729,7 @@ class Report extends StatelessWidget {
         final late = await RunnerClient.connect(endpoint, claims: true);
         expect(await outcome(late), isA<RunnerBusy>());
         await late.close();
+        silent.destroy();
       } finally {
         await holder.close();
         final client = owner;

@@ -234,8 +234,15 @@ void RunnerServer::OnListenReadable() {
   // the newcomer waits for its hello to say which it is (raccoon#281). One
   // at a time; a newcomer that never says hello holds the slot until it
   // hangs up, and the ones meanwhile are told Busy.
+  // One that said nothing for a second gives its place: the loop has no
+  // timer, so it is looked at as the next newcomer comes.
+  if (pending_fd_ >= 0 &&
+      std::chrono::steady_clock::now() - pending_since_ > kPendingWait) {
+    DropPending();
+  }
   if (client_fd_ >= 0 && client_yields_ && pending_fd_ < 0) {
     pending_fd_ = fd;
+    pending_since_ = std::chrono::steady_clock::now();
     pending_inbox_.clear();
     loop_.Watch(fd, POLLIN, [this](short) { OnPendingReadable(); });
     return;
