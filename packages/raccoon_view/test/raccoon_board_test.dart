@@ -133,6 +133,27 @@ void main() {
       final other = RaccoonBoardLayout()..replaceAll(frames);
       expect(other.frameFor('a').position, const Offset(5, 6));
     });
+
+    test('a frame shown before its app had a name takes the name, where it '
+        'is, and goes if the app never comes', () {
+      final layout = RaccoonBoardLayout();
+      layout.frameFor('app@3v~1');
+      layout.move('app@3v~1', const Offset(40, 50));
+      layout.setSize('app@3v~1', const Size(390, 844), 3, keep: false);
+      layout.rename('app@3v~1', 'app@3v2');
+      final named = layout.frames.single;
+      expect(named.name, 'app@3v2');
+      expect(named.position, const Offset(40, 50));
+      expect((named.size, named.pixelRatio), (const Size(390, 844), 3.0));
+
+      layout.frameFor('app@3v~2');
+      layout.remove('app@3v~2');
+      expect(layout.frames.map((frame) => frame.name), ['app@3v2']);
+      // A name with a frame already keeps its own.
+      layout.frameFor('app@3v~3');
+      layout.rename('app@3v~3', 'app@3v2');
+      expect(layout.frames.map((frame) => frame.name), ['app@3v2', 'app@3v~3']);
+    });
   });
 
   group('RaccoonBoard', () {

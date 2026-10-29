@@ -179,14 +179,40 @@ class RaccoonBoardLayout extends ChangeNotifier {
   }
 
   /// Gives the frame a device's size and pixel ratio, as the size menu does,
-  /// and keeps it for the app's next run.
-  void setSize(String name, Size size, double pixelRatio) {
+  /// and keeps it for the app's next run unless not to [keep] (a frame a
+  /// host shows before its app has a name).
+  void setSize(String name, Size size, double pixelRatio, {bool keep = true}) {
     final frame = _frames[name];
     if (frame == null) return;
     _frames[name] = frame.copyWith(size: size, pixelRatio: pixelRatio);
     notifyListeners();
     didChange();
-    saveSize(name);
+    if (keep) saveSize(name);
+  }
+
+  /// Gives [from]'s frame, where it is and its size, to [to]: a frame a
+  /// host showed at once, before the app's name was known, takes it when
+  /// it is. Nothing when [from] has none, or [to] has one already.
+  void rename(String from, String to) {
+    final frame = _frames[from];
+    if (frame == null || _frames.containsKey(to)) return;
+    _frames.remove(from);
+    _frames[to] = RaccoonBoardFrame(
+      name: to,
+      position: frame.position,
+      size: frame.size,
+      pixelRatio: frame.pixelRatio,
+    );
+    notifyListeners();
+    didChange();
+    saveSize(to);
+  }
+
+  /// Takes [name]'s frame off the board, and out of what is saved.
+  void remove(String name) {
+    if (_frames.remove(name) == null) return;
+    notifyListeners();
+    didChange();
   }
 
   /// Keeps the frame's size for the app's next run, in [sizes]; the board
