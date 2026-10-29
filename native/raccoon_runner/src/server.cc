@@ -180,6 +180,7 @@ RunnerServer::~RunnerServer() {
   // dropped, not dispatched to handlers whose state is gone (#138).
   handler_ = Handler{};
   CloseClient();
+  DropPending();
   while (!lingering_.empty()) Unlinger(lingering_.front());
   if (listen_fd_ >= 0) {
     loop_.Unwatch(listen_fd_);
@@ -229,24 +230,92 @@ void RunnerServer::OnListenReadable() {
   // yet: hear it first, or the newcomer is told a client that is gone has
   // the runner (a view's host closing one socket and opening the next).
   if (client_fd_ >= 0 && ReadableNow(client_fd_)) OnClientReadable(0);
+  // A client holding a run it doesn't own gives it to one that claims it:
+  // the newcomer waits for its hello to say which it is (raccoon#281). One
+  // at a time; a newcomer that never says hello holds the slot until it
+  // hangs up, and the ones meanwhile are told Busy.
+  if (client_fd_ >= 0 && client_yields_ && pending_fd_ < 0) {
+    pending_fd_ = fd;
+    pending_inbox_.clear();
+    loop_.Watch(fd, POLLIN, [this](short) { OnPendingReadable(); });
+    return;
+  }
   if (client_fd_ >= 0) {
-    // One client at a time: tell the newcomer who has the runner, then hang
-    // up, so it can say so instead of showing a dead pane.
-    v1::RunnerMessage busy;
-    busy.mutable_busy()->set_pid(client_pid_);
-    std::string bytes;
-    busy.SerializeToString(&bytes);
-    const uint32_t length = static_cast<uint32_t>(bytes.size());
-    const uint8_t prefix[4] = {
-        static_cast<uint8_t>(length & 0xff), static_cast<uint8_t>((length >> 8) & 0xff),
-        static_cast<uint8_t>((length >> 16) & 0xff), static_cast<uint8_t>((length >> 24) & 0xff)};
-    if (WriteAllTo(fd, prefix, sizeof(prefix))) {
-      WriteAllTo(fd, reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size());
-    }
-    Linger(fd);
+    SendBusy(fd);
     return;
   }
   Adopt(fd);
+}
+
+// One client at a time: tells the newcomer who has the runner, then hangs
+// up, so it can say so instead of showing a dead pane.
+void RunnerServer::SendBusy(int fd) {
+  v1::RunnerMessage busy;
+  busy.mutable_busy()->set_pid(client_pid_);
+  std::string bytes;
+  busy.SerializeToString(&bytes);
+  const uint32_t length = static_cast<uint32_t>(bytes.size());
+  const uint8_t prefix[4] = {
+      static_cast<uint8_t>(length & 0xff), static_cast<uint8_t>((length >> 8) & 0xff),
+      static_cast<uint8_t>((length >> 16) & 0xff), static_cast<uint8_t>((length >> 24) & 0xff)};
+  if (WriteAllTo(fd, prefix, sizeof(prefix))) {
+    WriteAllTo(fd, reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size());
+  }
+  Linger(fd);
+}
+
+void RunnerServer::DropPending() {
+  if (pending_fd_ < 0) return;
+  loop_.Unwatch(pending_fd_);
+  CloseFd(pending_fd_);
+  pending_fd_ = -1;
+  pending_inbox_.clear();
+}
+
+// The newcomer's first message decides: a hello that claims the run, or
+// any hello once the holder is gone, takes the runner, its bytes read as
+// if it had come first; any other is told Busy.
+void RunnerServer::OnPendingReadable() {
+  uint8_t buffer[4096];
+  while (true) {
+    const auto got = RecvSome(pending_fd_, buffer, sizeof(buffer));
+    if (got > 0) {
+      pending_inbox_.insert(pending_inbox_.end(), buffer, buffer + got);
+      if (pending_inbox_.size() > kMaxMessage + kLengthPrefix) break;
+      continue;
+    }
+    if (got < 0 && WouldBlock()) break;
+    DropPending();  // hung up, or failed, before its hello
+    return;
+  }
+  if (pending_inbox_.size() < kLengthPrefix) return;
+  const uint32_t length = ReadLength(pending_inbox_.data());
+  if (length > kMaxMessage) {
+    DropPending();
+    return;
+  }
+  if (pending_inbox_.size() - kLengthPrefix < length) return;
+  v1::ClientMessage first;
+  const bool parsed =
+      first.ParseFromArray(pending_inbox_.data() + kLengthPrefix, static_cast<int>(length));
+  const bool claims = parsed && first.has_hello() && first.hello().claims();
+  const int fd = pending_fd_;
+  loop_.Unwatch(fd);
+  pending_fd_ = -1;
+  std::vector<uint8_t> sent;
+  sent.swap(pending_inbox_);
+  if (client_fd_ >= 0 && !(claims && client_yields_)) {
+    SendBusy(fd);
+    return;
+  }
+  if (client_fd_ >= 0) {
+    std::fprintf(stderr, "🦝 the run's own host claimed it; letting the other go\n");
+    CloseClient();
+  }
+  Adopt(fd);
+  inbox_ = std::move(sent);
+  inbox_read_ = 0;
+  DispatchInbox();
 }
 
 void RunnerServer::Refuse(int fd) { CloseFd(fd); }
@@ -379,6 +448,7 @@ void RunnerServer::Dispatch(const v1::ClientMessage& message) {
   switch (message.message_case()) {
     case v1::ClientMessage::kHello:
       client_pid_ = message.hello().pid();
+      client_yields_ = message.hello().yields();
       if (handler_.on_hello) handler_.on_hello(message.hello());
       break;
     case v1::ClientMessage::kReleaseBuffer:
@@ -433,6 +503,7 @@ void RunnerServer::CloseClient() {
   client_fd_ = -1;
   // Gone: a newcomer is not told it holds the runner.
   client_pid_ = 0;
+  client_yields_ = false;
   inbox_.clear();
   inbox_read_ = 0;
   // What it never took goes, with the descriptors that were to ride along.

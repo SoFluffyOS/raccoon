@@ -29,6 +29,8 @@ class ClientHello extends $pb.GeneratedMessage {
     $core.int? pid,
     $core.bool? composes,
     $core.bool? gpuBuffers,
+    $core.bool? yields,
+    $core.bool? claims,
   }) {
     final result = ClientHello._();
     if (protocolVersion != null) result.protocolVersion = protocolVersion;
@@ -37,6 +39,8 @@ class ClientHello extends $pb.GeneratedMessage {
     if (pid != null) result.pid = pid;
     if (composes != null) result.composes = composes;
     if (gpuBuffers != null) result.gpuBuffers = gpuBuffers;
+    if (yields != null) result.yields = yields;
+    if (claims != null) result.claims = claims;
     return result;
   }
 
@@ -60,6 +64,8 @@ class ClientHello extends $pb.GeneratedMessage {
     ..aI(4, _omitFieldNames ? '' : 'pid', fieldType: $pb.PbFieldType.OU3)
     ..aOB(5, _omitFieldNames ? '' : 'composes')
     ..aOB(6, _omitFieldNames ? '' : 'gpuBuffers')
+    ..aOB(7, _omitFieldNames ? '' : 'yields')
+    ..aOB(8, _omitFieldNames ? '' : 'claims')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -146,6 +152,28 @@ class ClientHello extends $pb.GeneratedMessage {
   $core.bool hasGpuBuffers() => $_has(5);
   @$pb.TagNumber(6)
   void clearGpuBuffers() => $_clearField(6);
+
+  /// The client holds a run it doesn't own (it took it after other hosts
+  /// had their chance), and gives it to a client that claims it.
+  @$pb.TagNumber(7)
+  $core.bool get yields => $_getBF(6);
+  @$pb.TagNumber(7)
+  set yields($core.bool value) => $_setBool(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasYields() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearYields() => $_clearField(7);
+
+  /// The client owns the run's project: it takes the runner over from a
+  /// client that yields. A runner that predates these ignores both.
+  @$pb.TagNumber(8)
+  $core.bool get claims => $_getBF(7);
+  @$pb.TagNumber(8)
+  set claims($core.bool value) => $_setBool(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasClaims() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearClaims() => $_clearField(8);
 }
 
 /// Gives a shared buffer back to the runner once its pixels were read.

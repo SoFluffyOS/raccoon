@@ -28,6 +28,8 @@ final class RunnerClient
     required this.gpuBuffers,
     required this.startupGrace,
     required this.reusePixels,
+    this.yields = false,
+    this.claims = false,
   }) {
     _subscription = _transport.inbound.listen(
       _onInbound,
@@ -57,6 +59,8 @@ final class RunnerClient
         protocolVersion: RaccoonProtocol.version,
         clientName: 'raccoon_runtime',
         sharedBuffers: _sharedBuffers,
+        yields: yields,
+        claims: claims,
       ),
     ),
   );
@@ -87,19 +91,35 @@ final class RunnerClient
   /// frame before [startupFailure] reports it.
   ///
   /// With [reusePixels], see the field.
+  ///
+  /// A host following several hosts' runs says which it holds by right:
+  /// [claims] for a run of a project it has open, [yields] for one it took
+  /// for want of another taker. A runner a yielding client holds goes to a
+  /// claiming one; a runner that predates them ignores both.
   static Future<RunnerClient> connect(
     RunnerEndpoint endpoint, {
     bool composes = false,
     bool gpuBuffers = false,
     Duration startupGrace = defaultStartupGrace,
     bool reusePixels = false,
+    bool yields = false,
+    bool claims = false,
   }) async => RunnerClient._(
     await RunnerTransport.connect(endpoint),
     composes: composes,
     gpuBuffers: gpuBuffers,
     startupGrace: startupGrace,
     reusePixels: reusePixels,
+    yields: yields,
+    claims: claims,
   );
+
+  /// Whether this client holds the run only until its own host claims it;
+  /// see [connect].
+  final bool yields;
+
+  /// Whether this client's host has the run's project open; see [connect].
+  final bool claims;
 
   /// Whether a frame from a shared buffer is read into one of
   /// [reusedPixelBuffers] buffers the client keeps per frame size, rather

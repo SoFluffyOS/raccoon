@@ -31,6 +31,12 @@ message ClientHello {
   // pixels.
   bool gpu_buffers = 6;
   uint32 pid = 4;  // the client process, named to a later client
+  // The client holds a run it doesn't own (it took it after other hosts
+  // had their chance), and gives it to a client that claims it.
+  bool yields = 7;
+  // The client owns the run's project: it takes the runner over from a
+  // client that yields. A runner that predates these ignores both.
+  bool claims = 8;
 }
 
 // Gives a shared buffer back to the runner once its pixels were read.

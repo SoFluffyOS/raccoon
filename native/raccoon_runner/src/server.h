@@ -101,6 +101,16 @@ class RunnerServer {
   int listen_fd_ = -1;
   int client_fd_ = -1;
   uint32_t client_pid_ = 0;
+  // The client holds a run it doesn't own (ClientHello.yields): a newcomer
+  // that claims it takes it over.
+  bool client_yields_ = false;
+  // A newcomer while a yielding client holds the runner, waiting for its
+  // hello, and what it sent so far (raccoon#281).
+  int pending_fd_ = -1;
+  std::vector<uint8_t> pending_inbox_;
+  void OnPendingReadable();
+  void DropPending();
+  void SendBusy(int fd);
   bool closing_ = false;
   static bool WriteAllTo(int fd, const uint8_t* data, size_t size);
   std::vector<uint8_t> inbox_;

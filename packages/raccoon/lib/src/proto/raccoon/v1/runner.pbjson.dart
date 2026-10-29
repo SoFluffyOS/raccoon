@@ -121,6 +121,8 @@ const ClientHello$json = {
     {'1': 'composes', '3': 5, '4': 1, '5': 8, '10': 'composes'},
     {'1': 'gpu_buffers', '3': 6, '4': 1, '5': 8, '10': 'gpuBuffers'},
     {'1': 'pid', '3': 4, '4': 1, '5': 13, '10': 'pid'},
+    {'1': 'yields', '3': 7, '4': 1, '5': 8, '10': 'yields'},
+    {'1': 'claims', '3': 8, '4': 1, '5': 8, '10': 'claims'},
   ],
 };
 
@@ -129,7 +131,8 @@ final $typed_data.Uint8List clientHelloDescriptor = $convert.base64Decode(
     'CgtDbGllbnRIZWxsbxIpChBwcm90b2NvbF92ZXJzaW9uGAEgASgNUg9wcm90b2NvbFZlcnNpb2'
     '4SHwoLY2xpZW50X25hbWUYAiABKAlSCmNsaWVudE5hbWUSJQoOc2hhcmVkX2J1ZmZlcnMYAyAB'
     'KAhSDXNoYXJlZEJ1ZmZlcnMSGgoIY29tcG9zZXMYBSABKAhSCGNvbXBvc2VzEh8KC2dwdV9idW'
-    'ZmZXJzGAYgASgIUgpncHVCdWZmZXJzEhAKA3BpZBgEIAEoDVIDcGlk');
+    'ZmZXJzGAYgASgIUgpncHVCdWZmZXJzEhAKA3BpZBgEIAEoDVIDcGlkEhYKBnlpZWxkcxgHIAEo'
+    'CFIGeWllbGRzEhYKBmNsYWltcxgIIAEoCFIGY2xhaW1z');
 
 @$core.Deprecated('Use releaseBufferDescriptor instead')
 const ReleaseBuffer$json = {

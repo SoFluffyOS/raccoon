@@ -3681,6 +3681,63 @@ class Report extends StatelessWidget {
   );
 
   test(
+    'a host that claims a run takes it from one that yields; nobody else does',
+    () async {
+      // raccoon#281.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      Future<Object?> outcome(RunnerClient client) async {
+        try {
+          await client.hello.timeout(const Duration(seconds: 10));
+          return 'hello';
+        } on Object catch (error) {
+          return error;
+        }
+      }
+
+      final holder = await RunnerClient.connect(endpoint, yields: true);
+      RunnerClient? owner;
+      try {
+        expect(await outcome(holder), 'hello');
+        await holder.frames.first.timeout(const Duration(seconds: 15));
+        // Another that doesn't claim it: Busy, the holder stays.
+        final other = await RunnerClient.connect(endpoint);
+        expect(await outcome(other), isA<RunnerBusy>());
+        await other.close();
+        // Its own host claims it: the holder goes, the owner has it.
+        owner = await RunnerClient.connect(endpoint, claims: true);
+        expect(await outcome(owner), 'hello');
+        await holder.closed.timeout(const Duration(seconds: 5));
+        await owner.frames.first.timeout(const Duration(seconds: 15));
+        // A claim against a holder that doesn't yield: Busy, as before.
+        final late = await RunnerClient.connect(endpoint, claims: true);
+        expect(await outcome(late), isA<RunnerBusy>());
+        await late.close();
+      } finally {
+        await holder.close();
+        final client = owner;
+        if (client != null) {
+          client.shutdown();
+          await client.close();
+        }
+        expect(await _exitCode(runner), 0);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
+  test(
     'a second client is told who has the runner, then hung up on',
     () async {
       final temp = Directory.systemTemp.createTempSync('raccoon_test');
