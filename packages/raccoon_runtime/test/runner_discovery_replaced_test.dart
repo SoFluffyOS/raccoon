@@ -7,6 +7,9 @@ import 'package:test/test.dart';
 void main() {
   test('a runner replaced under the same path is a change', () async {
     final temp = Directory.systemTemp.createTempSync('raccoon_discovery');
+    // As the device helper leaves a socket directory: Dart makes a temporary
+    // one open to others on Linux, which discovery refuses in /tmp.
+    if (!Platform.isWindows) Process.runSync('chmod', ['700', temp.path]);
     final discovery = RunnerDiscovery(
       temp.path,
       pollInterval: const Duration(milliseconds: 50),

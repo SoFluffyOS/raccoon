@@ -11,7 +11,12 @@ Future<ServerSocket> _bind(String path) =>
 void main() {
   late Directory temp;
 
-  setUp(() => temp = Directory.systemTemp.createTempSync('raccoon_disc'));
+  setUp(() {
+    temp = Directory.systemTemp.createTempSync('raccoon_disc');
+    // As the device helper leaves a socket directory: Dart makes a temporary
+    // one open to others on Linux, which discovery refuses in /tmp.
+    if (!Platform.isWindows) Process.runSync('chmod', ['700', temp.path]);
+  });
   tearDown(() => temp.deleteSync(recursive: true));
 
   test('resolves the socket directory for the host', () {
