@@ -9,7 +9,7 @@ final class RunnerVersion {
   /// The runner this package goes with, as `native/raccoon_runner/VERSION`
   /// has it (a test holds the two together): what a host without a
   /// checkout downloads, or a release compatible with it and no older.
-  static const String current = '0.3.0-pre.17';
+  static const String current = '0.3.0-pre.18';
 
   const RunnerVersion._(
     this.text,
