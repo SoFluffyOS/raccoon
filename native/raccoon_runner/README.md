@@ -243,7 +243,13 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   and by the Xcode and CocoaPods versions (CMake and the compiler on
   Linux, which keeps failures the same way), so a new version of the plugin,
   an edit to a path plugin, a new runner or a new toolchain tries again.
-  `RACCOON_RETRY_PLUGINS=1` tries again at once (#136).
+  `RACCOON_RETRY_PLUGINS=1` tries again at once (#136). A build the
+  machine stopped is not kept: a full disk, an interrupted build, a
+  compiler killed for memory, no network for a fetch (#255), nor on Linux
+  a CMake configure that failed, a missing `-dev` package (#246). A plugin
+  that built nothing is kept the same way, so it isn't built again each
+  install. On macOS an entry is kept per set of dependencies it was built
+  against (#274).
   `RACCOON_PLUGINS` says how much of this an install does, on every host:
   `build` (the default) as above; `cached` takes the cache and the
   release's prebuilt plugins but compiles nothing, and a client is told
