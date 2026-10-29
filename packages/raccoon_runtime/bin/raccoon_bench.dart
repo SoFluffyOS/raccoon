@@ -18,14 +18,24 @@ Future<void> main(List<String> arguments) async {
   for (var i = 0; i + 1 < arguments.length; i += 2) {
     options[arguments[i].replaceFirst('--', '')] = arguments[i + 1];
   }
+  // An option it doesn't know, or one left without a value, would measure
+  // something else than asked: `--gpu true` as one argument measured
+  // pixel frames.
+  final unknown = [
+    for (final key in options.keys)
+      if (!_options.contains(key)) '--$key',
+    if (arguments.length.isOdd) arguments.last,
+  ];
   final runnerBinary = options['runner'];
   final engineDir = options['engine-dir'];
   final assets = options['assets'];
   final icu = options['icu'];
-  if (runnerBinary == null ||
+  if (unknown.isNotEmpty ||
+      runnerBinary == null ||
       engineDir == null ||
       assets == null ||
       icu == null) {
+    if (unknown.isNotEmpty) stderr.writeln('unknown: ${unknown.join(', ')}');
     stderr.writeln(
       'usage: raccoon_bench --runner B --engine-dir D --assets A --icu I '
       '[--width N] [--height N] [--pixel-ratio R] [--seconds N] '
@@ -120,6 +130,19 @@ Future<void> main(List<String> arguments) async {
   stdout.writeln('runner exit: $exit');
   temp.deleteSync(recursive: true);
 }
+
+const _options = {
+  'runner',
+  'engine-dir',
+  'assets',
+  'icu',
+  'width',
+  'height',
+  'pixel-ratio',
+  'seconds',
+  'gpu',
+  'reuse-pixels',
+};
 
 const _ticksPerSecond = 100;
 
