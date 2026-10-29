@@ -142,6 +142,26 @@ void main() {
     },
   );
 
+  test('a watch whose directory goes and cannot be made again fails, as a '
+      'stream error', () async {
+    final parent = Directory(p.join(temp.path, 'parent'))..createSync();
+    final events = StreamController<FileSystemEvent>();
+    final watching = RunnerDiscovery(
+      p.join(parent.path, 'raccoon'),
+      watcher: (_) => events.stream,
+    );
+    final errors = <Object>[];
+    final done = Completer<void>();
+    watching.watch().listen((_) {}, onError: errors.add, onDone: done.complete);
+    await _until(() => events.hasListener);
+    parent.deleteSync(recursive: true);
+    File(parent.path).writeAsStringSync('');
+    await events.close();
+
+    await done.future.timeout(const Duration(seconds: 5));
+    expect(errors, [isA<FileSystemException>()]);
+  });
+
   // #137: a watch that could not be set up, as when Linux runs out of
   // inotify watches, was set up again at once, for good, freezing the host.
   test('a watch that cannot be set up falls back to polling', () async {

@@ -155,6 +155,33 @@ void main() {
     },
   );
 
+  test('keeps engines under XDG_CACHE_HOME, else the home\'s .cache', () {
+    expect(
+      RuntimeStore.forHost({
+        'HOME': '/h',
+        'XDG_CACHE_HOME': '/xdg',
+      }).cacheDirectory,
+      p.join('/xdg', 'raccoon', 'engines'),
+    );
+    expect(
+      RuntimeStore.forHost({'USERPROFILE': '/profile'}).cacheDirectory,
+      p.join('/profile', '.cache', 'raccoon', 'engines'),
+    );
+  });
+
+  test('finds the sdk behind a linked flutter', () {
+    final bin = Directory(p.join(temp.path, 'sdk', 'bin'))
+      ..createSync(recursive: true);
+    File(p.join(bin.path, 'flutter')).writeAsStringSync('');
+    final link = Link(p.join(temp.path, 'flutter'))
+      ..createSync(p.join(bin.path, 'flutter'));
+
+    expect(
+      RuntimeStore.sdkRootOfFlutter(link.path),
+      Directory(p.join(temp.path, 'sdk')).resolveSymbolicLinksSync(),
+    );
+  }, testOn: '!windows');
+
   test('reads the engine revision from the sdk stamp', () {
     final sdk = Directory(p.join(temp.path, 'sdk', 'bin', 'cache'))
       ..createSync(recursive: true);
