@@ -67,7 +67,11 @@ case "$(uname -s)" in
     SDK_ENGINE=darwin-x64
     ;;
   Linux)
-    SOCKETS="${XDG_RUNTIME_DIR:-/tmp}/raccoon"
+    # The session's runtime directory, else the temporary one as the
+    # runtime's discovery takes it ($TMPDIR, else /tmp): over SSH or in a
+    # container there is often no XDG_RUNTIME_DIR.
+    TEMP="${TMPDIR:-/tmp}"
+    SOCKETS="${XDG_RUNTIME_DIR:-${TEMP%/}}/raccoon"
     case "$(uname -m)" in
       x86_64) SDK_ENGINE=linux-x64 ;;
       aarch64|arm64) SDK_ENGINE=linux-arm64 ;;

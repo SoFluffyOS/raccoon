@@ -118,7 +118,12 @@ final class RunnerDiscovery {
   /// app does.
   Stream<List<UnixSocketEndpoint>> watch() {
     final dir = Directory(directory);
-    if (!dir.existsSync()) dir.createSync(recursive: true);
+    try {
+      if (!dir.existsSync()) dir.createSync(recursive: true);
+    } on FileSystemException catch (error, stackTrace) {
+      // On the stream, as every other failure of the watch.
+      return Stream.error(error, stackTrace);
+    }
     StreamSubscription<FileSystemEvent>? events;
     Timer? timer;
     List<_Seen>? last;

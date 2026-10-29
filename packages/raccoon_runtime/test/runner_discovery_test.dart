@@ -46,6 +46,17 @@ void main() {
 
   // #118: a key too long for a socket path runs under a shorter socket
   // name, with the key in a .name file beside it.
+  test('a socket directory that cannot be made fails the watch, as a stream '
+      'error', () async {
+    // A file where its parent should be.
+    final blocker = File(p.join(temp.path, 'blocked'))..writeAsStringSync('');
+    final discovery = RunnerDiscovery(p.join(blocker.path, 'raccoon'));
+    await expectLater(
+      discovery.watch(),
+      emitsError(isA<FileSystemException>()),
+    );
+  });
+
   test('names the app after its .name file when there is one', () async {
     final short = await _bind(p.join(temp.path, 'a_long_name~12345.sock'));
     addTearDown(short.close);
