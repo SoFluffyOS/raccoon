@@ -169,7 +169,11 @@ package_config() {
 # native assets. Prints the path to run.
 # |1| as XML text.
 xml_text() {
-  printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+  # Most text holds none of the three: no sed for it (#317).
+  case "$1" in
+    *[\&\<\>]*) printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' ;;
+    *) printf '%s' "$1" ;;
+  esac
 }
 
 app_bundle() {
@@ -178,20 +182,28 @@ app_bundle() {
   # The pubspec's version, as Flutter's macOS build gives it: package_info_plus
   # reads it here (#186).
   # As XML text: an instance's key or a version may hold & or <.
-  [ -f "$APPS/$key/version" ] && version="$(xml_text "$(cat "$APPS/$key/version")")"
+  # Every run of an app with plugins: read and written in the shell, with
+  # no process a step where none is needed (#317).
+  if [ -f "$APPS/$key/version" ]; then
+    read_word version "$APPS/$key/version"
+    version="$(xml_text "$version")"
+  fi
   name="$(xml_text "$key")"
   if [ -n "$version" ]; then
     versions="  <key>CFBundleShortVersionString</key><string>${version%%+*}</string>
   <key>CFBundleVersion</key><string>${version#*+}</string>"
   fi
-  id="dev.raccoon.app.$(printf '%s' "$key" | tr -c 'A-Za-z0-9.\n' '-')"
-  mkdir -p "$bundle/MacOS" "$bundle/Resources"
-  ln -sfn "$RUNNER" "$bundle/MacOS/raccoon_runner"
-  rm -f "$bundle/Resources/GoogleService-Info.plist"
+  id="dev.raccoon.app.${key//[!A-Za-z0-9.]/-}"
+  [ -d "$bundle/MacOS" ] && [ -d "$bundle/Resources" ] || mkdir -p "$bundle/MacOS" "$bundle/Resources"
+  [ "$bundle/MacOS/raccoon_runner" -ef "$RUNNER" ] || ln -sfn "$RUNNER" "$bundle/MacOS/raccoon_runner"
+  if [ -e "$bundle/Resources/GoogleService-Info.plist" ]; then
+    rm -f "$bundle/Resources/GoogleService-Info.plist"
+  fi
   if [ -f "$APPS/$key/GoogleService-Info.plist" ]; then
     cp "$APPS/$key/GoogleService-Info.plist" "$bundle/Resources/"
   fi
-  cat > "$bundle/Info.plist" <<PLIST
+  local plist
+  IFS= read -r -d '' plist <<PLIST || true
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -205,6 +217,7 @@ $versions
 </dict>
 </plist>
 PLIST
+  printf '%s' "$plist" > "$bundle/Info.plist"
   echo "$bundle/MacOS/raccoon_runner"
 }
 
