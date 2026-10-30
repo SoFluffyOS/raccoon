@@ -264,14 +264,16 @@ final class CustomDevicesFile {
     return jsonDecode(text);
   }
 
-  /// The file's contents; null when it is missing or not JSON, which reads
-  /// as no devices.
+  /// The file's contents; null when it is missing, not JSON or can't be
+  /// read (not UTF-8, say), which reads as no devices.
   Object? _read() {
     final file = File(path);
     if (!file.existsSync()) return null;
     try {
       return jsonDecode(file.readAsStringSync());
     } on FormatException {
+      return null;
+    } on FileSystemException {
       return null;
     }
   }
@@ -353,6 +355,8 @@ final class FlutterSettings {
       final decoded = jsonDecode(file.readAsStringSync());
       return decoded is Map && decoded['enable-custom-devices'] == true;
     } on FormatException {
+      return false;
+    } on FileSystemException {
       return false;
     }
   }

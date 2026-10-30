@@ -32,4 +32,14 @@ void main() {
     expect(sizes.read('wonders'), (width: 390, height: 844, pixelRatio: 3.0));
     expect(sizes.read('wonders@tablet')?.pixelRatio, 2.625);
   });
+
+  test('a size that can\'t be read is none', () {
+    final temp = Directory.systemTemp.createTempSync('raccoon_sizes');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    final sizes = AppSizes(temp.path);
+    File(p.join(temp.path, 'wonders', 'size'))
+      ..createSync(recursive: true)
+      ..writeAsBytesSync([0xff, 0xfe, 0x33]);
+    expect(sizes.read('wonders'), isNull);
+  });
 }

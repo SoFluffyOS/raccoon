@@ -158,6 +158,26 @@ void main() {
     },
   );
 
+  // #306: one that isn't UTF-8 threw from the reads that take bad JSON as
+  // nothing.
+  test(
+    'a file that is not UTF-8 reads as no devices and is not overwritten',
+    () {
+      final path = p.join(temp.path, 'custom_devices.json');
+      final bytes = [0xff, 0xfe, ...'{"custom-devices": []}'.codeUnits];
+      File(path).writeAsBytesSync(bytes);
+      final file = CustomDevicesFile(path);
+      expect(file.ids(), isEmpty);
+      expect(file.helperOf('raccoon'), isNull);
+      expect(
+        () =>
+            file.upsert(CustomDeviceConfig(deviceHelper: '/h/raccoon-device')),
+        throwsA(isA<FileSystemException>()),
+      );
+      expect(File(path).readAsBytesSync(), bytes);
+    },
+  );
+
   test('a write keeps the file\'s other keys', () {
     final path = p.join(temp.path, 'custom_devices.json');
     File(path).writeAsStringSync(
@@ -400,6 +420,8 @@ void main() {
     File(settings.path).writeAsStringSync('{"enable-custom-devices": true}');
     expect(settings.customDevicesEnabled, isTrue);
     File(settings.path).writeAsStringSync('not json');
+    expect(settings.customDevicesEnabled, isFalse);
+    File(settings.path).writeAsBytesSync([0xff, 0xfe, 0x7b, 0x7d]);
     expect(settings.customDevicesEnabled, isFalse);
   });
 }

@@ -26,11 +26,16 @@ final class AppSizes {
 
   File _file(String app) => File(p.join(directory, app, 'size'));
 
-  /// The size saved for [app] (`wonders`, `wonders@tablet`), or null.
+  /// The size saved for [app] (`wonders`, `wonders@tablet`), or null, as
+  /// for one that can't be read.
   ({int width, int height, double pixelRatio})? read(String app) {
     final file = _file(app);
     if (!file.existsSync()) return null;
-    return RaccoonDevice.parseSize(file.readAsStringSync());
+    try {
+      return RaccoonDevice.parseSize(file.readAsStringSync());
+    } on FileSystemException {
+      return null;
+    }
   }
 
   /// Saves [app]'s logical size and pixel ratio for its next run.
