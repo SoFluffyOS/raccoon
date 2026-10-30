@@ -62,14 +62,19 @@ void main(List<String> arguments) {
   exitCode = 1;
 }
 
-/// Writes [out] from [config]; false when [config] does not name [project].
+/// Writes [out] from [config]; false when [config] does not name [project],
+/// as for one that can't be read: the search goes on past it.
 bool _scope(File config, String project, String out) {
   final dartTool = Uri.directory(config.parent.path);
-  final decoded = jsonDecode(config.readAsStringSync()) as Map;
+  final listed = switch (_read(config)) {
+    {'packages': final List<Object?> packages} => packages,
+    _ => const <Object?>[],
+  };
   final packages = <String, Map<String, Object?>>{};
   String? app;
-  for (final entry in (decoded['packages'] as List? ?? const [])) {
-    final package = Map<String, Object?>.from(entry as Map);
+  for (final entry in listed) {
+    if (entry is! Map) continue;
+    final package = Map<String, Object?>.from(entry);
     final root = dartTool.resolve('${package['rootUri'] ?? ''}');
     package['rootUri'] = root.toString();
     final name = '${package['name']}';
@@ -86,12 +91,17 @@ bool _scope(File config, String project, String out) {
     '${config.parent.path}${Platform.pathSeparator}package_graph.json',
   );
   var kept = packages.keys.toSet();
-  if (graph.existsSync()) {
+  // One that can't be read is as none: every package is kept.
+  final nodes = switch (graph.existsSync() ? _read(graph) : null) {
+    {'packages': final List<Object?> listed} => listed,
+    _ => null,
+  };
+  if (nodes != null) {
     final edges = <String, List<String>>{};
     final devEdges = <String, List<String>>{};
-    final nodes = (jsonDecode(graph.readAsStringSync()) as Map)['packages'];
-    for (final node in (nodes as List? ?? const [])) {
-      final name = '${(node as Map)['name']}';
+    for (final node in nodes) {
+      if (node is! Map) continue;
+      final name = '${node['name']}';
       edges[name] = [for (final d in node['dependencies'] as List? ?? []) '$d'];
       devEdges[name] = [
         for (final d in node['devDependencies'] as List? ?? []) '$d',
@@ -120,4 +130,13 @@ bool _scope(File config, String project, String out) {
     );
   stdout.writeln(out);
   return true;
+}
+
+/// [file]'s JSON, or null when it isn't JSON or can't be read.
+Object? _read(File file) {
+  try {
+    return jsonDecode(file.readAsStringSync());
+  } on Exception {
+    return null;
+  }
 }

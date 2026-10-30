@@ -113,4 +113,65 @@ void main() {
       expect('${scoped.stderr}', contains('usage: package_scope.dart'));
     },
   );
+
+  // #310: a config or graph that can't be read threw out of the search.
+  test('a config that can\'t be read is passed, and a graph that can\'t '
+      'is none', () async {
+    final root = p.join(temp.path, 'root');
+    final app = p.join(root, 'packages', 'app');
+    Directory(app).createSync(recursive: true);
+    config(root, ['app', 'dep']);
+    File(
+      p.join(root, '.dart_tool', 'package_graph.json'),
+    ).writeAsBytesSync([0xff, 0xfe]);
+    File(p.join(root, 'packages', '.dart_tool', 'package_config.json'))
+      ..createSync(recursive: true)
+      ..writeAsBytesSync([0xff, 0xfe, 0x7b]);
+    final out = p.join(app, 'build', 'raccoon', 'package_config.json');
+    final result = await Process.run(Platform.resolvedExecutable, [
+      noPackages,
+      script,
+      app,
+      out,
+    ]);
+    expect(result.exitCode, 0, reason: '${result.stderr}');
+    final names = [
+      for (final package
+          in (jsonDecode(File(out).readAsStringSync()) as Map)['packages']
+              as List)
+        (package as Map)['name'],
+    ];
+    expect(names, ['app', 'dep']);
+  });
+
+  // The Windows plugin builder reads the config before anything of
+  // Windows': one that isn't a config is said, on any host (#310).
+  test(
+    'the Windows plugin builder says so of a config that is not one',
+    () async {
+      final builder = p.join(p.dirname(script), 'plugins_windows.dart');
+      final file = File(p.join(temp.path, '.dart_tool', 'package_config.json'))
+        ..createSync(recursive: true);
+      for (final bytes in [
+        '{oops'.codeUnits,
+        '[1]'.codeUnits,
+        [0xff, 0xfe],
+      ]) {
+        file.writeAsBytesSync(bytes);
+        final result = await Process.run(Platform.resolvedExecutable, [
+          noPackages,
+          builder,
+          file.path,
+          p.join(temp.path, 'out'),
+          '',
+          p.join(temp.path, 'cache'),
+          '0.3.0',
+          p.join(temp.path, 'engine'),
+        ]);
+        expect(result.exitCode, 1, reason: '$bytes');
+        expect('${result.stderr}', contains('is not a package config'));
+        expect('${result.stderr}', isNot(contains('#0')));
+      }
+    },
+  );
 }

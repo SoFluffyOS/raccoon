@@ -42,8 +42,24 @@ Future<void> main(List<String> arguments) async {
   ];
 
   final packages = <({String name, String root, String pubspec})>[];
-  final decoded = jsonDecode(File(config).readAsStringSync()) as Map;
-  for (final package in (decoded['packages'] as List? ?? const [])) {
+  // One that isn't a package config stops the install saying what to do,
+  // as the other hosts' halves do (#300), rather than as a stack trace.
+  final List<Object?> listed;
+  try {
+    listed = switch (jsonDecode(File(config).readAsStringSync())) {
+      {'packages': final List<Object?> packages} => packages,
+      Map() => const [],
+      _ => throw const FormatException('not an object'),
+    };
+  } on Exception {
+    stderr.writeln(
+      '🦝 $config is not a package config: flutter pub get writes it anew',
+    );
+    exitCode = 1;
+    return;
+  }
+  for (final package in listed) {
+    if (package is! Map || package['name'] is! String) continue;
     final uri = '${package['rootUri'] ?? ''}';
     final root = uri.startsWith('file://')
         ? Uri.parse(uri).toFilePath()
