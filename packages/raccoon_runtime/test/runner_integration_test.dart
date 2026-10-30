@@ -5345,9 +5345,13 @@ class Report extends StatelessWidget {
         final set = await client.gpuBufferSets.first;
         var releasing = true;
         var gpuFrames = 0;
+        var pixelFrames = 0;
         Frame? previous;
         final frames = client.frames.listen((frame) {
-          if (!frame.inGpuBuffer) return;
+          if (!frame.inGpuBuffer) {
+            pixelFrames++;
+            return;
+          }
           gpuFrames++;
           final last = previous;
           if (releasing && last != null) {
@@ -5370,11 +5374,17 @@ class Report extends StatelessWidget {
         await Future<void>.delayed(const Duration(seconds: 1));
         releasing = true;
         gpuFrames = 0;
+        pixelFrames = 0;
         socket = await view();
         await Future<void>.delayed(const Duration(seconds: 1));
         socket.destroy();
         await frames.cancel();
-        printOnFailure('GPU frames a second: $before before, $gpuFrames after');
+        // Read back instead (#171's ring left full) or none at all (#319)?
+        printOnFailure(
+          'GPU frames a second: $before before, $gpuFrames after, with '
+          '$pixelFrames read back; the runner last said:\n'
+          '${runner.lastLines.join('\n')}',
+        );
         // With the ring left full, none came at all. A slow machine (CI's
         // x64 Mac: 57 a second before, 23 in the first second back) takes
         // part of that second to come back up to speed.
