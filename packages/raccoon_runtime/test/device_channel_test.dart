@@ -61,5 +61,10 @@ void main() {
         ).readAsStringSync();
     expect(views, contains('ViewCollection'));
     expect(views, contains('_RaccoonDevice(child: widget.child)'));
+
+    // One that can't be read is written anew (#307).
+    File(entry).writeAsBytesSync([0xff, 0xfe]);
+    expect(RaccoonEntrypoint.write(project.path), entry);
+    expect(File(entry).readAsStringSync(), source);
   });
 }

@@ -104,5 +104,11 @@ void main() {
       file.writeAsStringSync(text);
       expect(compatibility.forProject(temp.path), isEmpty, reason: text);
     }
+    // #307: cut inside a character, as in "My Wörk": the ö's first byte.
+    file.writeAsBytesSync([
+      ...'{"plugins": {"linux": [{"path": "/My W'.codeUnits,
+      0xc3,
+    ]);
+    expect(compatibility.forProject(temp.path), isEmpty);
   });
 }

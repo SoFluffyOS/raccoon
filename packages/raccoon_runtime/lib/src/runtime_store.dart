@@ -152,7 +152,12 @@ final class RuntimeStore {
     ]) {
       final file = File(candidate);
       if (!file.existsSync()) continue;
-      final revision = file.readAsStringSync().trim();
+      final String revision;
+      try {
+        revision = file.readAsStringSync().trim();
+      } on FileSystemException {
+        continue;
+      }
       if (revision.isNotEmpty) return revision;
     }
     return null;

@@ -42,10 +42,18 @@ abstract final class RaccoonEntrypoint {
       views: views,
     );
     // Unchanged, it is left be: a rewrite would make the tool compile anew.
-    if (!file.existsSync() || file.readAsStringSync() != source) {
-      file.writeAsStringSync(source);
-    }
+    if (!_holds(file, source)) file.writeAsStringSync(source);
     return file.path;
+  }
+
+  /// Whether [file] holds [source]; one that can't be read doesn't.
+  static bool _holds(File file, String source) {
+    if (!file.existsSync()) return false;
+    try {
+      return file.readAsStringSync() == source;
+    } on FileSystemException {
+      return false;
+    }
   }
 
   /// The package the pubspec in [projectDirectory] names, or null.

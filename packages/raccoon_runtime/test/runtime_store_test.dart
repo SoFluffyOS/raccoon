@@ -189,6 +189,13 @@ void main() {
 
     expect(RuntimeStore.revisionOfSdk(p.join(temp.path, 'sdk')), 'deadbeef');
     expect(RuntimeStore.revisionOfSdk(p.join(temp.path, 'nope')), isNull);
+
+    // One that can't be read: the next file says.
+    File(p.join(sdk.path, 'engine.stamp')).writeAsBytesSync([0xff, 0xfe]);
+    File(p.join(temp.path, 'sdk', 'bin', 'internal', 'engine.version'))
+      ..createSync(recursive: true)
+      ..writeAsStringSync('cafe\n');
+    expect(RuntimeStore.revisionOfSdk(p.join(temp.path, 'sdk')), 'cafe');
   });
 
   test(

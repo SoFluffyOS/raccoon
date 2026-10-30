@@ -50,7 +50,11 @@ final class RunnerVersion {
   static RunnerVersion? read(String file) {
     final versionFile = File(file);
     if (!versionFile.existsSync()) return null;
-    return parse(versionFile.readAsStringSync());
+    try {
+      return parse(versionFile.readAsStringSync());
+    } on FileSystemException {
+      return null;
+    }
   }
 
   /// The version without a leading `v` or `runner-v`.

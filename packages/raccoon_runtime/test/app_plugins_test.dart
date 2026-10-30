@@ -35,6 +35,9 @@ void main() {
     file.writeAsStringSync('sometimes\n');
     expect(plugins.read('wonders'), NativePlugins.build);
     expect(plugins.readOwn('wonders'), isNull);
+
+    file.writeAsBytesSync([0xff, 0xfe, 0x6f]);
+    expect(plugins.readOwn('wonders'), isNull);
   });
 
   test('an app that clears its own setting follows the default', () {

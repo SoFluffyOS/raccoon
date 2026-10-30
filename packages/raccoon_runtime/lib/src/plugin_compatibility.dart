@@ -80,6 +80,9 @@ final class PluginCompatibility {
       return parse(file.readAsStringSync());
     } on FormatException {
       return const [];
+    } on FileSystemException {
+      // Cut inside a character, as a read during the rewrite can find it.
+      return const [];
     }
   }
 

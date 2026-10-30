@@ -67,7 +67,11 @@ final class AppPlugins {
 
   static NativePlugins? _parse(File file) {
     if (!file.existsSync()) return null;
-    return NativePlugins.values.asNameMap()[file.readAsStringSync().trim()];
+    try {
+      return NativePlugins.values.asNameMap()[file.readAsStringSync().trim()];
+    } on FileSystemException {
+      return null;
+    }
   }
 
   static void _write(File file, NativePlugins plugins) =>

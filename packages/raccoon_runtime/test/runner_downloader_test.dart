@@ -95,6 +95,8 @@ void main() {
         ..writeAsStringSync('0.3.2\n');
       expect(RunnerVersion.read(file.path), RunnerVersion.parse('0.3.2'));
       expect(RunnerVersion.read(p.join(temp.path, 'missing')), isNull);
+      file.writeAsBytesSync([0xff, 0xfe, 0x30]);
+      expect(RunnerVersion.read(file.path), isNull);
     });
   });
 
