@@ -413,7 +413,21 @@ build_plugins_linux() {
     "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-linux-$UNAME_M.tar.gz}" <<'PY'
 # What only a build or a fetch needs is imported there: tarfile, tempfile
 # and concurrent.futures cost a cached install ~6 ms (#315).
-import glob, hashlib, json, os, re, shutil, subprocess, sys, time
+import glob, hashlib, json, os, re, shutil, sys, time
+
+
+class LazySubprocess:
+    """subprocess, imported when first used: a cached install starts no
+    process, and the import alone took ~5 ms (#320)."""
+
+    def __getattr__(self, name):
+        global subprocess
+        import subprocess as module
+        subprocess = module
+        return getattr(module, name)
+
+
+subprocess = LazySubprocess()
 started = time.time()
 from urllib.parse import unquote, urlparse
 
@@ -965,7 +979,21 @@ build_plugins_macos() {
     "$project" <<'PY'
 # What only a build or a fetch needs is imported there: tarfile, tempfile
 # and concurrent.futures cost a cached install ~6 ms (#315).
-import glob, hashlib, json, os, re, shutil, subprocess, sys, time
+import glob, hashlib, json, os, re, shutil, sys, time
+
+
+class LazySubprocess:
+    """subprocess, imported when first used: a cached install starts no
+    process, and the import alone took ~5 ms (#320)."""
+
+    def __getattr__(self, name):
+        global subprocess
+        import subprocess as module
+        subprocess = module
+        return getattr(module, name)
+
+
+subprocess = LazySubprocess()
 started = time.time()
 from urllib.parse import unquote, urlparse
 
