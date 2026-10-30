@@ -567,9 +567,13 @@ def fetch_prebuilt():
             remember = True
             raise
         os.remove(archive)
+        # Entries are folders: a link or a file there could pass for another
+        # entry, or for a marker.
         for entry in os.listdir(staging):
-            if not os.path.exists(os.path.join(cache, entry)):
-                os.replace(os.path.join(staging, entry), os.path.join(cache, entry))
+            source = os.path.join(staging, entry)
+            if (os.path.isdir(source) and not os.path.islink(source)
+                    and not os.path.exists(os.path.join(cache, entry))):
+                os.replace(source, os.path.join(cache, entry))
         print('🦝 prebuilt plugins fetched for runner %s' % runner_version, file=sys.stderr)
         remember = True
     except Exception:
@@ -1086,21 +1090,29 @@ def fetch_prebuilt():
         try:
             with tarfile.open(archive) as tar:
                 # Frameworks, with their symlinks; nothing that would land or
-                # point outside the cache.
+                # point outside the cache. A link that steps up at all could
+                # chain out (x -> .., then x/y -> ..), so none may; the data
+                # filter, where Python has it, checks again.
+                def inside(path):
+                    return not path.startswith('/') and '..' not in path.split('/')
+                members = [m for m in tar.getmembers()
+                           if inside(m.name) and (m.isfile() or m.isdir()
+                                                  or (m.issym() and inside(m.linkname)))]
                 if hasattr(tarfile, 'data_filter'):
-                    tar.extractall(staging, filter='data')
+                    tar.extractall(staging, members=members, filter='data')
                 else:
-                    members = [m for m in tar.getmembers()
-                               if not m.name.startswith('/') and '..' not in m.name.split('/')
-                               and not (m.issym() and (m.linkname.startswith('/') or '..' in m.linkname.split('/')[:-1]))]
                     tar.extractall(staging, members=members)
         except (tarfile.TarError, EOFError, zlib.error, gzip.BadGzipFile):
             remember = True
             raise
         os.remove(archive)
+        # Entries are folders: a link or a file there could pass for another
+        # entry, or for a marker.
         for entry in os.listdir(staging):
-            if not os.path.exists(os.path.join(cache, entry)):
-                os.replace(os.path.join(staging, entry), os.path.join(cache, entry))
+            source = os.path.join(staging, entry)
+            if (os.path.isdir(source) and not os.path.islink(source)
+                    and not os.path.exists(os.path.join(cache, entry))):
+                os.replace(source, os.path.join(cache, entry))
         print('🦝 prebuilt plugins fetched for runner %s' % runner_version, file=sys.stderr)
         remember = True
     except Exception:

@@ -1303,22 +1303,49 @@ void main() {
         expect(names().where((n) => n.startsWith('.prebuilt-')), isEmpty);
 
         // An archive there: its entries move in, and the fetch is noted.
-        final source = Directory(p.join(temp.path, 'archive', 'some-entry'))
-          ..createSync(recursive: true);
-        File(p.join(source.path, 'lib.dylib')).writeAsStringSync('x');
+        // Nothing in it lands outside the cache, nor passes for an entry or
+        // a marker (#299): a chain of links each stepping up, a link and a
+        // file beside the entries.
         final archive = p.join(temp.path, 'prebuilt.tar.gz');
-        final tar = await Process.run('tar', [
-          '-czf',
+        final tar = await Process.run('python3', [
+          '-c',
+          '''
+import io, sys, tarfile
+with tarfile.open(sys.argv[1], 'w:gz') as tar:
+    def add(name, data=b'x', link=None):
+        info = tarfile.TarInfo(name)
+        if link is not None:
+            info.type, info.linkname = tarfile.SYMTYPE, link
+            tar.addfile(info)
+        else:
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    add('some-entry/lib.dylib')
+    add('some-entry/x', link='..')
+    add('some-entry/x/y', link='..')
+    add('some-entry/x/y/z', link='..')
+    add('some-entry/x/y/z/escaped')
+    add('other-entry', link='some-entry')
+    add('prebuilt-other.done')
+''',
           archive,
-          '-C',
-          p.join(temp.path, 'archive'),
-          'some-entry',
         ]);
         expect(tar.exitCode, 0, reason: '${tar.stderr}');
         await install(Uri.file(archive).toString());
         expect(names(), contains('some-entry'));
+        expect(names(), isNot(contains('other-entry')));
         expect(names().where((n) => n.endsWith('.done')), hasLength(1));
         expect(names().where((n) => n.startsWith('.prebuilt-')), isEmpty);
+        final root = temp.resolveSymbolicLinksSync();
+        expect([
+          for (final file in temp.listSync(recursive: true).whereType<File>())
+            if (p.basename(file.path) == 'escaped' &&
+                !p.isWithin(
+                  p.join(root, 'cache', 'some-entry'),
+                  file.resolveSymbolicLinksSync(),
+                ))
+              file.path,
+        ], isEmpty);
       } finally {
         temp.deleteSync(recursive: true);
       }

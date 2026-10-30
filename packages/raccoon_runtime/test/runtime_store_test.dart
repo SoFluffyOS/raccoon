@@ -244,6 +244,45 @@ void main() {
     expect(store.installed('rev1'), isNotNull);
   }, skip: Platform.isWindows ? 'symbolic links' : false);
 
+  // #299: every link was made as given, and every name written as given.
+  test('ensure writes nothing outside the engine\'s folder', () async {
+    final outside = p.join(temp.path, 'outside');
+    Directory(outside).createSync();
+    final zip = ZipDecoder().decodeBytes(_darwinEmbedderZip());
+    final archive =
+        Archive()
+          ..addFile(ArchiveFile.string('../../../stepped.txt', 'x'))
+          ..addFile(_symlink('up', '..'))
+          ..addFile(_symlink('up/up', '..'))
+          ..addFile(_symlink('up/up/up', '..'))
+          ..addFile(ArchiveFile.string('up/up/up/chained.txt', 'x'))
+          ..addFile(_symlink('away', outside))
+          ..addFile(ArchiveFile.string('away/absolute.txt', 'x'));
+    for (final file in zip.files) {
+      archive.addFile(file);
+    }
+    final store = RuntimeStore(
+      cacheDirectory: p.join(temp.path, 'engines'),
+      platform: 'darwin',
+      download: (_) async => _madeOnUnix(ZipEncoder().encodeBytes(archive)),
+    );
+
+    final runtime = await store.ensure('rev1');
+
+    final engines =
+        Directory(p.join(temp.path, 'engines')).resolveSymbolicLinksSync();
+    final escaped = [
+      for (final file in temp.listSync(recursive: true).whereType<File>())
+        if (!p.isWithin(engines, file.resolveSymbolicLinksSync())) file.path,
+    ];
+    expect(escaped, isEmpty);
+    expect(Directory(outside).listSync(), isEmpty);
+    expect(
+      File(runtime.engineLibrary).resolveSymbolicLinksSync(),
+      endsWith(p.join('Versions', 'A', 'FlutterEmbedder')),
+    );
+  }, skip: Platform.isWindows ? 'symbolic links' : false);
+
   // #113: unpacking took the caller's isolate for 300 ms, the UI's in a
   // host.
   test('ensure unpacks without holding up the caller\'s isolate', () async {

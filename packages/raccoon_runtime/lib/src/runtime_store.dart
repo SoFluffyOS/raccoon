@@ -329,8 +329,10 @@ final class RuntimeStore {
   /// is mostly links into its `Versions/A`.
   static void _extract(Archive archive, String root) {
     for (final entry in archive.files) {
+      if (!_inside(entry.name)) continue;
       final target = p.join(root, entry.name);
       if (entry.symbolicLink case final link? when link.isNotEmpty) {
+        if (!_inside(link)) continue;
         Directory(p.dirname(target)).createSync(recursive: true);
         Link(target).createSync(link);
         continue;
@@ -341,6 +343,18 @@ final class RuntimeStore {
         ..writeAsBytesSync(entry.content);
     }
   }
+
+  /// Whether an archive's [path] stays where it is put: relative, and never
+  /// stepping up. A link that steps up at all could chain out of the
+  /// folder (`x` to `..`, then `x/y` to `..`), and a file written through
+  /// it with it (#299). No colon either: on Windows `C:x` is on drive C.
+  static bool _inside(String path) =>
+      !p.posix.isAbsolute(path) &&
+      !p.windows.isAbsolute(path) &&
+      !path.contains(':') &&
+      !path.split(_separators).contains('..');
+
+  static final _separators = RegExp(r'[/\\]');
 
   static void _makeExecutable(File file) {
     if (Platform.isWindows) return;
