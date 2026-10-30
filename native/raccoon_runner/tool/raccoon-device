@@ -1640,7 +1640,11 @@ swift_all, swift = swift, [p for p in swift if p['name'] not in swift_dropped]
 swift_entry = swift_entry_of(swift)
 swift_why, swift_built = None, False
 # Every one of them a pod in the cache already (the release's prebuilt
-# plugins, or an install before #187): those, rather than a build.
+# plugins, or an install before #187): those, rather than a build. The
+# prebuilt ones are fetched first, or a cold cache never has them here.
+if swift and not in_cache(swift_entry) and not all(in_cache(p) for p in swift):
+    sweep_staging()
+    fetch_prebuilt()
 if swift and not in_cache(swift_entry) and all(in_cache(p) for p in swift):
     wanted.extend(swift)
     swift = []

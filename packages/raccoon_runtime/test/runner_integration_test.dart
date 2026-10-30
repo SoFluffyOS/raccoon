@@ -1400,6 +1400,91 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
     },
     timeout: const Timeout(Duration(minutes: 3)),
   );
+  // #302: the prebuilt plugins were fetched only after the Swift
+  // packages had been built, so a cold cache built what the release had.
+  test(
+    'on macOS a Swift package plugin in the prebuilt archive is not built',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_prebuilt_spm');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      // A hosted plugin, keyed by its name and version, with a Swift
+      // package that doesn't build and a podspec.
+      const hosted = 'pub/.pub-cache/hosted/pub.dev/plugin_sp-1.0.0';
+      write(
+        '$hosted/pubspec.yaml',
+        'name: plugin_sp\nversion: 1.0.0\nflutter:\n  plugin:\n    platforms:\n'
+            '      macos:\n        pluginClass: PluginSp\n',
+      );
+      write('$hosted/macos/plugin_sp.podspec', 'Pod::Spec.new do |s|\nend\n');
+      write('$hosted/macos/plugin_sp/Package.swift', 'this is not Swift\n');
+      write('app/pubspec.yaml', 'name: app\ndependencies:\n  plugin_sp:\n');
+      write(
+        'app/.dart_tool/package_config.json',
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+            {
+              'name': 'plugin_sp',
+              'rootUri': Uri.directory(p.join(temp.path, hosted)).toString(),
+              'packageUri': 'lib/',
+            },
+          ],
+        }),
+      );
+      final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+        ..createSync(recursive: true);
+
+      // The release's archive: the plugin's pod, built whole.
+      final version =
+          File(p.join(runnerDir, 'VERSION')).readAsStringSync().trim();
+      final arch = '${Process.runSync('uname', ['-m']).stdout}'.trim();
+      final entry = 'plugin_sp-1.0.0-$version-$arch';
+      write('archive/$entry/plugin_sp.framework/plugin_sp', 'x');
+      write('archive/$entry/.complete', '');
+      final archive = p.join(temp.path, 'prebuilt.tar.gz');
+      final tar = await Process.run('tar', [
+        '-czf',
+        archive,
+        '-C',
+        p.join(temp.path, 'archive'),
+        entry,
+      ]);
+      expect(tar.exitCode, 0, reason: '${tar.stderr}');
+
+      final install = await Process.run(
+        p.join(runnerDir, 'tool', 'raccoon-device'),
+        ['install', bundle.path, 'app'],
+        environment: {
+          'RACCOON_RUNNER': binary!,
+          if (sdk != null) 'FLUTTER_ROOT': sdk,
+          'XDG_DATA_HOME': p.join(temp.path, 'data'),
+          'RACCOON_PLUGIN_CACHE': p.join(temp.path, 'cache'),
+          'RACCOON_PREBUILT_PLUGINS': Uri.file(archive).toString(),
+        },
+      );
+      final said = '${install.stderr}';
+      expect(said, contains('1 from the cache: plugin_sp'));
+      expect(said, isNot(contains('swift packages did not build')));
+      expect(
+        Directory(p.join(temp.path, 'cache'))
+            .listSync()
+            .map((e) => p.basename(e.path))
+            .where((name) => name.startsWith('swiftpm-')),
+        isEmpty,
+      );
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isMacOS)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'the macOS plugin builder',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
   test(
     'on macOS a pod asking for an older macOS builds for this one',
     () async {
