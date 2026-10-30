@@ -483,6 +483,49 @@ void main() {
     },
   );
 
+  test(
+    'the helper says so of a package config that is not one',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_config');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final app = Directory(p.join(temp.path, 'app'));
+      final bundle = Directory(p.join(app.path, 'build', 'assets'))
+        ..createSync(recursive: true);
+      File(p.join(app.path, 'pubspec.yaml')).writeAsStringSync('name: app\n');
+      File(p.join(app.path, '.dart_tool', 'package_config.json'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('{"configVersion": 2, "packages": ');
+      Future<ProcessResult> install(Map<String, String> extra) => Process.run(
+        p.join(runnerDir, 'tool', 'raccoon-device'),
+        ['install', bundle.path, 'app'],
+        environment: {
+          'RACCOON_RUNNER': binary!,
+          if (sdk != null) 'FLUTTER_ROOT': sdk,
+          'XDG_DATA_HOME': p.join(temp.path, 'data'),
+          'RACCOON_PLUGIN_CACHE': p.join(temp.path, 'cache'),
+          'RACCOON_NO_PREBUILT': '1',
+          ...extra,
+        },
+      );
+
+      final built = await install({});
+      expect(built.exitCode, 1);
+      expect('${built.stderr}', contains('is not a package config'));
+      expect('${built.stderr}', isNot(contains('Traceback')));
+
+      // Native assets read it too, on their own.
+      final assetsOnly = await install({'RACCOON_PLUGINS': 'off'});
+      expect('${assetsOnly.stderr}', contains('is not a package config'));
+      expect('${assetsOnly.stderr}', isNot(contains('Traceback')));
+      expect('${assetsOnly.stderr}', isNot(contains('substitution')));
+    },
+    skip: switch ((binary != null, Platform.isWindows)) {
+      (false, _) => 'build the runner first',
+      (_, true) => 'the helper runs in Git Bash on Windows',
+      _ => false,
+    },
+  );
+
   // #118: a socket path must fit in 104 bytes on macOS. An app whose key
   // doesn't fit runs under a shorter socket name, its key in a .name file.
   test(

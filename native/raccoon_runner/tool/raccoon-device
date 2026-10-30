@@ -594,8 +594,17 @@ def can_build():
 
 wanted = []
 status = []  # what never gets as far as a library, for the runner to relay
+def config_packages():
+    # Its entries, or the install stops saying what to do: a config that is
+    # not one would end in a traceback.
+    try:
+        entries = json.load(open(config)).get('packages', [])
+        return [e for e in entries if isinstance(e, dict) and isinstance(e.get('name'), str)
+                and isinstance(e.get('rootUri', ''), str)]
+    except (OSError, ValueError, AttributeError, TypeError):
+        sys.exit('🦝 %s is not a package config: flutter pub get writes it anew' % config)
 packages = []
-for package in json.load(open(config)).get('packages', []):
+for package in config_packages():
     uri = package.get('rootUri', '')
     root = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, unquote(uri)))
     pubspec_path = os.path.join(root, 'pubspec.yaml')
@@ -1502,8 +1511,17 @@ wanted = []
 swift = []  # the plugins built through their Swift packages
 swift_packages = os.environ.get('RACCOON_NO_SWIFT_PACKAGES') != '1'
 status = []  # what never gets as far as a library, for the runner to relay
+def config_packages():
+    # Its entries, or the install stops saying what to do: a config that is
+    # not one would end in a traceback.
+    try:
+        entries = json.load(open(config)).get('packages', [])
+        return [e for e in entries if isinstance(e, dict) and isinstance(e.get('name'), str)
+                and isinstance(e.get('rootUri', ''), str)]
+    except (OSError, ValueError, AttributeError, TypeError):
+        sys.exit('🦝 %s is not a package config: flutter pub get writes it anew' % config)
 packages = []
-for package in json.load(open(config)).get('packages', []):
+for package in config_packages():
     uri = package.get('rootUri', '')
     root = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, unquote(uri)))
     pubspec_path = os.path.join(root, 'pubspec.yaml')
@@ -2104,8 +2122,17 @@ for path in (config, os.path.join(project, 'pubspec.lock'), os.path.join(project
     if os.path.isfile(path):
         digest.update(path.encode('utf-8', 'surrogateescape'))
         digest.update(open(path, 'rb').read())
+def config_packages():
+    # Its entries, or the install stops saying what to do: a config that is
+    # not one would end in a traceback.
+    try:
+        entries = json.load(open(config)).get('packages', [])
+        return [e for e in entries if isinstance(e, dict) and isinstance(e.get('name'), str)
+                and isinstance(e.get('rootUri', ''), str)]
+    except (OSError, ValueError, AttributeError, TypeError):
+        sys.exit('🦝 %s is not a package config: flutter pub get writes it anew' % config)
 roots = {}
-for package in json.load(open(config)).get('packages', []):
+for package in config_packages():
     uri = package.get('rootUri', '')
     roots[package.get('name')] = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, unquote(uri)))
 hooked = [name for name, root in roots.items() if os.path.isfile(os.path.join(root, 'hook', 'build.dart'))]
