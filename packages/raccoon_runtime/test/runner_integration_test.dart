@@ -7516,14 +7516,18 @@ Future<int?> _exitCode(RunnerProcess runner) async {
         Directory.systemTemp.path,
         'runner-${runner.pid}.sample',
       );
-      final sampled = await Process.run('sample', [
-        '${runner.pid}',
-        '2',
-        '-file',
-        report,
-      ]);
+      await Process.run('sample', ['${runner.pid}', '2', '-file', report]);
+      // The report is in the file: sample says only where it put it.
+      final threads = switch (File(report)) {
+        final file when file.existsSync() => file
+            .readAsLinesSync()
+            .skipWhile((line) => !line.startsWith('Call graph:'))
+            .take(150)
+            .join('\n'),
+        _ => 'no sample',
+      };
       printOnFailure(
-        'the runner did not exit; its threads:\n${sampled.stdout}',
+        'the runner did not exit; its threads ($report):\n$threads',
       );
     }
     runner.kill();

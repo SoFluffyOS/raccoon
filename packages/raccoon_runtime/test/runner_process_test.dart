@@ -86,7 +86,9 @@ void main() {
       await expectLater(
         RunnerProcess.start(
           launchOf("trap '' TERM; echo \$\$ > '$pidFile'; exec sleep 30"),
-          timeout: const Duration(milliseconds: 500),
+          // Long enough for the shell to start on a loaded machine and
+          // write its pid before it is killed (#308).
+          timeout: const Duration(seconds: 3),
         ),
         throwsA(isA<TimeoutException>()),
       );
