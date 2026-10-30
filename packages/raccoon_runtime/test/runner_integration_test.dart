@@ -202,7 +202,7 @@ void main() {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -2686,7 +2686,7 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -2774,7 +2774,7 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -2839,7 +2839,7 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -2908,7 +2908,7 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -2950,7 +2950,7 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -3043,7 +3043,7 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
         }
         first.shutdown();
         await first.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -3109,7 +3109,7 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
         await view.close();
         first.shutdown();
         await first.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -3281,7 +3281,7 @@ class Report extends StatelessWidget {
       } finally {
         client?.shutdown();
         await client?.close();
-        if (runner != null) expect(await _exitCode(runner), 0);
+        if (runner != null) await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -3337,7 +3337,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -3487,7 +3487,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -3564,7 +3564,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -3606,7 +3606,7 @@ class Report extends StatelessWidget {
     } finally {
       client.shutdown();
       await client.close();
-      expect(await _exitCode(runner), 0);
+      await _expectExit(runner);
     }
     final picture = _pictureLine.firstMatch(
       lines.firstWhere((l) => l.startsWith('picture'), orElse: () => ''),
@@ -3766,7 +3766,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -3844,7 +3844,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -3948,7 +3948,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -4056,7 +4056,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -4149,7 +4149,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -4267,7 +4267,7 @@ class Report extends StatelessWidget {
           client.shutdown();
           await client.close();
         }
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -4328,7 +4328,7 @@ class Report extends StatelessWidget {
           client.shutdown();
           await client.close();
         }
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
       }
     },
     skip: switch ((ready, Platform.isWindows)) {
@@ -4408,7 +4408,7 @@ class Report extends StatelessWidget {
           client.shutdown();
           await client.close();
         }
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -4451,7 +4451,7 @@ class Report extends StatelessWidget {
       } finally {
         first.shutdown();
         await first.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -4506,7 +4506,7 @@ class Report extends StatelessWidget {
         await last.hello.timeout(const Duration(seconds: 5));
         last.shutdown();
         await last.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -4707,7 +4707,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -4763,7 +4763,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -4826,7 +4826,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -4884,7 +4884,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -4939,7 +4939,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -4983,7 +4983,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -5214,7 +5214,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -5302,7 +5302,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -5383,7 +5383,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -5592,7 +5592,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -5687,7 +5687,7 @@ class Report extends StatelessWidget {
         final client = await RunnerClient.connect(endpoint);
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -5768,7 +5768,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -5853,7 +5853,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -5910,7 +5910,7 @@ class Report extends StatelessWidget {
       } finally {
         (second ?? await RunnerClient.connect(endpoint)).shutdown();
         await second?.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -5957,7 +5957,7 @@ class Report extends StatelessWidget {
         final client = await RunnerClient.connect(endpoint);
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -6307,7 +6307,7 @@ class Report extends StatelessWidget {
         final client = await RunnerClient.connect(endpoint);
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -6384,7 +6384,7 @@ class Report extends StatelessWidget {
         await frames.cancel();
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -6433,7 +6433,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -6706,7 +6706,7 @@ class Report extends StatelessWidget {
         await logged.cancel();
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -6779,7 +6779,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -6837,7 +6837,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -6926,7 +6926,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -6984,7 +6984,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -7042,7 +7042,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -7117,7 +7117,7 @@ class Report extends StatelessWidget {
         final client = await RunnerClient.connect(endpoint);
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -7172,7 +7172,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -7388,7 +7388,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -7462,7 +7462,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -7518,7 +7518,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -7567,7 +7567,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -7658,7 +7658,7 @@ class Report extends StatelessWidget {
       } finally {
         client.shutdown();
         await client.close();
-        expect(await _exitCode(runner), 0);
+        await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }
     },
@@ -7680,6 +7680,20 @@ Uint8List _release(int generation, int index) {
         ..setUint32(12, 0, Endian.little);
   payload.buffer.asUint8List().setAll(0, 'RREL'.codeUnits);
   return MessageFraming.frame(payload.buffer.asUint8List());
+}
+
+/// Fails the test, as `expect(await _exitCode(runner), 0)` would, when
+/// [runner] doesn't exit with 0, but without throwing: from a test's
+/// `finally`, that throw took the place of whatever failed first, which
+/// the failure then never showed (#309, #318).
+Future<void> _expectExit(RunnerProcess runner) async {
+  final code = await _exitCode(runner);
+  if (code != 0) {
+    registerException(
+      TestFailure('the runner exited with $code, not 0'),
+      StackTrace.current,
+    );
+  }
 }
 
 /// The runner's exit code, waiting up to 10 s. One still running by then has
