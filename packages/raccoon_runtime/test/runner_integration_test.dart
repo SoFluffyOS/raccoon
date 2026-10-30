@@ -4275,6 +4275,70 @@ class Report extends StatelessWidget {
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
+  // raccoon#309: a claim whose sender hung up before the runner read it
+  // came in one read with the hang-up, and was dropped with it; on a slow
+  // machine the holder kept the run. The runner is stopped while the claim
+  // comes and goes, so it reads both at once, every time.
+  test(
+    'a claim read together with its sender\'s hang-up still takes the run',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final holder = await RunnerClient.connect(endpoint, yields: true);
+      RunnerClient? next;
+      try {
+        await holder.hello.timeout(const Duration(seconds: 10));
+        await holder.frames.first.timeout(const Duration(seconds: 15));
+        expect(Process.killPid(runner.pid, ProcessSignal.sigstop), isTrue);
+        try {
+          final claimer = await Socket.connect(
+            InternetAddress(endpoint.path, type: InternetAddressType.unix),
+            0,
+          );
+          claimer.add(
+            MessageFraming.frame(
+              ClientMessage(
+                hello: ClientHello(protocolVersion: 1, claims: true),
+              ).writeToBuffer(),
+            ),
+          );
+          await claimer.flush();
+          await claimer.close();
+          claimer.destroy();
+        } finally {
+          Process.killPid(runner.pid, ProcessSignal.sigcont);
+        }
+        await holder.closed.timeout(const Duration(seconds: 5));
+        next = await RunnerClient.connect(endpoint);
+        await next.hello.timeout(const Duration(seconds: 10));
+        await next.frames.first.timeout(const Duration(seconds: 15));
+      } finally {
+        await holder.close();
+        if (next case final client?) {
+          client.shutdown();
+          await client.close();
+        }
+        expect(await _exitCode(runner), 0);
+      }
+    },
+    skip: switch ((ready, Platform.isWindows)) {
+      (false, _) => 'build the runner and example first',
+      (_, true) => 'stopping a process is a signal',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   test(
     'a host that claims a run takes it from one that yields; nobody else does',
     () async {

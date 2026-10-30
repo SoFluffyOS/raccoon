@@ -118,6 +118,7 @@ class RunnerServer {
   static constexpr std::chrono::milliseconds kPendingWait{1000};
   void OnPendingReadable();
   void DropPending();
+  void HearGone(int fd);
   void SendBusy(int fd);
   bool closing_ = false;
   static bool WriteAllTo(int fd, const uint8_t* data, size_t size);

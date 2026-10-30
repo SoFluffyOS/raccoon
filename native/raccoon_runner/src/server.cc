@@ -42,7 +42,8 @@ int OpenListenSocket() {
   return socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 }
 
-int AcceptClient(int listen_fd) {
+int AcceptClient(int listen_fd, bool* gone) {
+  *gone = false;
   return accept4(listen_fd, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
 }
 
@@ -52,7 +53,10 @@ constexpr int kSendFlags = 0;
 
 int OpenListenSocket() { return OpenSocket(AF_UNIX); }
 
-int AcceptClient(int listen_fd) { return AcceptSocket(listen_fd); }
+int AcceptClient(int listen_fd, bool* gone) {
+  *gone = false;
+  return AcceptSocket(listen_fd);
+}
 
 #else
 
@@ -80,15 +84,25 @@ int OpenListenSocket() {
 // holds only what is unread; nothing is set aside.
 constexpr int kSendBuffer = 4 << 20;
 
-int AcceptClient(int listen_fd) {
+// [gone]: the client hung up before it was let in. macOS then refuses
+// SO_NOSIGPIPE (EINVAL), so the socket must never be written; what it sent
+// can still be read (raccoon#309).
+int AcceptClient(int listen_fd, bool* gone) {
+  *gone = false;
   const int fd = accept(listen_fd, nullptr, nullptr);
   if (fd < 0) return fd;
-  const int no_sigpipe = 1;
-  if (!SetNonBlockingCloseOnExec(fd) ||
-      setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe,
-                 sizeof(no_sigpipe)) != 0) {
+  if (!SetNonBlockingCloseOnExec(fd)) {
     close(fd);
     return -1;
+  }
+  const int no_sigpipe = 1;
+  if (setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof(no_sigpipe)) != 0) {
+    if (errno != EINVAL) {
+      close(fd);
+      return -1;
+    }
+    *gone = true;
+    return fd;
   }
   // Best effort: a smaller buffer only costs writes.
   setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &kSendBuffer, sizeof(kSendBuffer));
@@ -220,8 +234,13 @@ bool RunnerServer::Listen(const std::string& socket_path, std::string* error) {
 }
 
 void RunnerServer::OnListenReadable() {
-  const int fd = AcceptClient(listen_fd_);
+  bool gone = false;
+  const int fd = AcceptClient(listen_fd_, &gone);
   if (fd < 0) return;
+  if (gone) {
+    HearGone(fd);
+    return;
+  }
   if (handler_.on_accept) {
     handler_.on_accept(fd);
     return;
@@ -284,11 +303,42 @@ void RunnerServer::DropPending() {
   pending_inbox_.clear();
 }
 
+// A newcomer that hung up before it was let in, on macOS, whose socket
+// can't be written: its claim still counts, as it would had it been let in
+// a moment sooner, and the run's holder goes as for any claim (raccoon#285,
+// raccoon#309). Then it goes too, unanswered: nobody is there to read.
+void RunnerServer::HearGone(int fd) {
+  std::vector<uint8_t> sent;
+  uint8_t buffer[4096];
+  while (sent.size() <= kMaxMessage + kLengthPrefix) {
+    const auto got = RecvSome(fd, buffer, sizeof(buffer));
+    if (got <= 0) break;
+    sent.insert(sent.end(), buffer, buffer + got);
+  }
+  CloseFd(fd);
+  if (handler_.on_accept || client_fd_ < 0 || !client_yields_) return;
+  if (sent.size() < kLengthPrefix) return;
+  const uint32_t length = ReadLength(sent.data());
+  if (length > kMaxMessage || sent.size() - kLengthPrefix < length) return;
+  v1::ClientMessage first;
+  if (!first.ParseFromArray(sent.data() + kLengthPrefix, static_cast<int>(length)) ||
+      !first.has_hello() || !first.hello().claims()) {
+    return;
+  }
+  std::fprintf(stderr, "🦝 the run's own host claimed it; letting the other go\n");
+  CloseClient(/*hear_last=*/false);
+}
+
 // The newcomer's first message decides: a hello that claims the run, or
 // any hello once the holder is gone, takes the runner, its bytes read as
 // if it had come first; any other is told Busy.
 void RunnerServer::OnPendingReadable() {
   uint8_t buffer[4096];
+  // A newcomer that hangs up right after its hello, read late, has its
+  // hello and its hang-up in one pass: what it sent whole still decides, as
+  // it would have read a moment sooner (raccoon#309). Short of a whole
+  // message, one that hung up, or failed, is dropped.
+  bool gone = false;
   while (true) {
     const auto got = RecvSome(pending_fd_, buffer, sizeof(buffer));
     if (got > 0) {
@@ -297,7 +347,15 @@ void RunnerServer::OnPendingReadable() {
       continue;
     }
     if (got < 0 && WouldBlock()) break;
-    DropPending();  // hung up, or failed, before its hello
+    gone = true;
+    break;
+  }
+  const bool whole = pending_inbox_.size() >= kLengthPrefix &&
+                     ReadLength(pending_inbox_.data()) <= kMaxMessage &&
+                     pending_inbox_.size() - kLengthPrefix >=
+                         ReadLength(pending_inbox_.data());
+  if (gone && !whole) {
+    DropPending();
     return;
   }
   if (pending_inbox_.size() < kLengthPrefix) return;
