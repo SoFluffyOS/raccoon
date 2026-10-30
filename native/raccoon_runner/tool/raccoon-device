@@ -398,7 +398,9 @@ build_plugins_linux() {
   python3 - "$config" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS" \
     "$cache" "$version" "$UNAME_M" \
     "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-linux-$UNAME_M.tar.gz}" <<'PY'
-import glob, hashlib, json, os, re, shutil, subprocess, sys, tarfile, tempfile, time
+# What only a build or a fetch needs is imported there: tarfile, tempfile
+# and concurrent.futures cost a cached install ~6 ms (#315).
+import glob, hashlib, json, os, re, shutil, subprocess, sys, time
 started = time.time()
 from urllib.parse import unquote, urlparse
 
@@ -589,7 +591,7 @@ def fetch_prebuilt():
     remember = False
     try:
         # Only when downloading: importing it costs every install 20 ms.
-        import gzip, socket, urllib.error, urllib.request, zlib
+        import gzip, socket, tarfile, urllib.error, urllib.request, zlib
         # A stalled connection fails rather than holding the install.
         socket.setdefaulttimeout(30)
         try:
@@ -836,6 +838,7 @@ def build(plugin):
     # Copied aside, then renamed into place: an interrupted copy leaves
     # no entry that counts as cached (#122).
     os.makedirs(cache, exist_ok=True)
+    import tempfile
     staging = tempfile.mkdtemp(prefix=os.path.basename(cached) + '.partial-', dir=cache)
     for so in libs.values():
         shutil.copy2(so, staging)
@@ -947,7 +950,9 @@ build_plugins_macos() {
     "$cache" "$version" "$UNAME_M" "$sdk/bin/cache/artifacts/engine/darwin-x64" \
     "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-$engine-macos-$UNAME_M.tar.gz}" \
     "$project" <<'PY'
-import glob, hashlib, json, os, re, shutil, subprocess, sys, tarfile, tempfile, time
+# What only a build or a fetch needs is imported there: tarfile, tempfile
+# and concurrent.futures cost a cached install ~6 ms (#315).
+import glob, hashlib, json, os, re, shutil, subprocess, sys, time
 started = time.time()
 from urllib.parse import unquote, urlparse
 
@@ -985,7 +990,6 @@ def clone(source, target):
     else:
         shutil.copy2(source, target)
 
-import concurrent.futures
 config, out, virtual, cache, runner_version, arch, engine_dir, prebuilt_url, project = sys.argv[1:10]
 # What an install that may only take the cache says of the rest (#214).
 SKIPPED = 'not built: native plugins are cached only (RACCOON_PLUGINS=cached)'
@@ -1137,7 +1141,7 @@ def fetch_prebuilt():
     remember = False
     try:
         # Only when downloading: importing it costs every install 20 ms.
-        import gzip, socket, urllib.error, urllib.request, zlib
+        import gzip, socket, tarfile, urllib.error, urllib.request, zlib
         # A stalled connection fails rather than holding the install.
         socket.setdefaulttimeout(30)
         try:
@@ -1510,6 +1514,7 @@ def build_packages(plugins, entry):
         drop(work)
         return why, culprits, kept
     os.makedirs(cache, exist_ok=True)
+    import tempfile
     staging = tempfile.mkdtemp(prefix=entry['key'] + '.partial-', dir=cache)
     shutil.copytree(framework, os.path.join(staging, SWIFT_FRAMEWORK + '.framework'), symlinks=True)
     # The packages' resource bundles, where Bundle.module looks: in the
@@ -1922,6 +1927,7 @@ if misses:
         # Copied aside, then renamed into place: an interrupted copy leaves
         # no entry that counts as cached (#122).
         os.makedirs(cache, exist_ok=True)
+        import tempfile
         staging = tempfile.mkdtemp(prefix=plugin['key'] + '.partial-', dir=cache)
         for d, f in made:
             shutil.copytree(os.path.join(release, d, f), os.path.join(staging, f), symlinks=True,
@@ -1951,6 +1957,7 @@ if misses:
     # building take disk.
     targets = [p for p in misses if p['name'] not in broken]
     workers = max(1, min(4, (os.cpu_count() or 2) // 2))
+    import concurrent.futures
     with concurrent.futures.ThreadPoolExecutor(workers) as pool:
         running = {pool.submit(xcodebuild, p['name']): p for p in targets}
         for done in concurrent.futures.as_completed(running):
