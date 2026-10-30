@@ -26,7 +26,10 @@ REV=""
 if SDK="$(sdk_root)"; then
   for stamp in "$SDK/bin/cache/engine.stamp" "$SDK/bin/internal/engine.version"; do
     [ -f "$stamp" ] || continue
-    REV="$(tr -d '[:space:]' < "$stamp")"
+    # Read in the shell, CR and all spaces dropped: a run asks this every
+    # launch, and tr was a process (#323).
+    IFS= read -r REV < "$stamp" || true
+    REV="${REV//[[:space:]]/}"
     [ -n "$REV" ] && break
   done
 fi
@@ -43,7 +46,9 @@ fi
 STORAGE="${FLUTTER_STORAGE_BASE_URL:-https://storage.googleapis.com}"
 BUCKET="${STORAGE%/}/flutter_infra_release/flutter/$REV"
 CACHE="${RACCOON_ENGINE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/engines}/$REV"
-case "$(uname -s)" in
+# The device helper passes what uname said to it; run on its own, it asks.
+SYSTEM="${UNAME_S:-$(uname -s)}"
+case "$SYSTEM" in
   Darwin)
     # One universal framework serves both Mac architectures.
     DIR="$CACHE/darwin"
@@ -52,10 +57,11 @@ case "$(uname -s)" in
     UNZIP_INTO="$DIR/FlutterEmbedder.framework"
     ;;
   Linux)
-    case "$(uname -m)" in
+    MACHINE="${UNAME_M:-$(uname -m)}"
+    case "$MACHINE" in
       x86_64) PLATFORM=linux-x64 ;;
       aarch64|arm64) PLATFORM=linux-arm64 ;;
-      *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
+      *) echo "unsupported architecture $MACHINE" >&2; exit 1 ;;
     esac
     DIR="$CACHE/$PLATFORM"
     LIBRARY="$DIR/libflutter_engine.so"
@@ -73,7 +79,7 @@ case "$(uname -s)" in
     URL="$BUCKET/$PLATFORM/$PLATFORM-embedder.zip"
     UNZIP_INTO="$DIR"
     ;;
-  *) echo "unsupported system $(uname -s)" >&2; exit 1 ;;
+  *) echo "unsupported system $SYSTEM" >&2; exit 1 ;;
 esac
 
 # An engine is there once its library is, unless a download that wrote in

@@ -126,7 +126,7 @@ engine_revision() {
     printf '%s\n' "$revision"
     return 0
   fi
-  basename "$(dirname "$("$ROOT/tool/engine_dir.sh")")"
+  basename "$(dirname "$(UNAME_S="$UNAME_S" UNAME_M="$UNAME_M" "$ROOT/tool/engine_dir.sh")")"
 }
 
 sdk_root() {
@@ -2559,7 +2559,7 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
     # without a word.
     # Before the runner: an engine that can't be had stops the run with
     # engine_dir.sh's word on why, not with the runner's usage (#119).
-    engine_dir="$("$ROOT/tool/engine_dir.sh")" || exit 1
+    engine_dir="$(UNAME_S="$UNAME_S" UNAME_M="$UNAME_M" "$ROOT/tool/engine_dir.sh")" || exit 1
     if [ ! -x "$binary" ]; then
       echo "🦝 no runner at $binary: build native/raccoon_runner, or set RACCOON_RUNNER" >&2
       exit 1
