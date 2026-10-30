@@ -6093,8 +6093,9 @@ class Report extends StatelessWidget {
           contains('MODAL:done'),
         );
         // Two seconds at 60 Hz are 120 frames; a held loop sends none, so
-        // 10 tells them apart on a loaded CI runner too (one drew 27).
-        expect(during, greaterThan(10));
+        // 4 tells them apart on a loaded CI runner too (one drew 27, a
+        // macos-x64 one 10).
+        expect(during, greaterThan(4));
       } finally {
         await frames.cancel();
         client.shutdown();
