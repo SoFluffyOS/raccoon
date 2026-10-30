@@ -589,6 +589,77 @@ void main() {
     skip: ready ? false : 'build the runner and example first',
   );
 
+  // #314: the native assets pass started a Python of its own to find what
+  // the plugin pass had just seen, that no package has a build hook.
+  test(
+    'the plugin pass says when no package has a build hook',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_hooks');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final app = Directory(p.join(temp.path, 'app'));
+      final bundle = Directory(p.join(app.path, 'build', 'assets'))
+        ..createSync(recursive: true);
+      File(p.join(app.path, 'pubspec.yaml')).writeAsStringSync('name: app\n');
+      final dep = Directory(p.join(temp.path, 'dep'))..createSync();
+      File(p.join(dep.path, 'pubspec.yaml')).writeAsStringSync('name: dep\n');
+      File(p.join(app.path, '.dart_tool', 'package_config.json'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync(
+          jsonEncode({
+            'configVersion': 2,
+            'packages': [
+              {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+              {
+                'name': 'dep',
+                'rootUri': Uri.directory(dep.path).toString(),
+                'packageUri': 'lib/',
+              },
+            ],
+          }),
+        );
+      final hint = File(
+        p.join(
+          temp.path,
+          'data',
+          'raccoon',
+          'apps',
+          'app',
+          'plugins',
+          '.no_hooks',
+        ),
+      );
+      Future<void> install() async {
+        final result = await Process.run(
+          p.join(runnerDir, 'tool', 'raccoon-device'),
+          ['install', bundle.path, 'app'],
+          environment: {
+            'RACCOON_RUNNER': binary!,
+            if (sdk != null) 'FLUTTER_ROOT': sdk,
+            'XDG_DATA_HOME': p.join(temp.path, 'data'),
+            'RACCOON_PLUGIN_CACHE': p.join(temp.path, 'cache'),
+            'RACCOON_NO_PREBUILT': '1',
+          },
+        );
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+      }
+
+      await install();
+      expect(hint.existsSync(), isTrue);
+
+      // A package with a hook: no hint, and the native assets pass looks.
+      File(p.join(dep.path, 'hook', 'build.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('void main(List<String> args) {}\n');
+      await install();
+      expect(hint.existsSync(), isFalse);
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isWindows)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, true) => 'the helper runs in Git Bash on Windows',
+      _ => false,
+    },
+  );
+
   test(
     'install keeps the app\'s version, without its comment',
     () async {

@@ -646,12 +646,19 @@ def config_packages():
     except (OSError, ValueError, AttributeError, TypeError):
         sys.exit('🦝 %s is not a package config: flutter pub get writes it anew' % config)
 packages = []
+hooks = False
 for package in config_packages():
     uri = package.get('rootUri', '')
     root = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, unquote(uri)))
+    hooks = hooks or os.path.isfile(os.path.join(root, 'hook', 'build.dart'))
     pubspec_path = os.path.join(root, 'pubspec.yaml')
     if os.path.isfile(pubspec_path):
         packages.append((package['name'], root, open(pubspec_path).read()))
+# No package has a build hook: the native assets pass needn't start a
+# Python of its own to find that out again (#314).
+if not hooks:
+    os.makedirs(out, exist_ok=True)
+    open(os.path.join(out, '.no_hooks'), 'w').close()
 # Implementation packages of federated plugins: named as a default_package
 # by their app-facing package, or saying what they implement. Not the ones
 # to blame for a missing host.
@@ -1563,12 +1570,19 @@ def config_packages():
     except (OSError, ValueError, AttributeError, TypeError):
         sys.exit('🦝 %s is not a package config: flutter pub get writes it anew' % config)
 packages = []
+hooks = False
 for package in config_packages():
     uri = package.get('rootUri', '')
     root = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, unquote(uri)))
+    hooks = hooks or os.path.isfile(os.path.join(root, 'hook', 'build.dart'))
     pubspec_path = os.path.join(root, 'pubspec.yaml')
     if os.path.isfile(pubspec_path):
         packages.append((package['name'], root, open(pubspec_path).read()))
+# No package has a build hook: the native assets pass needn't start a
+# Python of its own to find that out again (#314).
+if not hooks:
+    os.makedirs(out, exist_ok=True)
+    open(os.path.join(out, '.no_hooks'), 'w').close()
 # Implementation packages of federated plugins, not the ones to blame for
 # a missing host (as on Linux).
 implementations = set()
@@ -2118,6 +2132,9 @@ build_native_assets() {
   local -a target
   if [ $# -ge 3 ]; then config="$3"; else config="$(package_config "$project")" || config=""; fi
   [ -n "$config" ] || return 0
+  # The plugin pass, just run on the same config, found no build hook: as
+  # the scan below would, at the cost of a Python start (#314).
+  [ -f "$app/plugins/.no_hooks" ] && return 0
   out="$project/build/raccoon/native_assets"
   case "$UNAME_S" in
     Darwin)
