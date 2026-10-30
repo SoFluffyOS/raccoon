@@ -977,9 +977,31 @@ def settle(staging, cached, good):
         shutil.rmtree(staging, ignore_errors=True)
 
 
+clonefile = None
+
+
 def clone(source, target):
     # A copy-on-write clone where the file system has one, so an install
-    # writes no bytes (#115); a plain copy otherwise.
+    # writes no bytes (#115); a plain copy otherwise. clonefile(2) itself
+    # first, as cp -c calls it: a call, where a cp is a process a framework,
+    # ~9 ms each (#316).
+    global clonefile
+    if clonefile is None:
+        try:
+            import ctypes
+            clonefile = ctypes.CDLL(None, use_errno=True).clonefile
+            clonefile.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint32)
+            clonefile.restype = ctypes.c_int
+        except (ImportError, OSError, AttributeError):
+            clonefile = False
+    if clonefile:
+        # CLONE_NOFOLLOW: a link is cloned as a link, as cp -R copies it.
+        if clonefile(os.fsencode(source), os.fsencode(target), 1) == 0:
+            return
+        import ctypes, errno
+        if ctypes.get_errno() != errno.EEXIST and os.path.lexists(target):
+            # Not one the caller left: whatever a failed clone made.
+            shutil.rmtree(target, ignore_errors=True)
     flag = {'darwin': '-c', 'linux': '--reflink=auto'}.get(sys.platform)
     if flag and subprocess.run(['cp', flag, '-R', source, target],
                                stderr=subprocess.DEVNULL).returncode == 0:
