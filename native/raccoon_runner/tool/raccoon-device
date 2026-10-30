@@ -246,17 +246,34 @@ stamp() {
             $_ = sprintf("%02d:%02d:%06.3f ", $l[2], $l[1], $l[0] + $t - int($t)) . $_'
 }
 
+usage() {
+  echo "usage: raccoon-device ping | install [--instance KEY] <localPath> <appName> | uninstall [--instance KEY] <appName> | run [--instance KEY] [--size WxH@R] <appName> [engine switches] | prebuild <project> <archive.tar.gz>" >&2
+  exit 2
+}
+
 verb="${1:-}"; shift || true
 INSTANCE=1
 SIZE=""
 if [ "${1:-}" = "--instance" ]; then
+  [ $# -ge 2 ] || { echo "🦝 --instance needs a key: raccoon-device $verb --instance KEY <appName>" >&2; exit 2; }
   INSTANCE="$2"; shift 2
 fi
 # --size WxH@R: the logical size and pixel ratio a named device starts at
 # (the runtime passes it for raccoon-phone, raccoon-tablet, raccoon-desktop).
 if [ "${1:-}" = "--size" ]; then
+  [ $# -ge 2 ] || { echo "🦝 --size needs a size: WxH or WxH@R, as 390x844@3" >&2; exit 2; }
   SIZE="$2"; shift 2
+  # One that isn't a size is said, and the app opens as it would without.
+  if ! [[ "$SIZE" =~ ^[1-9][0-9]*x[1-9][0-9]*(@[0-9]*\.?[0-9]+)?$ ]] || [[ "$SIZE" =~ @0*\.?0*$ ]]; then
+    echo "🦝 --size is WxH or WxH@R, as 390x844@3, not $SIZE: left out" >&2
+    SIZE=""
+  fi
 fi
+# What each verb needs, said as usage rather than as an unbound variable.
+case "$verb" in
+  install|prebuild) [ $# -ge 2 ] || usage ;;
+  uninstall|run) [ $# -ge 1 ] || usage ;;
+esac
 
 
 # The window plugins stay the runner's own: their window is the client's pane,
@@ -2461,7 +2478,6 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
     exit "$status"
     ;;
   *)
-    echo "usage: raccoon-device ping | install [--instance KEY] <localPath> <appName> | uninstall [--instance KEY] <appName> | run [--instance KEY] [--size WxH@R] <appName> [engine switches] | prebuild <project> <archive.tar.gz>" >&2
-    exit 2
+    usage
     ;;
 esac

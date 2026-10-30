@@ -138,7 +138,12 @@ bool ParseOptions(int argc, char** argv, Options* options) {
     else if (arg == "--icu") options->engine.icu = v;
     else if (arg == "--width") options->engine.width = std::strtoul(v, nullptr, 10);
     else if (arg == "--height") options->engine.height = std::strtoul(v, nullptr, 10);
-    else if (arg == "--dpr") options->engine.pixel_ratio = std::strtod(v, nullptr);
+    else if (arg == "--dpr") {
+      // As a client's Resize: a ratio that is no number, or none above 0,
+      // is 1 rather than one the engine refuses on every metrics event.
+      const double ratio = std::strtod(v, nullptr);
+      options->engine.pixel_ratio = std::isfinite(ratio) && ratio > 0 ? ratio : 1.0;
+    }
     else if (arg == "--data-dir") options->engine.data_dir = v;
     else if (arg == "--plugins") options->plugins = v;
     else if (arg == "--renderer") options->engine.renderer = v;

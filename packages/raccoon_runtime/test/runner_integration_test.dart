@@ -484,6 +484,75 @@ void main() {
   );
 
   test(
+    'the helper says what run is missing rather than failing on it',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_args');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      Future<ProcessResult> helper(List<String> args) => Process.run(
+        p.join(runnerDir, 'tool', 'raccoon-device'),
+        args,
+        environment: {
+          'RACCOON_RUNNER': binary!,
+          'XDG_DATA_HOME': p.join(temp.path, 'data'),
+        },
+      );
+
+      for (final (args, said) in [
+        (['run', '--size'], '--size needs a size'),
+        (['run', '--instance'], '--instance needs a key'),
+        (['run'], 'usage: raccoon-device'),
+        (['install', 'only-a-path'], 'usage: raccoon-device'),
+        // Taken as the size, it leaves no app: both are said.
+        (['run', '--size', 'phone'], 'not phone: left out'),
+        (['run', '--size', 'phone'], 'usage: raccoon-device'),
+        (['run', '--size', '390x844@0'], 'not 390x844@0: left out'),
+      ]) {
+        final result = await helper(args);
+        expect(result.exitCode, 2, reason: '$args: ${result.stderr}');
+        expect('${result.stderr}', contains(said), reason: '$args');
+        expect('${result.stderr}', isNot(contains('unbound variable')));
+      }
+    },
+    skip: switch ((binary != null, Platform.isWindows)) {
+      (false, _) => 'build the runner first',
+      (_, true) => 'the helper runs in Git Bash on Windows',
+      _ => false,
+    },
+  );
+
+  test(
+    'a pixel ratio that is no number, or none above 0, renders at 1',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_dpr');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      for (final ratio in ['0', '-2', 'nan']) {
+        final out = p.join(temp.path, 'frame_$ratio.ppm');
+        final render = await Process.run(binary!, [
+          'render',
+          '--engine-dir',
+          engineDir!,
+          '--assets',
+          assets,
+          '--icu',
+          icu!,
+          '--dpr',
+          ratio,
+          '--out',
+          out,
+        ]);
+        expect(render.exitCode, 0, reason: '${render.stderr}');
+        expect(
+          '${render.stderr}',
+          isNot(contains('pixel ratio was invalid')),
+          reason: '--dpr $ratio',
+        );
+        expect(File(out).existsSync(), isTrue);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+  );
+
+  test(
     'the helper says so of a package config that is not one',
     () async {
       final temp = Directory.systemTemp.createTempSync('raccoon_config');
