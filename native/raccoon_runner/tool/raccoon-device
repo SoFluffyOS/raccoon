@@ -67,8 +67,12 @@ DATA="$(native_path "${XDG_DATA_HOME:-$HOME/.local/share}")/raccoon/data"
 # The socket directory must be the one raccoon_runtime's RunnerDiscovery
 # watches: the XDG runtime directory on Linux, the user's temporary directory
 # on macOS and Windows. The SDK keeps one macOS engine directory for both
-# architectures.
-case "$(uname -s)" in
+# architectures. The system and machine are asked once: each uname is a
+# fork, ~3 ms, and an install asked eight times. Not OS: Windows exports
+# one of its own, which the build tools read.
+UNAME_S="$(uname -s)"
+UNAME_M="$(uname -m)"
+case "$UNAME_S" in
   MINGW*|MSYS*|CYGWIN*)
     SOCKETS="$(native_path "${TMP:-/tmp}")/raccoon"
     case "${PROCESSOR_ARCHITEW6432:-${PROCESSOR_ARCHITECTURE:-}}" in
@@ -88,20 +92,20 @@ case "$(uname -s)" in
     # container there is often no XDG_RUNTIME_DIR.
     TEMP="${TMPDIR:-/tmp}"
     SOCKETS="${XDG_RUNTIME_DIR:-${TEMP%/}}/raccoon"
-    case "$(uname -m)" in
+    case "$UNAME_M" in
       x86_64) SDK_ENGINE=linux-x64 ;;
       aarch64|arm64) SDK_ENGINE=linux-arm64 ;;
-      *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
+      *) echo "unsupported architecture $UNAME_M" >&2; exit 1 ;;
     esac
     ;;
-  *) echo "unsupported system $(uname -s)" >&2; exit 1 ;;
+  *) echo "unsupported system $UNAME_S" >&2; exit 1 ;;
 esac
 
 # A copy-on-write clone where the file system has one, so an install
 # writes no bytes (#115): APFS, btrfs, XFS. A plain copy otherwise.
 clone_tree() {
   local flag=""
-  case "$(uname -s)" in
+  case "$UNAME_S" in
     Darwin) flag=-c ;;
     Linux) flag=--reflink=auto ;;
   esac
@@ -322,7 +326,7 @@ build_plugins() {
     return 0
   fi
   command -v python3 >/dev/null || { echo "🦝 no python3; native plugins skipped" >&2; return 0; }
-  case "$(uname -s)" in
+  case "$UNAME_S" in
     Darwin) build_plugins_macos "$project" "$out" "$config" ;;
     *) build_plugins_linux "$project" "$out" "$config" ;;
   esac
@@ -371,8 +375,8 @@ build_plugins_linux() {
   version="$(tr -d '[:space:]' < "$ROOT/VERSION")"
   cache="${RACCOON_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/linux}"
   python3 - "$config" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS" \
-    "$cache" "$version" "$(uname -m)" \
-    "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-linux-$(uname -m).tar.gz}" <<'PY'
+    "$cache" "$version" "$UNAME_M" \
+    "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-linux-$UNAME_M.tar.gz}" <<'PY'
 import glob, hashlib, json, os, re, shutil, subprocess, sys, tarfile, tempfile, time
 started = time.time()
 from urllib.parse import unquote, urlparse
@@ -912,8 +916,8 @@ build_plugins_macos() {
   version="$(tr -d '[:space:]' < "$ROOT/VERSION")"
   cache="${RACCOON_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/$engine}"
   python3 - "$config" "$out" "$VIRTUAL_PLUGINS_MACOS" \
-    "$cache" "$version" "$(uname -m)" "$sdk/bin/cache/artifacts/engine/darwin-x64" \
-    "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-$engine-macos-$(uname -m).tar.gz}" \
+    "$cache" "$version" "$UNAME_M" "$sdk/bin/cache/artifacts/engine/darwin-x64" \
+    "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-$engine-macos-$UNAME_M.tar.gz}" \
     "$project" <<'PY'
 import glob, hashlib, json, os, re, shutil, subprocess, sys, tarfile, tempfile, time
 started = time.time()
@@ -2071,7 +2075,7 @@ lock_build() {
 # install killed mid-build left goes too (#136).
 clear_assembled_linux() {
   local linux="$1/linux"
-  [ "$(uname -s)" = Linux ] || return 0
+  [ "$UNAME_S" = Linux ] || return 0
   [ "$(ls -A "$linux" 2>/dev/null)" = flutter ] || return 0
   [ "$(ls -A "$linux/flutter")" = ephemeral ] || return 0
   rm -rf "$linux"
@@ -2094,17 +2098,17 @@ build_native_assets() {
   if [ $# -ge 3 ]; then config="$3"; else config="$(package_config "$project")" || config=""; fi
   [ -n "$config" ] || return 0
   out="$project/build/raccoon/native_assets"
-  case "$(uname -s)" in
+  case "$UNAME_S" in
     Darwin)
       local arch=x86_64
-      [ "$(uname -m)" = arm64 ] && arch=arm64
+      [ "$UNAME_M" = arm64 ] && arch=arm64
       target=(-dTargetPlatform=darwin -dDarwinArchs="$arch" debug_macos_bundle_flutter_assets)
       manifest="$out/App.framework/Resources/flutter_assets/NativeAssetsManifest.json"
       built="$out/native_assets"
       ;;
     Linux)
       local platform=linux-x64
-      case "$(uname -m)" in aarch64|arm64) platform=linux-arm64 ;; esac
+      case "$UNAME_M" in aarch64|arm64) platform=linux-arm64 ;; esac
       target=(-dTargetPlatform="$platform" "debug_bundle_${platform}_assets")
       manifest="$out/flutter_assets/NativeAssetsManifest.json"
       built="$out/native_assets/linux"
@@ -2350,7 +2354,7 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
     pubspec_version "$project" > "$APPS/$key/version"
     # The project's Firebase config for Apple hosts, where its Runner keeps
     # it: the macOS one, else the iOS one. The app's bundle carries it.
-    if [ "$(uname -s)" = Darwin ]; then
+    if [ "$UNAME_S" = Darwin ]; then
       for plist in "$project/macos/Runner/GoogleService-Info.plist" \
         "$project/ios/Runner/GoogleService-Info.plist"; do
         [ -f "$plist" ] || continue
@@ -2427,7 +2431,7 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
       export DYLD_LIBRARY_PATH="$APPS/$key/plugins/frameworks${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
     fi
     binary="$RUNNER"
-    if [ "$(uname -s)" = Darwin ] && { [ -n "$manifest" ] || [ -d "$APPS/$key/native_assets" ]; }; then
+    if [ "$UNAME_S" = Darwin ] && { [ -n "$manifest" ] || [ -d "$APPS/$key/native_assets" ]; }; then
       binary="$(app_bundle "$key")"
     fi
     # The runner is this script's child rather than its replacement, so a
