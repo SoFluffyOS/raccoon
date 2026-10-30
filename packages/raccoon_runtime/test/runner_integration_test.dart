@@ -5152,7 +5152,7 @@ class Report extends StatelessWidget {
         } finally {
           client.shutdown();
           await client.close();
-          expect(await _exitCode(runner), 0, reason: content);
+          await _expectExit(runner, reason: content);
           temp.deleteSync(recursive: true);
         }
       }
@@ -7696,11 +7696,13 @@ Uint8List _release(int generation, int index) {
 /// [runner] doesn't exit with 0, but without throwing: from a test's
 /// `finally`, that throw took the place of whatever failed first, which
 /// the failure then never showed (#309, #318).
-Future<void> _expectExit(RunnerProcess runner) async {
+Future<void> _expectExit(RunnerProcess runner, {String? reason}) async {
   final code = await _exitCode(runner);
   if (code != 0) {
     registerException(
-      TestFailure('the runner exited with $code, not 0'),
+      TestFailure(
+        'the runner exited with $code, not 0${reason == null ? '' : ': $reason'}',
+      ),
       StackTrace.current,
     );
   }
