@@ -2464,7 +2464,9 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
     # the runner.
     project="$(cd "$local_path/.." && pwd)"
     until [ -f "$project/pubspec.yaml" ] || [ "$project" = / ]; do
-      project="$(dirname "$project")"
+      # dirname in the shell: a level up without a process (#322).
+      project="${project%/*}"
+      [ -n "$project" ] || project=/
     done
     [ -f "$project/pubspec.yaml" ] || project="$(cd "$local_path/../.." && pwd)"
     pubspec_version "$project" > "$APPS/$key/version"

@@ -661,6 +661,45 @@ void main() {
   );
 
   test(
+    'install finds the project above a bundle deeper than two levels',
+    () async {
+      // flutter config --build-dir puts the bundle further down: the project
+      // is the nearest folder above it with a pubspec (#225, #322).
+      final temp = Directory.systemTemp.createTempSync('raccoon_deep');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final app = Directory(p.join(temp.path, 'app'));
+      final bundle = Directory(
+        p.join(app.path, 'out', 'flutter', 'debug', 'assets'),
+      )..createSync(recursive: true);
+      File(
+        p.join(app.path, 'pubspec.yaml'),
+      ).writeAsStringSync('name: app\nversion: 3.1.4\n');
+      final install = await Process.run(
+        p.join(runnerDir, 'tool', 'raccoon-device'),
+        ['install', bundle.path, 'app'],
+        environment: {
+          'RACCOON_RUNNER': binary!,
+          if (sdk != null) 'FLUTTER_ROOT': sdk,
+          'XDG_DATA_HOME': p.join(temp.path, 'data'),
+          'RACCOON_PLUGINS': 'off',
+        },
+      );
+      expect(install.exitCode, 0, reason: '${install.stderr}');
+      expect(
+        File(
+          p.join(temp.path, 'data', 'raccoon', 'apps', 'app', 'version'),
+        ).readAsStringSync(),
+        '3.1.4',
+      );
+    },
+    skip: switch ((binary != null, Platform.isWindows)) {
+      (false, _) => 'build the runner first',
+      (_, true) => 'the helper runs in Git Bash on Windows',
+      _ => false,
+    },
+  );
+
+  test(
     'install keeps the app\'s version, without its comment',
     () async {
       final temp = Directory.systemTemp.createTempSync('raccoon_version');
