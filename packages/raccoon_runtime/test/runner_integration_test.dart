@@ -4117,6 +4117,7 @@ class Report extends StatelessWidget {
       );
       final holder = await RunnerClient.connect(endpoint, yields: true);
       RunnerClient? next;
+      var nextClosed = false;
       try {
         await holder.hello.timeout(const Duration(seconds: 10));
         await holder.frames.first.timeout(const Duration(seconds: 15));
@@ -4144,12 +4145,18 @@ class Report extends StatelessWidget {
         await Future<void>.delayed(const Duration(milliseconds: 300));
         // The next client has the runner, its messages read whole.
         next = await RunnerClient.connect(endpoint);
+        unawaited(next.closed.then((_) => nextClosed = true));
         await next.hello.timeout(const Duration(seconds: 10));
         await next.frames.first.timeout(const Duration(seconds: 15));
       } finally {
         await holder.close();
         final client = next;
         if (client != null) {
+          // A runner that hung up on it hears no Shutdown: said, should it
+          // not exit.
+          printOnFailure(
+            'the next client was closed before Shutdown: $nextClosed',
+          );
           client.shutdown();
           await client.close();
         }
@@ -7529,6 +7536,9 @@ Future<int?> _exitCode(RunnerProcess runner) async {
       printOnFailure(
         'the runner did not exit; its threads ($report):\n$threads',
       );
+    }
+    if (runner.lastLines case final lines when lines.isNotEmpty) {
+      printOnFailure('its last lines:\n${lines.join('\n')}');
     }
     runner.kill();
     return null;

@@ -65,6 +65,8 @@ void main() {
         ),
       );
       addTearDown(runner.kill);
+      // Kept, for one that stops answering.
+      expect(runner.lastLines.last, '🦝 listening on x');
       final stdoutDone = runner.stdout.toList();
       final vmService = runner.vmServiceUri;
       runner.kill();

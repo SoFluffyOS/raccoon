@@ -189,6 +189,10 @@ final class RunnerProcess {
   /// The runner's process id.
   int get pid => _process.pid;
 
+  /// The runner's last lines of output, its own and the app's: what it was
+  /// doing, for one that has stopped answering.
+  List<String> get lastLines => List.unmodifiable(_lastLines);
+
   /// Completes with the runner's exit code once it ends.
   Future<int> get exitCode => _process.exitCode;
 
