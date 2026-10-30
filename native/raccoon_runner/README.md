@@ -358,8 +358,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   `--instance KEY` names everything `<app>@KEY`, which is how the
   `raccoon-2`, `raccoon-phone`, `raccoon-tablet` and `raccoon-desktop`
   devices keep their runs of the same project apart; `--size 820x1180@2`
-  starts the runner at a device's logical size and pixel ratio, and without
-  it the run starts at the size a host's board last gave the app
+  starts the runner at a device's logical size and pixel ratio (one that
+  isn't a size is said and left out), and without it the run starts at the
+  size a host's board last gave the app
   (`<data>/raccoon/data/<app>/size`, raccoon_runtime's `AppSizes`); each run's
   output lands timestamped in the app's data directory as `runner.log`. A
   runner that ends badly is said so in the run's output: `🦝 raccoon_runner
