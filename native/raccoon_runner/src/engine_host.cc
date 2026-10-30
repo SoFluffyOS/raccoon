@@ -618,12 +618,20 @@ bool EngineHost::PresentView(const FlutterPresentViewInfo* info) {
   return true;
 }
 
-bool EngineHost::ConfigureRenderer(const std::string& wanted,
+bool EngineHost::ConfigureRenderer(const std::string& asked,
                                    FlutterRendererConfig* renderer,
                                    std::string* error) {
   // "auto" takes the GPU renderer this host builds when it starts, else
-  // software; "gl", "metal" and "vulkan" insist on theirs; "software" never
-  // tries.
+  // software; "gl", "metal" and "vulkan" insist on theirs, and only theirs;
+  // "software" never tries. A name that is none of them is said, and taken
+  // as "auto": RACCOON_RENDERER can carry a typo.
+  std::string wanted = asked;
+  if (wanted != "auto" && wanted != "gl" && wanted != "metal" && wanted != "vulkan" &&
+      wanted != "software") {
+    std::fprintf(stderr, "🦝 no renderer \"%s\" (auto, gl, metal, vulkan or software); auto\n",
+                 wanted.c_str());
+    wanted = "auto";
+  }
   const bool insists = wanted == "gl" || wanted == "metal" || wanted == "vulkan";
   std::string gpu_error;
   const char* kind = "GPU";
@@ -658,7 +666,7 @@ bool EngineHost::ConfigureRenderer(const std::string& wanted,
   }
 #endif
 #if RACCOON_HAS_GL
-  if (wanted != "software" && wanted != "metal") {
+  if (wanted == "auto" || wanted == "gl") {
     kind = "GL";
     auto gl = std::make_unique<GlRenderer>();
     if (gl->Init(&gpu_error)) {
@@ -683,7 +691,7 @@ bool EngineHost::ConfigureRenderer(const std::string& wanted,
   }
 #endif
 #if RACCOON_HAS_METAL
-  if (wanted != "software" && wanted != "gl") {
+  if (wanted == "auto" || wanted == "metal") {
     kind = "Metal";
     auto metal = std::make_unique<MetalRenderer>();
     if (metal->Init(&gpu_error)) {

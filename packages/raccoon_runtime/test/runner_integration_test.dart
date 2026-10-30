@@ -521,6 +521,43 @@ void main() {
   );
 
   test(
+    'a named renderer is that one or none, and an unknown name is auto',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_renderer');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      Future<ProcessResult> render(String renderer) => Process.run(binary!, [
+        'render',
+        '--engine-dir',
+        engineDir!,
+        '--assets',
+        assets,
+        '--icu',
+        icu!,
+        '--renderer',
+        renderer,
+        '--out',
+        p.join(temp.path, '$renderer.ppm'),
+      ]);
+
+      final unknown = await render('bogus');
+      expect(unknown.exitCode, 0, reason: '${unknown.stderr}');
+      expect('${unknown.stderr}', contains('no renderer "bogus"'));
+      expect(File(p.join(temp.path, 'bogus.ppm')).existsSync(), isTrue);
+
+      // One this host never builds: it used to fall through to the next
+      // GPU renderer (Metal for vulkan on macOS) without a word.
+      final absent = Platform.isMacOS ? 'vulkan' : 'metal';
+      final insisted = await render(absent);
+      expect(insisted.exitCode, isNot(0));
+      expect(
+        '${insisted.stderr}',
+        contains('built without the $absent renderer'),
+      );
+    },
+    skip: ready ? false : 'build the runner and example first',
+  );
+
+  test(
     'a pixel ratio that is no number, or none above 0, renders at 1',
     () async {
       final temp = Directory.systemTemp.createTempSync('raccoon_dpr');

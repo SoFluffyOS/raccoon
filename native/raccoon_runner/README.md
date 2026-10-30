@@ -146,7 +146,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   socket, with a fence of its own on the second where there are fences. The
   raccoon_view plugin does this on Linux, macOS and Windows. `--renderer
   auto|gl|metal|vulkan|software`, or `RACCOON_RENDERER` in the environment: `auto`
-  falls back to software; the start-up log says which is in use, and
+  falls back to software, a named GPU renderer is that one or the runner
+  says why not, and a name that is none of these is taken as `auto`; the
+  start-up log says which is in use, and
   `RACCOON_TRACE=1` traces every frame's buffer. On Linux, built when `egl`
   and `glesv2` are found by pkg-config (`libegl1-mesa-dev
   libgles2-mesa-dev` on Debian).
