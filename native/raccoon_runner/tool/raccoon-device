@@ -143,6 +143,38 @@ sdk_icu() {
   native_path "$(sdk_root)/bin/cache/artifacts/engine/$SDK_ENGINE/icudtl.dat"
 }
 
+# Runs tool/<name>.dart with the SDK's own dart and no package of its own
+# (dart: libraries only). From source the VM compiles it every run (~190 ms
+# for package_scope); a kernel snapshot kept in the cache loads in a third of
+# that (#328). A snapshot loads only on the VM that made it, so each SDK
+# version has its own, made again when the script is newer. One that won't
+# load (253, 254) is dropped and the script runs from source; a tool failing
+# on its own is never run twice. Without a cache to write, from source.
+dart_tool() {
+  local name="$1" sdk dart script version dill status
+  shift
+  sdk="$(sdk_root)/bin/cache/dart-sdk"
+  dart="$sdk/bin/dart$EXE"
+  script="$ROOT/tool/$name.dart"
+  read_word version "$sdk/version"
+  dill="${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/tools/${version:-unknown}/$name.dill"
+  if [ ! "$dill" -nt "$script" ] && mkdir -p "${dill%/*}" 2>/dev/null &&
+    [ -w "${dill%/*}" ]; then
+    "$dart" --packages="$(native_path "$ROOT/tool/no_packages.json")" \
+      --snapshot-kind=kernel --snapshot="$(native_path "$dill.$$")" \
+      "$(native_path "$script")" > /dev/null 2>&1 &&
+      mv -f "$dill.$$" "$dill" 2>/dev/null
+    rm -f "$dill.$$"
+  fi
+  if [ "$dill" -nt "$script" ]; then
+    status=0
+    "$dart" "$(native_path "$dill")" "$@" || status=$?
+    case "$status" in 253|254) rm -f "$dill" ;; *) return "$status" ;; esac
+  fi
+  "$dart" --packages="$(native_path "$ROOT/tool/no_packages.json")" \
+    "$(native_path "$script")" "$@"
+}
+
 # The package config the app's packages come from: its own, or for a pub
 # workspace member the workspace's, kept to what the app reaches
 # (tool/package_scope.dart). Prints nothing, and says why, when there is none.
@@ -154,9 +186,8 @@ package_config() {
   fi
   # With a package config of none: dart would take the config of a pub
   # workspace this checkout sits in, at its language version (#217).
-  "$(sdk_root)/bin/cache/dart-sdk/bin/dart$EXE" --packages="$(native_path "$ROOT/tool/no_packages.json")" \
-    "$(native_path "$ROOT/tool/package_scope.dart")" \
-    "$(native_path "$project")" "$(native_path "$scoped")" > /dev/null && echo "$scoped"
+  dart_tool package_scope "$(native_path "$project")" "$(native_path "$scoped")" \
+    > /dev/null && echo "$scoped"
 }
 
 # On macOS, an application bundle of the app's own around the runner: a
@@ -380,8 +411,7 @@ build_plugins_windows() {
   read_word version "$ROOT/VERSION"
   cache="${RACCOON_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/$engine}"
   sdk="$(sdk_root)"
-  "$sdk/bin/cache/dart-sdk/bin/dart.exe" --packages="$(native_path "$ROOT/tool/no_packages.json")" \
-    "$(native_path "$ROOT/tool/plugins_windows.dart")" \
+  dart_tool plugins_windows \
     "$(native_path "$config")" "$(native_path "$out")" \
     "$VIRTUAL_PLUGINS" "$(native_path "$cache")" "$version" \
     "$(native_path "$sdk/bin/cache/artifacts/engine/$SDK_ENGINE")"

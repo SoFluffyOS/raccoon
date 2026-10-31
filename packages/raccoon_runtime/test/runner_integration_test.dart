@@ -2650,7 +2650,21 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
       final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
         ..createSync(recursive: true);
       final data = p.join(temp.path, 'data');
-      try {
+      final cache = p.join(temp.path, 'cache');
+      // package_scope.dart runs from a kernel snapshot kept in the cache
+      // (#328); one that won't load is dropped, and the script runs as is.
+      File snapshot() => File(
+        p.join(
+          cache,
+          'raccoon',
+          'tools',
+          File(
+            p.join(sdk!, 'bin', 'cache', 'dart-sdk', 'version'),
+          ).readAsStringSync().trim(),
+          'package_scope.dill',
+        ),
+      );
+      Future<void> installs() async {
         final install = await Process.run(
           p.join(runnerDir, 'tool', 'raccoon-device'),
           ['install', bundle.path, 'app'],
@@ -2658,6 +2672,7 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
             'RACCOON_RUNNER': binary!,
             if (sdk != null) 'FLUTTER_ROOT': sdk,
             'XDG_DATA_HOME': data,
+            'XDG_CACHE_HOME': cache,
           },
         );
         expect(install.exitCode, 0, reason: '${install.stderr}');
@@ -2672,6 +2687,18 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
             '${(entry as Map)['name']}',
         ];
         expect(status, ['app_plugin']);
+      }
+
+      try {
+        await installs();
+        expect(snapshot().existsSync(), isTrue);
+        snapshot().writeAsBytesSync(
+          snapshot().readAsBytesSync().sublist(0, 100),
+        );
+        await installs();
+        expect(snapshot().existsSync(), isFalse);
+        await installs();
+        expect(snapshot().existsSync(), isTrue);
       } finally {
         temp.deleteSync(recursive: true);
       }
