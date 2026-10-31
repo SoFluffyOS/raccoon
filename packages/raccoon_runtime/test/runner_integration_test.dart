@@ -2665,14 +2665,24 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
         ),
       );
       Future<void> installs() async {
+        // On Windows through Git Bash, with the forward slashes the
+        // helper's paths have there.
+        String posix(String path) => path.replaceAll(r'\', '/');
         final install = await Process.run(
-          p.join(runnerDir, 'tool', 'raccoon-device'),
-          ['install', bundle.path, 'app'],
+          CustomDeviceConfig.hostLauncher.firstOrNull ??
+              p.join(runnerDir, 'tool', 'raccoon-device'),
+          [
+            if (CustomDeviceConfig.hostLauncher.isNotEmpty)
+              posix(p.join(runnerDir, 'tool', 'raccoon-device')),
+            'install',
+            posix(bundle.path),
+            'app',
+          ],
           environment: {
-            'RACCOON_RUNNER': binary!,
-            if (sdk != null) 'FLUTTER_ROOT': sdk,
-            'XDG_DATA_HOME': data,
-            'XDG_CACHE_HOME': cache,
+            'RACCOON_RUNNER': posix(binary!),
+            if (sdk != null) 'FLUTTER_ROOT': posix(sdk),
+            'XDG_DATA_HOME': posix(data),
+            'XDG_CACHE_HOME': posix(cache),
           },
         );
         expect(install.exitCode, 0, reason: '${install.stderr}');
@@ -2703,10 +2713,9 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
         temp.deleteSync(recursive: true);
       }
     },
-    skip: switch ((binary != null && sdk != null, Platform.isWindows)) {
-      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
-      (_, true) => 'the helper runs in Git Bash on Windows',
-      _ => false,
+    skip: switch (binary != null && sdk != null) {
+      false => 'build the runner first, with a Flutter SDK on PATH',
+      true => false,
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );
@@ -3539,7 +3548,18 @@ class Report extends StatelessWidget {
             r'frames=(\d+) size=(\S+) duration_ms=(\d+) left=(\S+) right=(\S+)',
           ).firstMatch('${probe.stdout}');
           expect(held, isNotNull, reason: '${probe.stdout}${probe.stderr}');
-          expect(int.parse(held?[1] ?? '0'), inInclusiveRange(25, 36));
+          // About 30 frames a second, for no longer than the app says it
+          // recorded (#329): a pause that doesn't pause adds its 400 ms.
+          final recordedMs = int.parse(
+            lines
+                .firstWhere((l) => l.startsWith('video_ms '))
+                .substring('video_ms '.length),
+          );
+          expect(
+            int.parse(held?[1] ?? '0'),
+            inInclusiveRange(25, recordedMs * 30 ~/ 1000 + 6),
+            reason: 'recorded for at most $recordedMs ms',
+          );
           expect(held?[2], '352x288');
           expect(int.parse(held?[3] ?? '0'), inInclusiveRange(850, 1250));
           final left = (held?[4] ?? '').split(',').map(int.parse);

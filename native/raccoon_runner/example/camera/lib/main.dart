@@ -92,13 +92,21 @@ Future<void> main() async {
     );
     await recorder.initialize();
     try {
+      // The most the video can hold: the platform calls around the delays
+      // take their own time on a loaded machine, and frames go on being
+      // recorded during them. The paused stretch is left out.
+      final recording = Stopwatch()..start();
       await recorder.startVideoRecording();
       await Future<void>.delayed(const Duration(milliseconds: 600));
       await recorder.pauseVideoRecording();
+      recording.stop();
       await Future<void>.delayed(const Duration(milliseconds: 400));
+      recording.start();
       await recorder.resumeVideoRecording();
       await Future<void>.delayed(const Duration(milliseconds: 400));
       final video = await recorder.stopVideoRecording();
+      recording.stop();
+      _say('video_ms ${recording.elapsedMilliseconds}');
       _say('video ${video.path}');
     } on CameraException catch (error) {
       _say('video refused ${error.code}');
