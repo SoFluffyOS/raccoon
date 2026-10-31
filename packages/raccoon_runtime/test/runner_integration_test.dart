@@ -3561,7 +3561,13 @@ class Report extends StatelessWidget {
             reason: 'recorded for at most $recordedMs ms',
           );
           expect(held?[2], '352x288');
-          expect(int.parse(held?[3] ?? '0'), inInclusiveRange(850, 1250));
+          // Its length too: the 250 ms of room is less than the 400 a pause
+          // that doesn't pause adds.
+          expect(
+            int.parse(held?[3] ?? '0'),
+            inInclusiveRange(850, recordedMs + 250),
+            reason: 'recorded for at most $recordedMs ms',
+          );
           final left = (held?[4] ?? '').split(',').map(int.parse);
           final right = (held?[5] ?? '').split(',').map(int.parse).toList();
           expect(left.every((c) => c > 230), isTrue, reason: 'left $left');
