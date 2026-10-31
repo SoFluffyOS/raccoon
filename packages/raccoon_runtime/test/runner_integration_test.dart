@@ -212,64 +212,70 @@ void main() {
             : 'build the runner and example first: $binary / $engineDir / $icu',
     timeout: const Timeout(Duration(minutes: 2)),
   );
-  test(
-    'a sized device starts at its logical size, in pixels times its ratio',
-    () async {
-      // The helper's --size is logical, as raccoon-phone's 390x844@3 is;
-      // the runner takes pixels. A client that never resizes sees the size
-      // the runner started at.
-      final temp = Directory.systemTemp.createTempSync('raccoon_size');
-      final helper = p.join(runnerDir, 'tool', 'raccoon-device');
-      final helperEnvironment = {
-        'RACCOON_RUNNER': binary!,
-        if (sdk != null) 'FLUTTER_ROOT': sdk,
-        'XDG_DATA_HOME': p.join(temp.path, 'data'),
-        'XDG_RUNTIME_DIR': temp.path,
-        'TMPDIR': '${temp.path}/',
-      };
-      final install = await Process.run(helper, [
-        'install',
-        assets,
-        'sized',
-      ], environment: helperEnvironment);
-      expect(install.exitCode, 0, reason: '${install.stderr}');
-      final run = await Process.start(helper, [
-        'run',
-        '--size',
-        '200x150@2',
-        'sized',
-      ], environment: helperEnvironment);
-      final socket = File(p.join(temp.path, 'raccoon', 'sized.sock'));
-      try {
-        final deadline = DateTime.now().add(const Duration(seconds: 30));
-        while (!socket.existsSync() && DateTime.now().isBefore(deadline)) {
-          await Future<void>.delayed(const Duration(milliseconds: 100));
-        }
-        final client = await RunnerClient.connect(
-          UnixSocketEndpoint(socket.path),
-        );
+  // A whole ratio is worked out in the shell, a fractional one by awk.
+  for (final (size, pixels) in [
+    ('200x150@2', (400, 300)),
+    ('200x150@1.5', (300, 225)),
+  ]) {
+    test(
+      'a sized device ($size) starts at its logical size, in pixels times its ratio',
+      () async {
+        // The helper's --size is logical, as raccoon-phone's 390x844@3 is;
+        // the runner takes pixels. A client that never resizes sees the size
+        // the runner started at.
+        final temp = Directory.systemTemp.createTempSync('raccoon_size');
+        final helper = p.join(runnerDir, 'tool', 'raccoon-device');
+        final helperEnvironment = {
+          'RACCOON_RUNNER': binary!,
+          if (sdk != null) 'FLUTTER_ROOT': sdk,
+          'XDG_DATA_HOME': p.join(temp.path, 'data'),
+          'XDG_RUNTIME_DIR': temp.path,
+          'TMPDIR': '${temp.path}/',
+        };
+        final install = await Process.run(helper, [
+          'install',
+          assets,
+          'sized',
+        ], environment: helperEnvironment);
+        expect(install.exitCode, 0, reason: '${install.stderr}');
+        final run = await Process.start(helper, [
+          'run',
+          '--size',
+          size,
+          'sized',
+        ], environment: helperEnvironment);
+        final socket = File(p.join(temp.path, 'raccoon', 'sized.sock'));
         try {
-          final frame = await client.frames.first.timeout(
-            const Duration(seconds: 15),
+          final deadline = DateTime.now().add(const Duration(seconds: 30));
+          while (!socket.existsSync() && DateTime.now().isBefore(deadline)) {
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+          }
+          final client = await RunnerClient.connect(
+            UnixSocketEndpoint(socket.path),
           );
-          expect((frame.width, frame.height), (400, 300));
+          try {
+            final frame = await client.frames.first.timeout(
+              const Duration(seconds: 15),
+            );
+            expect((frame.width, frame.height), pixels);
+          } finally {
+            client.shutdown();
+            await client.close();
+          }
         } finally {
-          client.shutdown();
-          await client.close();
+          run.kill();
+          await run.exitCode;
+          temp.deleteSync(recursive: true);
         }
-      } finally {
-        run.kill();
-        await run.exitCode;
-        temp.deleteSync(recursive: true);
-      }
-    },
-    skip: switch ((ready, Platform.isWindows)) {
-      (false, _) => 'build the runner and example first',
-      (_, true) => 'the helper runs in Git Bash on Windows',
-      _ => false,
-    },
-    timeout: const Timeout(Duration(minutes: 2)),
-  );
+      },
+      skip: switch ((ready, Platform.isWindows)) {
+        (false, _) => 'build the runner and example first',
+        (_, true) => 'the helper runs in Git Bash on Windows',
+        _ => false,
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
+  }
   // #119: an engine that can't be downloaded stops the run with a word on
   // why, not with the runner's usage text.
   test(

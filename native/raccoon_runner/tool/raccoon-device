@@ -2527,9 +2527,14 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
     if [ -n "$SIZE" ]; then
       w="${SIZE%%x*}"; rest="${SIZE#*x}"; h="${rest%%@*}"; r="${rest#*@}"
       [ "$r" = "$rest" ] && r=1
-      # The size is logical; the runner takes pixels.
-      size_args="$(awk -v w="$w" -v h="$h" -v r="$r" \
-        'BEGIN { printf "--width %d --height %d --dpr %s", w * r + 0.5, h * r + 0.5, r }')"
+      # The size is logical; the runner takes pixels. A whole ratio needs
+      # no awk; numbers with a leading zero would read as octal here.
+      if [[ "$w" =~ ^[1-9][0-9]{0,5}$ && "$h" =~ ^[1-9][0-9]{0,5}$ && "$r" =~ ^[1-9][0-9]?$ ]]; then
+        size_args="--width $((w * r)) --height $((h * r)) --dpr $r"
+      else
+        size_args="$(awk -v w="$w" -v h="$h" -v r="$r" \
+          'BEGIN { printf "--width %d --height %d --dpr %s", w * r + 0.5, h * r + 0.5, r }')"
+      fi
     fi
     # FFI plugins' libraries, opened by the Dart side by name: on Linux by
     # library name, on macOS as <name>.framework/<name>, on Windows as a DLL
