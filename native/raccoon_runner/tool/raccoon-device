@@ -69,9 +69,19 @@ DATA="$(native_path "${XDG_DATA_HOME:-$HOME/.local/share}")/raccoon/data"
 # on macOS and Windows. The SDK keeps one macOS engine directory for both
 # architectures. The system and machine are asked once: each uname is a
 # fork, ~3 ms, and an install asked eight times. Not OS: Windows exports
-# one of its own, which the build tools read.
-UNAME_S="$(uname -s)"
-UNAME_M="$(uname -m)"
+# one of its own, which the build tools read. bash knows both for the usual
+# hosts: HOSTTYPE is the machine it runs as, x86_64 under Rosetta as uname
+# says there too (#330). Anything else, Windows' MINGW64_NT-... included,
+# asks uname.
+case "$OSTYPE" in
+  darwin*) UNAME_S=Darwin ;;
+  linux*) UNAME_S=Linux ;;
+  *) UNAME_S="$(uname -s)" ;;
+esac
+case "$HOSTTYPE" in
+  x86_64|arm64|aarch64) UNAME_M="$HOSTTYPE" ;;
+  *) UNAME_M="$(uname -m)" ;;
+esac
 case "$UNAME_S" in
   MINGW*|MSYS*|CYGWIN*)
     SOCKETS="$(native_path "${TMP:-/tmp}")/raccoon"
