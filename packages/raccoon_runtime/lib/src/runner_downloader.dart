@@ -317,6 +317,7 @@ final class RunnerDownloader {
     final folder = Directory(staging);
     if (folder.existsSync()) folder.deleteSync(recursive: true);
     folder.createSync(recursive: true);
+    final executables = <String>{};
     for (final entry in archive) {
       if (!entry.isFile) continue;
       final target = p.normalize(p.join(staging, entry.name));
@@ -326,14 +327,14 @@ final class RunnerDownloader {
           File(target)
             ..parent.createSync(recursive: true)
             ..writeAsBytesSync(entry.content);
-      if (entry.mode & _ownerExecutable != 0) _makeExecutable(file);
+      if (entry.mode & _ownerExecutable != 0) executables.add(file.path);
     }
     final made = File(p.join(staging, binary));
     if (!made.existsSync()) {
       folder.deleteSync(recursive: true);
       throw DownloadFailed('No $binary in $source');
     }
-    _makeExecutable(made);
+    _makeExecutable(executables..add(made.path));
   }
 
   static const _ownerExecutable = 0x40;
@@ -369,9 +370,10 @@ final class RunnerDownloader {
     return null;
   }
 
-  static void _makeExecutable(File file) {
+  /// One `chmod` for all of [paths], not a process each.
+  static void _makeExecutable(Set<String> paths) {
     if (Platform.isWindows) return;
-    Process.runSync('chmod', ['755', file.path]);
+    Process.runSync('chmod', ['755', ...paths]);
   }
 
   Future<List<int>> _get(Uri uri, {String? accept}) async {

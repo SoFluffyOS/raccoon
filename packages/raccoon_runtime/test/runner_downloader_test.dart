@@ -231,6 +231,38 @@ void main() {
     expect(ping.stdout, 'ping\n');
   });
 
+  test(
+    'the binary comes out executable even when the archive says not',
+    () async {
+      server.addRelease(
+        'runner-v0.3.1',
+        platforms: ['linux-x64'],
+        archive: fakeRunnerArchive(
+          version: '0.3.1',
+          entries: {'raccoon_runner': 'not a script'},
+        ),
+      );
+      final release =
+          await downloader.find(pinned) ?? (throw StateError('no release'));
+
+      await downloader.install(release, prebuilt);
+
+      bool executable(String path) => File(path).statSync().mode & 0x40 != 0;
+      expect(executable(prebuilt.binary), isTrue);
+      expect(executable(prebuilt.deviceHelper), isTrue);
+      expect(
+        executable(p.join(prebuilt.directory, 'tool', 'engine_dir.sh')),
+        isTrue,
+      );
+      expect(executable(prebuilt.versionFile), isFalse);
+      expect(executable(p.join(prebuilt.directory, 'LICENSE')), isFalse);
+    },
+    skip: switch (Platform.isWindows) {
+      true => 'Windows files have no executable bit',
+      false => false,
+    },
+  );
+
   test('deletes a runner an earlier install moved aside', () async {
     server.addRelease(
       'runner-v0.3.1',
