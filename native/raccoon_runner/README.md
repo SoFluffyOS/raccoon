@@ -451,6 +451,9 @@ On macOS the ICU data is under `engine/darwin-x64` and the sockets live in
 `$TMPDIR/raccoon`, which is where `tool/raccoon-device` puts them; on
 Windows under `engine/windows-x64` and in `%TEMP%\raccoon`.
 
+Run `build/raccoon_runner` with no arguments for every option. The size is
+in pixels: `--width 1170 --height 2532 --dpr 3` is a 390 × 844 phone at 3x.
+
 Register the custom device and run any project on it:
 
 ```sh
