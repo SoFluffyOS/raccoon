@@ -48,7 +48,9 @@ class VulkanRenderer : public GpuRenderer {
   // Hands the drawn frame on: to the GPU frame callback when it is in a pool
   // buffer, else read back through |callback|.
   bool Present(VkImage image, const FrameCallback& callback);
-  // vkGetInstanceProcAddr, with the queue's calls behind the queue's lock.
+  // vkGetInstanceProcAddr, with the queue's calls behind the queue's lock,
+  // also when found through the vkGetInstanceProcAddr or
+  // vkGetDeviceProcAddr it hands out, as the engine finds them.
   void* ProcAddress(VkInstance instance, const char* name) const;
 
   VkInstance instance() const { return instance_; }
@@ -96,7 +98,13 @@ class VulkanRenderer : public GpuRenderer {
   // The ring for frames of this size, made when the size or count changes.
   // Holding mutex_.
   bool EnsurePool(size_t width, size_t height);
-  void DestroyPool();
+  // Lets the ring go, holding mutex_: at once when the engine draws into
+  // none of it, else once it has presented that frame (#126).
+  void DropPool();
+  // Destroys the ring now, holding mutex_.
+  void FreePool();
+  // vkDeviceWaitIdle, which needs the queue to itself.
+  void WaitIdle();
   // The D3D11 device on this Vulkan device's adapter, made once.
   bool EnsureD3d(std::string* error);
   // Records and runs one barrier on |image|, waiting for it.
@@ -107,6 +115,13 @@ class VulkanRenderer : public GpuRenderer {
                                                           const VkSubmitInfo* submits,
                                                           VkFence fence);
   static VKAPI_ATTR VkResult VKAPI_CALL LockedQueueWaitIdle(VkQueue queue);
+  static VKAPI_ATTR VkResult VKAPI_CALL LockedDeviceWaitIdle(VkDevice device);
+  static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL LockedGetDeviceProcAddr(VkDevice device,
+                                                                          const char* name);
+  static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL LockedGetInstanceProcAddr(VkInstance instance,
+                                                                            const char* name);
+  // The locked call for |name|, or null for one the lookups pass through.
+  static PFN_vkVoidFunction Intercepted(const char* name);
 
   bool EnsureSize(size_t width, size_t height);
   void DestroyImages();
@@ -170,9 +185,12 @@ class VulkanRenderer : public GpuRenderer {
   uint32_t generation_ = 0;
   size_t pool_width_ = 0;
   size_t pool_height_ = 0;
-  // The pool buffer the engine is drawing into, -1 when it draws to be read
-  // back.
+  // The pool buffer the engine is drawing into, from NextImage until Present
+  // is done with it; -1 when it draws to be read back.
   int drawing_ = -1;
+  // The ring was let go while the engine drew into it: it goes after that
+  // frame, which nobody is shown.
+  bool retire_pool_ = false;
   size_t last_drawn_ = 0;
   GpuFrameCallback gpu_frame_;
 

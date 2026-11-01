@@ -7377,6 +7377,78 @@ class Report extends StatelessWidget {
   );
 
   test(
+    'on Windows clients that take the ring and hang up mid-frame leave the runner drawing',
+    () async {
+      // The spin example animates, so the raster thread is mostly between
+      // taking a buffer and presenting it when a client leaves (#126).
+      final spinAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'spin',
+        'build',
+        'flutter_assets',
+      );
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: spinAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      int? exited;
+      unawaited(runner.exitCode.then((code) => exited = code));
+      try {
+        for (var i = 0; i < 100; i++) {
+          final client = await RunnerClient.connect(endpoint, gpuBuffers: true);
+          await client.hello.timeout(const Duration(seconds: 10));
+          if (runner.renderer != 'vulkan') {
+            printOnFailure('renderer ${runner.renderer}, no ring');
+            client.shutdown();
+            await client.close();
+            return;
+          }
+          final first = Completer<void>();
+          final frames = client.frames.listen((_) {
+            if (!first.isCompleted) first.complete();
+          });
+          await first.future.timeout(
+            const Duration(seconds: 10),
+            onTimeout: () => fail('client $i got no frame; exited $exited'),
+          );
+          await Future<void>.delayed(Duration(milliseconds: i % 7));
+          await frames.cancel();
+          await client.close();
+        }
+        // Freed under the engine, the ring crashed the runner within 40
+        // clients in four runs of five, or the engine stopped drawing.
+        final client = await RunnerClient.connect(endpoint);
+        await client.hello.timeout(const Duration(seconds: 10));
+        var count = 0;
+        final frames = client.frames.listen((_) => count++);
+        await Future<void>.delayed(const Duration(seconds: 1));
+        await frames.cancel();
+        expect(count, greaterThan(20));
+        client.shutdown();
+        await client.close();
+        await _expectExit(runner);
+      } finally {
+        if (exited == null) runner.kill();
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        !Platform.isWindows
+            ? 'the Vulkan ring is Windows'
+            : ready
+            ? false
+            : 'build the runner first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'a client that imports GPU buffers gets frames as buffer indices and their descriptors on the GPU socket',
     () async {
       // The spin example animates, so frames keep coming.

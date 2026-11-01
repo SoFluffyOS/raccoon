@@ -11,11 +11,15 @@ namespace raccoon {
 
 namespace {
 
-// The queue is one, used by the engine on its threads and by the readback
-// on the raster thread; the embedder asks for its submits to be locked.
+// The queue is one, used by the engine on its raster and IO threads and by
+// the renderer on the raster and main threads; the embedder asks for its
+// submits to be locked. vkDeviceWaitIdle needs every queue to itself too.
 std::mutex g_queue_lock;
 PFN_vkQueueSubmit g_queue_submit = nullptr;
 PFN_vkQueueWaitIdle g_queue_wait_idle = nullptr;
+PFN_vkDeviceWaitIdle g_device_wait_idle = nullptr;
+PFN_vkGetDeviceProcAddr g_get_device_proc = nullptr;
+PFN_vkGetInstanceProcAddr g_get_instance_proc = nullptr;
 
 }  // namespace
 
@@ -29,6 +33,50 @@ VKAPI_ATTR VkResult VKAPI_CALL VulkanRenderer::LockedQueueSubmit(VkQueue queue, 
 VKAPI_ATTR VkResult VKAPI_CALL VulkanRenderer::LockedQueueWaitIdle(VkQueue queue) {
   std::lock_guard<std::mutex> lock(g_queue_lock);
   return g_queue_wait_idle(queue);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL VulkanRenderer::LockedDeviceWaitIdle(VkDevice device) {
+  std::lock_guard<std::mutex> lock(g_queue_lock);
+  return g_device_wait_idle(device);
+}
+
+// The engine asks the embedder for vkGetInstanceProcAddr alone and finds
+// every other call through it, vkGetDeviceProcAddr and the queue's among
+// them: each lookup hands out the locked calls, and lookups that do too.
+PFN_vkVoidFunction VulkanRenderer::Intercepted(const char* name) {
+  if (std::strcmp(name, "vkQueueSubmit") == 0) {
+    return reinterpret_cast<PFN_vkVoidFunction>(&LockedQueueSubmit);
+  }
+  if (std::strcmp(name, "vkQueueWaitIdle") == 0) {
+    return reinterpret_cast<PFN_vkVoidFunction>(&LockedQueueWaitIdle);
+  }
+  if (std::strcmp(name, "vkDeviceWaitIdle") == 0) {
+    return reinterpret_cast<PFN_vkVoidFunction>(&LockedDeviceWaitIdle);
+  }
+  if (std::strcmp(name, "vkGetDeviceProcAddr") == 0) {
+    return reinterpret_cast<PFN_vkVoidFunction>(&LockedGetDeviceProcAddr);
+  }
+  if (std::strcmp(name, "vkGetInstanceProcAddr") == 0) {
+    return reinterpret_cast<PFN_vkVoidFunction>(&LockedGetInstanceProcAddr);
+  }
+  return nullptr;
+}
+
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL VulkanRenderer::LockedGetDeviceProcAddr(VkDevice device,
+                                                                                const char* name) {
+  if (PFN_vkVoidFunction locked = Intercepted(name)) return locked;
+  return g_get_device_proc(device, name);
+}
+
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+VulkanRenderer::LockedGetInstanceProcAddr(VkInstance instance, const char* name) {
+  if (PFN_vkVoidFunction locked = Intercepted(name)) return locked;
+  return g_get_instance_proc(instance, name);
+}
+
+void VulkanRenderer::WaitIdle() {
+  std::lock_guard<std::mutex> lock(g_queue_lock);
+  vk_.DeviceWaitIdle(device_);
 }
 
 VulkanRenderer::~VulkanRenderer() { Shutdown(); }
@@ -200,6 +248,9 @@ bool VulkanRenderer::Init(std::string* error) {
 #undef RACCOON_VK
   g_queue_submit = vk_.QueueSubmit;
   g_queue_wait_idle = vk_.QueueWaitIdle;
+  g_device_wait_idle = vk_.DeviceWaitIdle;
+  g_get_device_proc = vk_.GetDeviceProcAddr;
+  g_get_instance_proc = get_instance_proc_;
   auto get_queue = reinterpret_cast<PFN_vkGetDeviceQueue>(device_call("vkGetDeviceQueue"));
   get_queue(device_, queue_family_, 0, &queue_);
 
@@ -225,11 +276,13 @@ bool VulkanRenderer::Init(std::string* error) {
 
 void VulkanRenderer::Shutdown() {
   if (device_ != VK_NULL_HANDLE) {
-    vk_.DeviceWaitIdle(device_);
+    WaitIdle();
     DestroyImages();
     {
+      // The engine is gone: nothing draws into the ring any more.
       std::lock_guard<std::mutex> lock(mutex_);
-      DestroyPool();
+      drawing_ = -1;
+      FreePool();
     }
     if (d3d_ != nullptr) {
       d3d_->Release();
@@ -244,15 +297,15 @@ void VulkanRenderer::Shutdown() {
     vk_.DestroyInstance(instance_, nullptr);
     instance_ = VK_NULL_HANDLE;
   }
+  if (library_ != nullptr) {
+    FreeLibrary(static_cast<HMODULE>(library_));
+    library_ = nullptr;
+    get_instance_proc_ = nullptr;
+  }
 }
 
 void* VulkanRenderer::ProcAddress(VkInstance instance, const char* name) const {
-  if (std::strcmp(name, "vkQueueSubmit") == 0) {
-    return reinterpret_cast<void*>(&LockedQueueSubmit);
-  }
-  if (std::strcmp(name, "vkQueueWaitIdle") == 0) {
-    return reinterpret_cast<void*>(&LockedQueueWaitIdle);
-  }
+  if (PFN_vkVoidFunction locked = Intercepted(name)) return reinterpret_cast<void*>(locked);
   return reinterpret_cast<void*>(get_instance_proc_(instance, name));
 }
 
@@ -271,11 +324,11 @@ void VulkanRenderer::DestroyImages() {
     vk_.FreeMemory(device_, image.memory, nullptr);
   }
   images_.clear();
-  if (readback_memory_ != VK_NULL_HANDLE) {
-    vk_.UnmapMemory(device_, readback_memory_);
-    vk_.DestroyBuffer(device_, readback_, nullptr);
-    vk_.FreeMemory(device_, readback_memory_, nullptr);
-  }
+  // Each part as far as a failed resize made it: a buffer without memory,
+  // memory never mapped.
+  if (readback_pixels_ != nullptr) vk_.UnmapMemory(device_, readback_memory_);
+  if (readback_ != VK_NULL_HANDLE) vk_.DestroyBuffer(device_, readback_, nullptr);
+  if (readback_memory_ != VK_NULL_HANDLE) vk_.FreeMemory(device_, readback_memory_, nullptr);
   readback_ = VK_NULL_HANDLE;
   readback_memory_ = VK_NULL_HANDLE;
   readback_pixels_ = nullptr;
@@ -284,7 +337,7 @@ void VulkanRenderer::DestroyImages() {
 
 bool VulkanRenderer::EnsureSize(size_t width, size_t height) {
   if (width == width_ && height == height_ && !images_.empty()) return true;
-  vk_.DeviceWaitIdle(device_);
+  WaitIdle();
   DestroyImages();
   for (size_t i = 0; i < kImages; ++i) {
     // The usage the engine wraps the image with: drawn to, copied from and
@@ -311,6 +364,7 @@ bool VulkanRenderer::EnsureSize(size_t width, size_t height) {
     if (type < 0 || vk_.AllocateMemory(device_, &allocate, nullptr, &image.memory) != VK_SUCCESS ||
         vk_.BindImageMemory(device_, image.image, image.memory, 0) != VK_SUCCESS) {
       vk_.DestroyImage(device_, image.image, nullptr);
+      if (image.memory != VK_NULL_HANDLE) vk_.FreeMemory(device_, image.memory, nullptr);
       return false;
     }
     images_.push_back(image);
@@ -346,7 +400,10 @@ bool VulkanRenderer::EnsureSize(size_t width, size_t height) {
 VkImage VulkanRenderer::NextImage(size_t width, size_t height) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    // A frame begun and never presented leaves its buffer here; a ring let
+    // go during it goes now.
     drawing_ = -1;
+    if (retire_pool_) FreePool();
     if (pool_count_ > 0 && EnsurePool(width, height)) {
       // Round the ring from the buffer after the last one drawn, so one
       // just given back is drawn into last.
@@ -379,14 +436,27 @@ bool VulkanRenderer::Present(VkImage image, const FrameCallback& callback) {
       generation = generation_;
       width = pool_width_;
       height = pool_height_;
+    } else {
+      drawing_ = -1;
     }
-    drawing_ = -1;
   }
   if (index >= 0) {
     // Handed over to whoever opens the texture: out of the engine's layout
-    // and its queue family, for D3D11 to read.
-    if (!Transition(image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
-                    VK_QUEUE_FAMILY_EXTERNAL)) {
+    // and its queue family, for D3D11 to read. The buffer stays the one
+    // being drawn until then, so the ring isn't destroyed under it.
+    const bool handed = Transition(image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                   VK_IMAGE_LAYOUT_GENERAL, VK_QUEUE_FAMILY_EXTERNAL);
+    bool retired = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      drawing_ = -1;
+      retired = retire_pool_;
+      if (retired) FreePool();
+    }
+    // The client it was for has gone, or the ring changed: nobody is shown
+    // this frame.
+    if (retired) return true;
+    if (!handed) {
       Release(generation, index, -1);
       return false;
     }
@@ -509,7 +579,7 @@ bool VulkanRenderer::EnablePool(size_t count, std::string* error) {
   }
   if (!EnsureD3d(error)) return false;
   std::lock_guard<std::mutex> lock(mutex_);
-  if (pool_count_ != count) DestroyPool();
+  if (pool_count_ != count) DropPool();
   pool_count_ = count;
   return true;
 }
@@ -517,12 +587,24 @@ bool VulkanRenderer::EnablePool(size_t count, std::string* error) {
 void VulkanRenderer::DisablePool() {
   std::lock_guard<std::mutex> lock(mutex_);
   pool_count_ = 0;
-  DestroyPool();
+  DropPool();
 }
 
-void VulkanRenderer::DestroyPool() {
+void VulkanRenderer::DropPool() {
   if (pool_.empty()) return;
-  vk_.DeviceWaitIdle(device_);
+  // Called on the main thread when a client leaves: the raster thread may
+  // be between NextImage and Present with one of these images.
+  if (drawing_ >= 0) {
+    retire_pool_ = true;
+    return;
+  }
+  FreePool();
+}
+
+void VulkanRenderer::FreePool() {
+  retire_pool_ = false;
+  if (pool_.empty()) return;
+  WaitIdle();
   for (PoolBuffer& buffer : pool_) {
     vk_.DestroyImage(device_, buffer.image.image, nullptr);
     vk_.FreeMemory(device_, buffer.image.memory, nullptr);
@@ -531,12 +613,14 @@ void VulkanRenderer::DestroyPool() {
   }
   pool_.clear();
   pool_width_ = pool_height_ = 0;
-  if (drawing_ >= 0) drawing_ = -1;
 }
 
 bool VulkanRenderer::EnsurePool(size_t width, size_t height) {
-  if (!pool_.empty() && width == pool_width_ && height == pool_height_) return true;
-  DestroyPool();
+  if (!pool_.empty() && width == pool_width_ && height == pool_height_ &&
+      pool_.size() == pool_count_) {
+    return true;
+  }
+  FreePool();
   for (size_t i = 0; i < pool_count_; ++i) {
     PoolBuffer buffer;
     D3D11_TEXTURE2D_DESC description{};
