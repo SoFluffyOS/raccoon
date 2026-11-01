@@ -343,9 +343,16 @@ final class RuntimeStore {
         continue;
       }
       if (!entry.isFile) continue;
+      // Each file against its CRC, by hand: no archive version checks a
+      // stored entry's, and from 4.6 a damaged one decodes without a word
+      // unless asked (#332). ~1 ms a megabyte, once an engine.
+      final content = entry.content;
+      if (entry.crc32 case final crc? when getCrc32(content) != crc) {
+        throw ArchiveException('${entry.name} is damaged (its CRC is wrong)');
+      }
       File(target)
         ..parent.createSync(recursive: true)
-        ..writeAsBytesSync(entry.content);
+        ..writeAsBytesSync(content);
     }
   }
 

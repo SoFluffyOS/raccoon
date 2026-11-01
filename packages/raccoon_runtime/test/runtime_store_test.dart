@@ -438,6 +438,29 @@ void main() {
     expect(store.ensure('rev2'), throwsStateError);
   });
 
+  // #332: from archive 4.6 a damaged zip decodes without a word unless
+  // asked; an entry that isn't what its CRC says fails the install.
+  test('ensure rejects an archive whose entry is damaged', () async {
+    // Stored, not deflated, so its bytes can be found in the zip.
+    final zip = ZipEncoder().encodeBytes(
+      Archive()..addFile(
+        ArchiveFile.bytes('libflutter_engine.so', [0x7f, 0x45, 0x4c, 0x46])
+          ..compression = CompressionType.none,
+      ),
+    );
+    final at = _indexOf(zip, [0x7f, 0x45, 0x4c, 0x46]);
+    expect(at, isNonNegative);
+    zip[at + 3] ^= 0xff;
+    final store = RuntimeStore(
+      cacheDirectory: p.join(temp.path, 'engines'),
+      platform: 'linux-x64',
+      download: (_) async => zip,
+    );
+
+    await expectLater(store.ensure('rev3'), throwsA(isA<ArchiveException>()));
+    expect(store.installed('rev3'), isNull);
+  });
+
   // #134: a download that stalled held ensure() for good.
   test('a download that stalls fails', () async {
     final stalled = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
@@ -475,4 +498,15 @@ void main() {
       'linux-x64/linux-x64-embedder.zip',
     );
   });
+}
+
+int _indexOf(List<int> bytes, List<int> part) {
+  for (var i = 0; i + part.length <= bytes.length; i++) {
+    var j = 0;
+    while (j < part.length && bytes[i + j] == part[j]) {
+      j++;
+    }
+    if (j == part.length) return i;
+  }
+  return -1;
 }

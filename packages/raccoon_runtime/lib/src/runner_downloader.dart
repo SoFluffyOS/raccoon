@@ -302,13 +302,14 @@ final class RunnerDownloader {
   ) {
     final Archive archive;
     try {
-      final data = const GZipDecoder().decodeBytes(bytes);
+      // Damage throws only when asked, from archive 4.6 on (#332).
+      final data = const GZipDecoder().decodeBytes(bytes, verify: true);
       // A cut archive decodes into fewer files without a word: what came
       // out has to be what the gzip's trailer says went in.
       if (!_wholeGzip(bytes, data)) {
         throw DownloadFailed('$source arrived cut short');
       }
-      archive = TarDecoder().decodeBytes(data);
+      archive = TarDecoder().decodeBytes(data, verify: true);
     } on DownloadFailed {
       rethrow;
     } on Object catch (error) {
