@@ -7,23 +7,24 @@
 # SDK's engine stamp when it can, which is much faster than asking the tool.
 set -euo pipefail
 
+# Sets SDK, in this shell: every launch asks, and a $(...) is a fork.
 sdk_root() {
   # The Flutter tool exports FLUTTER_ROOT to the commands it runs, such as the
   # custom device helper; IDEs often start flutter without it on PATH.
   if [ -n "${FLUTTER_ROOT:-}" ] && [ -x "$FLUTTER_ROOT/bin/flutter" ]; then
-    echo "$FLUTTER_ROOT"
+    SDK="$FLUTTER_ROOT"
     return 0
   fi
   local flutter
   flutter="$(command -v flutter)" || return 1
   flutter="$(readlink -f "$flutter")"
-  echo "$(cd "$(dirname "$flutter")/.." && pwd)"
+  SDK="$(cd "$(dirname "$flutter")/.." && pwd)"
 }
 
 REV=""
 # The stamp, else the revision the SDK pins; either may end in CRLF on
 # Windows.
-if SDK="$(sdk_root)"; then
+if sdk_root; then
   for stamp in "$SDK/bin/cache/engine.stamp" "$SDK/bin/internal/engine.version"; do
     [ -f "$stamp" ] || continue
     # Read in the shell, CR and all spaces dropped: a run asks this every
