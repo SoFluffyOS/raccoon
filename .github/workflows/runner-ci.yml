@@ -25,6 +25,8 @@ jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    # Jobs take 6-17 min; GitHub's default would let a hung one run 6 h (#333).
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -69,8 +71,10 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-      # cache: true keeps the SDK and the pub cache between runs.
+      # cache: true keeps the SDK and the pub cache between runs. Up to
+      # ~3 min; once it sat 37 (#333).
       - uses: subosito/flutter-action@v2
+        timeout-minutes: 15
         with:
           channel: stable
           flutter-version: ${{ env.FLUTTER_VERSION }}
