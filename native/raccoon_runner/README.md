@@ -366,7 +366,10 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   `prebuild`, which CI uses to pack the common plugins.
   `--instance KEY` names everything `<app>@KEY`, which is how the
   `raccoon-2`, `raccoon-phone`, `raccoon-tablet` and `raccoon-desktop`
-  devices keep their runs of the same project apart; `--size 820x1180@2`
+  devices keep their runs of the same project apart. Without one, a second
+  run of an app takes its socket and the first runner stops (`🦝 a later
+  run took <socket>; stopping`), ending the run before it as an IDE's
+  re-run does; `--size 820x1180@2`
   starts the runner at a device's logical size and pixel ratio (one that
   isn't a size is said and left out), and without it the run starts at the
   size a host's board last gave the app

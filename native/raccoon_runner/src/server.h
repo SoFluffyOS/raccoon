@@ -47,6 +47,10 @@ class RunnerServer {
   RunnerServer& operator=(const RunnerServer&) = delete;
 
   bool Listen(const std::string& socket_path, std::string* error);
+  // Whether another socket file is at the path this server listens on: a
+  // later run of the same app bound it, and nobody can reach this one
+  // (#324). A path with nothing at it is not taken.
+  bool PathTaken() const;
   // Takes |fd|, a connection accepted elsewhere, as this server's client.
   void Adopt(int fd);
   // Closes |fd|, a connection no server took.
@@ -102,6 +106,19 @@ class RunnerServer {
   EventLoop& loop_;
   Handler handler_;
   std::string socket_path_;
+  // The socket file this server bound, as its file system names it (device
+  // and inode, or volume and file index), to tell it from another one at
+  // the same path; zeros when it couldn't be read.
+  struct FileId {
+    uint64_t volume = 0;
+    uint64_t file = 0;
+    bool operator==(const FileId& other) const {
+      return volume == other.volume && file == other.file;
+    }
+  };
+  static bool FileIdOf(const std::string& path, FileId* id);
+  FileId listen_id_;
+  bool has_listen_id_ = false;
   int listen_fd_ = -1;
   int client_fd_ = -1;
   uint32_t client_pid_ = 0;

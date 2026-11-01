@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/uio.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -199,8 +200,42 @@ RunnerServer::~RunnerServer() {
   if (listen_fd_ >= 0) {
     loop_.Unwatch(listen_fd_);
     CloseFd(listen_fd_);
-    RemoveSocketFile(socket_path_);
+    // Only the file this server bound: one a later run bound at the path
+    // since is that run's, which would lose it (#324).
+    if (!PathTaken()) RemoveSocketFile(socket_path_);
   }
+}
+
+#if defined(_WIN32)
+bool RunnerServer::FileIdOf(const std::string& path, FileId* id) {
+  // An AF_UNIX socket's file is a reparse point: opened as itself, for no
+  // access, which a bound socket allows.
+  HANDLE file = CreateFileA(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                            nullptr, OPEN_EXISTING,
+                            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+  if (file == INVALID_HANDLE_VALUE) return false;
+  BY_HANDLE_FILE_INFORMATION information{};
+  const bool read = GetFileInformationByHandle(file, &information) != 0;
+  CloseHandle(file);
+  if (!read) return false;
+  id->volume = information.dwVolumeSerialNumber;
+  id->file = (static_cast<uint64_t>(information.nFileIndexHigh) << 32) | information.nFileIndexLow;
+  return true;
+}
+#else
+bool RunnerServer::FileIdOf(const std::string& path, FileId* id) {
+  struct stat status {};
+  if (lstat(path.c_str(), &status) != 0) return false;
+  id->volume = static_cast<uint64_t>(status.st_dev);
+  id->file = static_cast<uint64_t>(status.st_ino);
+  return true;
+}
+#endif
+
+bool RunnerServer::PathTaken() const {
+  if (!has_listen_id_) return false;
+  FileId now;
+  return FileIdOf(socket_path_, &now) && !(now == listen_id_);
 }
 
 bool RunnerServer::Listen(const std::string& socket_path, std::string* error) {
@@ -229,6 +264,7 @@ bool RunnerServer::Listen(const std::string& socket_path, std::string* error) {
     return false;
   }
   socket_path_ = socket_path;
+  has_listen_id_ = FileIdOf(socket_path_, &listen_id_);
   loop_.Watch(listen_fd_, POLLIN, [this](short) { OnListenReadable(); });
   return true;
 }

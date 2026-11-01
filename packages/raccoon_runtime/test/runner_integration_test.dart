@@ -4304,6 +4304,72 @@ class Report extends StatelessWidget {
   );
 
   test(
+    'a later run of the app at the same socket stops the one before it',
+    () async {
+      // #324: the newer run wins, as an IDE's re-run does. The older runner
+      // goes cleanly, and leaves the newer one's socket file where it is.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final socket = p.join(temp.path, 'runner.sock');
+      Future<(Process, List<String>)> serve() async {
+        final process = await Process.start(binary ?? '', [
+          'serve',
+          '--engine-dir',
+          engineDir ?? '',
+          '--assets',
+          assets,
+          '--icu',
+          icu ?? '',
+          '--socket',
+          socket,
+        ]);
+        final errors = <String>[];
+        process.stderr
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .listen(errors.add);
+        final listening = Completer<void>();
+        process.stdout
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .listen((line) {
+              if (line.contains('listening on') && !listening.isCompleted) {
+                listening.complete();
+              }
+            });
+        await Future.any([
+          listening.future,
+          process.exitCode.then((code) => fail('exited $code: $errors')),
+        ]).timeout(const Duration(seconds: 15));
+        return (process, errors);
+      }
+
+      final (older, olderErrors) = await serve();
+      Process? newer;
+      try {
+        // Before, both said they listened and the older ran on, unreachable.
+        final (started, _) = await serve();
+        newer = started;
+        final code = await older.exitCode.timeout(const Duration(seconds: 5));
+        expect(code, 0, reason: olderErrors.join('\n'));
+        expect(olderErrors.join('\n'), contains('a later run took'));
+        // The newer one is the one a client reaches.
+        expect(File(socket).existsSync() || Link(socket).existsSync(), isTrue);
+        final client = await RunnerClient.connect(UnixSocketEndpoint(socket));
+        await client.hello.timeout(const Duration(seconds: 10));
+        client.shutdown();
+        await client.close();
+        expect(await newer.exitCode.timeout(const Duration(seconds: 10)), 0);
+      } finally {
+        older.kill();
+        newer?.kill();
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
+  test(
     'a claim from a host gone as it is let in leaves the runner whole for the '
     'next',
     () async {

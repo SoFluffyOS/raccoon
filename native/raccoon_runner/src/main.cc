@@ -1465,6 +1465,7 @@ int Serve(const Options& options) {
   // the clients. The loop below takes one between waits; a plugin's modal
   // dialog takes them while its own loop holds ours (MessagePump on
   // Windows, RunLoopPump on macOS, GlibPump on Linux).
+  auto next_path_check = std::chrono::steady_clock::now();
   auto Turn = [&]() {
 #if RACCOON_HAS_METAL
     {
@@ -1495,6 +1496,17 @@ int Serve(const Options& options) {
     if (const int gone = GonePid(); gone != 0) {
       std::fprintf(stderr, "🦝 parent %d is gone; stopping\n", gone);
       stop = true;
+    }
+    // A later run of the app bound its socket at this one's path: nobody
+    // reaches this one any more, so it goes, as an IDE's re-run ends the
+    // run before it (#324). Looked at twice a second at most.
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= next_path_check) {
+      next_path_check = now + std::chrono::milliseconds(500);
+      if (first.server->PathTaken()) {
+        std::fprintf(stderr, "🦝 a later run took %s; stopping\n", options.socket.c_str());
+        stop = true;
+      }
     }
   };
   // How long the loop may sleep: until the next platform task, frame or
