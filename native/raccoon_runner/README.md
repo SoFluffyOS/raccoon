@@ -396,6 +396,10 @@ cmake -S . -B build -G Ninja -DRACCOON_ENGINE_DIR="$(tool/engine_dir.sh)"
 ninja -C build                       # first build also compiles protobuf-lite
 ```
 
+After a Flutter upgrade, run the `cmake` line again: the engine revision,
+and its folder, changed. After an Xcode update, start a new build folder:
+CMake keeps the path of the SDK it first found, which the update removes.
+
 Without `-DCMAKE_BUILD_TYPE` the build is RelWithDebInfo: optimised, with
 symbols. Unoptimised, the pixel path costs about four times the CPU (#159).
 
