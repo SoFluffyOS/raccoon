@@ -80,20 +80,17 @@ void main() {
   });
 
   test('add says an option given last needs its value', () async {
-    for (final option in ['--size', '--label', '--helper']) {
-      final result = await _run(
-        ['add', 'my', option],
-        directory: project.path,
-        config: config,
-      );
-      expect(result.exitCode, 2, reason: option);
-      expect('${result.stderr}', contains('$option needs a value'));
+    // At once, each compiling the command anew: one after another took
+    // past 30 s on CI's Intel Mac (#339).
+    const options = ['--size', '--label', '--helper'];
+    final results = await Future.wait([
+      for (final option in [...options, '--bogus'])
+        _run(['add', 'my', option], directory: project.path, config: config),
+    ]);
+    for (final (i, option) in options.indexed) {
+      expect(results[i].exitCode, 2, reason: option);
+      expect('${results[i].stderr}', contains('$option needs a value'));
     }
-    final unknown = await _run(
-      ['add', 'my', '--bogus'],
-      directory: project.path,
-      config: config,
-    );
-    expect('${unknown.stderr}', contains('unknown option --bogus'));
-  });
+    expect('${results.last.stderr}', contains('unknown option --bogus'));
+  }, timeout: const Timeout(Duration(minutes: 2)));
 }
