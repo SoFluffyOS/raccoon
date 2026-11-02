@@ -680,10 +680,10 @@ void main() {
       File(
         p.join(app.path, 'pubspec.yaml'),
       ).writeAsStringSync('name: app\nversion: 3.1.4\n');
-      final install = await Process.run(
-        p.join(runnerDir, 'tool', 'raccoon-device'),
+      final install = await _runHelper(
+        runnerDir,
         ['install', bundle.path, 'app'],
-        environment: {
+        {
           'RACCOON_RUNNER': binary!,
           if (sdk != null) 'FLUTTER_ROOT': sdk,
           'XDG_DATA_HOME': p.join(temp.path, 'data'),
@@ -698,10 +698,9 @@ void main() {
         '3.1.4',
       );
     },
-    skip: switch ((binary != null, Platform.isWindows)) {
-      (false, _) => 'build the runner first',
-      (_, true) => 'the helper runs in Git Bash on Windows',
-      _ => false,
+    skip: switch (binary != null) {
+      false => 'build the runner first',
+      true => false,
     },
   );
 
@@ -716,10 +715,10 @@ void main() {
       File(p.join(app.path, 'pubspec.yaml')).writeAsStringSync(
         'name: app\n  version: 9.9.9\nversion: 2.4.1+17 # release\n',
       );
-      final install = await Process.run(
-        p.join(runnerDir, 'tool', 'raccoon-device'),
+      final install = await _runHelper(
+        runnerDir,
         ['install', bundle.path, 'app'],
-        environment: {
+        {
           'RACCOON_RUNNER': binary!,
           if (sdk != null) 'FLUTTER_ROOT': sdk,
           'XDG_DATA_HOME': p.join(temp.path, 'data'),
@@ -734,10 +733,9 @@ void main() {
         '2.4.1+17',
       );
     },
-    skip: switch ((binary != null, Platform.isWindows)) {
-      (false, _) => 'build the runner first',
-      (_, true) => 'the helper runs in Git Bash on Windows',
-      _ => false,
+    skip: switch (binary != null) {
+      false => 'build the runner first',
+      true => false,
     },
   );
 
@@ -8440,4 +8438,24 @@ String? _sdkRoot(Map<String, String> environment) {
     return root;
   }
   return RuntimeStore.sdkRootOnPath();
+}
+
+/// Runs the device helper with [arguments]: on Windows through Git Bash, as
+/// Flutter's custom device entry does, its paths with forward slashes.
+Future<ProcessResult> _runHelper(
+  String runnerDir,
+  List<String> arguments,
+  Map<String, String> environment,
+) {
+  String posix(String value) => value.replaceAll(r'\', '/');
+  final helper = p.join(runnerDir, 'tool', 'raccoon-device');
+  final launcher = CustomDeviceConfig.hostLauncher;
+  return Process.run(
+    launcher.firstOrNull ?? helper,
+    [if (launcher.isNotEmpty) posix(helper), ...arguments.map(posix)],
+    environment: {
+      for (final MapEntry(:key, :value) in environment.entries)
+        key: posix(value),
+    },
+  );
 }
