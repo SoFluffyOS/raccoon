@@ -135,7 +135,13 @@ Future<void> main(List<String> arguments) async {
     }
     final cmake = File('${package.root}\\windows\\CMakeLists.txt');
     if (!cmake.existsSync()) continue;
-    final cmakeText = cmake.readAsStringSync();
+    // Read for its add_library and the targets it links, all ASCII: a file
+    // saved in a Windows code page (a ü in a comment) is read all the same,
+    // where a strict decode would end the install.
+    final cmakeText = utf8.decode(
+      cmake.readAsBytesSync(),
+      allowMalformed: true,
+    );
     wanted.add(
       _Plugin(
         name: package.name,
@@ -401,6 +407,11 @@ Future<void> main(List<String> arguments) async {
           }
         }
       }
+      // Into the app's libraries, here too: a copy that fails (a full disk,
+      // a DLL held open) fails these plugins, not the install (#141).
+      for (final dll in dlls) {
+        dll.copySync('${lib.path}\\${_basename(dll.path)}');
+      }
     } on Exception catch (error) {
       whyNot = '$error';
     }
@@ -410,9 +421,6 @@ Future<void> main(List<String> arguments) async {
         status.add({'name': name, 'state': 'failed', 'detail': whyNot});
       }
     } else if (dlls.isNotEmpty) {
-      for (final dll in dlls) {
-        dll.copySync('${lib.path}\\${_basename(dll.path)}');
-      }
       for (final plugin in statics) {
         final symbol = plugin.symbol;
         if (symbol == null) continue;

@@ -2213,6 +2213,17 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
           ..createSync(recursive: true)
           ..writeAsStringSync('int shared(void) { return 1; }\n');
         expect(await build(), contains('1 built: raccoon_echo'), reason: log());
+        // A CMakeLists.txt saved in a Windows code page, an author's name
+        // with a ü in a comment: not UTF-8, and no reason to fail the
+        // install.
+        final cmake = File(p.join(root, 'windows', 'CMakeLists.txt'));
+        cmake.writeAsBytesSync([
+          ...'# M'.codeUnits,
+          0xFC,
+          ...'ller\n'.codeUnits,
+          ...cmake.readAsBytesSync(),
+        ]);
+        expect(await build(), contains('1 built: raccoon_echo'), reason: log());
       } finally {
         temp.deleteSync(recursive: true);
       }
