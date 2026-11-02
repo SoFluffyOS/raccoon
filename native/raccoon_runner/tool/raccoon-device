@@ -2407,12 +2407,28 @@ PY
     [ -n "$inputs" ] && echo "$inputs" > "$stamp"
   fi
   python3 - "$manifest" "$built" "$app" "$started" "$unchanged" <<'PY'
-import json, os, shutil, subprocess, sys, time
+import json, os, shutil, sys, time
 manifest_path, built, app, started, unchanged = sys.argv[1:6]
 
 def clone(source, target):
     # A copy-on-write clone where the file system has one, so an install
-    # writes no bytes (#115); a plain copy otherwise.
+    # writes no bytes (#115); a plain copy otherwise. clonefile(2) first on
+    # macOS, a folder in one call, as the plugin pass does (#316, #338).
+    if sys.platform == 'darwin':
+        try:
+            import ctypes, errno
+            clonefile = ctypes.CDLL(None, use_errno=True).clonefile
+            clonefile.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint32)
+            clonefile.restype = ctypes.c_int
+            # CLONE_NOFOLLOW: a link is cloned as a link, as cp -R copies it.
+            if clonefile(os.fsencode(source), os.fsencode(target), 1) == 0:
+                return
+            if ctypes.get_errno() != errno.EEXIST and os.path.lexists(target):
+                # Whatever a failed clone made.
+                shutil.rmtree(target, ignore_errors=True)
+        except (ImportError, OSError, AttributeError):
+            pass
+    import subprocess
     flag = {'darwin': '-c', 'linux': '--reflink=auto'}.get(sys.platform)
     if flag and subprocess.run(['cp', flag, '-R', source, target],
                                stderr=subprocess.DEVNULL).returncode == 0:
