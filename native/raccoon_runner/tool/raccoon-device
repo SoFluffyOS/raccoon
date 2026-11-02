@@ -2388,7 +2388,9 @@ PY
   log="$app/native_assets.log"
   mkdir -p "$out"
   local status=0 started unchanged="" stamp="$out/raccoon_inputs"
-  started="$(python3 -c 'import time; print(time.time())')"
+  # perl, as the run log's timestamps: a Python start only to read the
+  # clock cost ~25 ms (#336).
+  started="$(perl -MTime::HiRes=time -e 'printf "%.6f", time')"
   if [ -n "$inputs" ] && [ -f "$manifest" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$inputs" ]; then
     unchanged=1
   else

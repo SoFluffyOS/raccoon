@@ -1021,6 +1021,13 @@ void main() {
         final built = await install();
         expect(built, contains('1 for this host'));
         expect(built, isNot(contains('unchanged')));
+        // The time it took, from a clock read in the shell (#336): a build
+        // that runs flutter assemble takes some, and not hours.
+        final took = double.parse(
+          RegExp(r'native assets ready in (\d+\.\d) s').firstMatch(built)?[1] ??
+              '-1',
+        );
+        expect(took, inInclusiveRange(0.1, 600), reason: built);
 
         final again = await install();
         expect(again, contains('1 for this host, unchanged'));
