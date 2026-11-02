@@ -744,7 +744,7 @@ void main() {
   // #342: an app with no version got a bundle with none; Flutter's macOS
   // build gives it 1.0.0 (1), which package_info_plus then reads.
   test(
-    'an app with no version runs as 1.0.0 (1) in its bundle',
+    'an app\'s bundle gives 1.0.0 (1) for no version, and its own name',
     () async {
       final temp = Directory.systemTemp.createTempSync('raccoon_no_version');
       addTearDown(() => temp.deleteSync(recursive: true));
@@ -797,6 +797,47 @@ void main() {
         contains('<key>CFBundleShortVersionString</key><string>1.0.0</string>'),
       );
       expect(plist, contains('<key>CFBundleVersion</key><string>1</string>'));
+      expect(plist, contains('<key>CFBundleName</key><string>app</string>'));
+
+      // #343: an instance names itself as the app does; its identifier,
+      // and so its data, stays its own.
+      final instanced = await Process.run(
+        helper,
+        ['install', '--instance', 'phone', bundle.path, 'app'],
+        environment: {...environment, 'RACCOON_RUNNER': binary},
+      );
+      expect(instanced.exitCode, 0, reason: '${instanced.stderr}');
+      Directory(
+        p.join(data, 'raccoon', 'apps', 'app@phone', 'native_assets'),
+      ).createSync();
+      final instanceRun = await Process.run(
+        helper,
+        ['run', '--instance', 'phone', 'app'],
+        environment: {...environment, 'RACCOON_RUNNER': stub.path},
+      );
+      expect(instanceRun.exitCode, 0, reason: '${instanceRun.stderr}');
+      final instancePlist =
+          File(
+            p.join(
+              data,
+              'raccoon',
+              'apps',
+              'app@phone',
+              'app@phone.app',
+              'Contents',
+              'Info.plist',
+            ),
+          ).readAsStringSync();
+      expect(
+        instancePlist,
+        contains('<key>CFBundleName</key><string>app</string>'),
+      );
+      expect(
+        instancePlist,
+        contains(
+          '<key>CFBundleIdentifier</key><string>dev.raccoon.app.app-phone</string>',
+        ),
+      );
     },
     skip: switch ((binary != null && sdk != null, Platform.isMacOS)) {
       (false, _) => 'build the runner first, with a Flutter SDK on PATH',

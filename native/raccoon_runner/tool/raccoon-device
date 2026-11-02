@@ -229,7 +229,10 @@ app_bundle() {
     read_word version "$APPS/$key/version"
     version="$(xml_text "$version")"
   fi
-  name="$(xml_text "$key")"
+  # The app's own name, as Flutter's macOS build gives it: package_info_plus
+  # reads it here. An instance's key is <app>@<instance>; its bundle and
+  # identifier keep the instance, so its data stays its own (#343).
+  name="$(xml_text "${key%%@*}")"
   # None in the pubspec: 1.0.0 (1), as Flutter's macOS build gives it (#342).
   [ -n "$version" ] || version=1.0.0+1
   versions="  <key>CFBundleShortVersionString</key><string>${version%%+*}</string>
