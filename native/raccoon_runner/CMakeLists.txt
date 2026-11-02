@@ -56,15 +56,20 @@ set(RACCOON_ENGINE_DIR "" CACHE PATH "Runtime directory with the embedder header
 if(NOT RACCOON_ENGINE_DIR)
   message(FATAL_ERROR "Set -DRACCOON_ENGINE_DIR to a runtime directory (see tool/engine_dir.sh)")
 endif()
+# Not cached: a cached result outlives a new RACCOON_ENGINE_DIR, and the
+# runner would build against the old revision's header (#334). What an
+# older configure cached goes, or the search would be skipped for it.
+unset(RACCOON_EMBEDDER_HEADER CACHE)
+unset(RACCOON_FRAMEWORK_HEADER CACHE)
 find_file(RACCOON_EMBEDDER_HEADER NAMES flutter_embedder.h
-  PATHS ${RACCOON_ENGINE_DIR} NO_DEFAULT_PATH)
+  PATHS ${RACCOON_ENGINE_DIR} NO_DEFAULT_PATH NO_CACHE)
 if(RACCOON_EMBEDDER_HEADER)
   set(RACCOON_EMBEDDER_INCLUDE_DIR ${RACCOON_ENGINE_DIR})
 else()
   # The macOS framework names the header FlutterEmbedder.h; the sources keep
   # their one include and reach it through a generated alias.
   find_file(RACCOON_FRAMEWORK_HEADER NAMES FlutterEmbedder.h
-    PATHS ${RACCOON_ENGINE_DIR}/FlutterEmbedder.framework/Headers NO_DEFAULT_PATH)
+    PATHS ${RACCOON_ENGINE_DIR}/FlutterEmbedder.framework/Headers NO_DEFAULT_PATH NO_CACHE)
   if(NOT RACCOON_FRAMEWORK_HEADER)
     message(FATAL_ERROR "No flutter_embedder.h or FlutterEmbedder.framework in ${RACCOON_ENGINE_DIR} (see tool/engine_dir.sh)")
   endif()
