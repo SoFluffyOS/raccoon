@@ -230,10 +230,10 @@ app_bundle() {
     version="$(xml_text "$version")"
   fi
   name="$(xml_text "$key")"
-  if [ -n "$version" ]; then
-    versions="  <key>CFBundleShortVersionString</key><string>${version%%+*}</string>
+  # None in the pubspec: 1.0.0 (1), as Flutter's macOS build gives it (#342).
+  [ -n "$version" ] || version=1.0.0+1
+  versions="  <key>CFBundleShortVersionString</key><string>${version%%+*}</string>
   <key>CFBundleVersion</key><string>${version#*+}</string>"
-  fi
   id="dev.raccoon.app.${key//[!A-Za-z0-9.]/-}"
   [ -d "$bundle/MacOS" ] && [ -d "$bundle/Resources" ] || mkdir -p "$bundle/MacOS" "$bundle/Resources"
   [ "$bundle/MacOS/raccoon_runner" -ef "$RUNNER" ] || ln -sfn "$RUNNER" "$bundle/MacOS/raccoon_runner"

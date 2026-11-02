@@ -741,6 +741,70 @@ void main() {
     },
   );
 
+  // #342: an app with no version got a bundle with none; Flutter's macOS
+  // build gives it 1.0.0 (1), which package_info_plus then reads.
+  test(
+    'an app with no version runs as 1.0.0 (1) in its bundle',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_no_version');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final app = Directory(p.join(temp.path, 'app'));
+      final bundle = Directory(p.join(app.path, 'build', 'assets'))
+        ..createSync(recursive: true);
+      File(p.join(app.path, 'pubspec.yaml')).writeAsStringSync('name: app\n');
+      final data = p.join(temp.path, 'data');
+      // Exits at once: only the bundle made around it is looked at.
+      final stub = File(p.join(temp.path, 'raccoon_runner'))
+        ..writeAsStringSync('#!/bin/sh\nexit 0\n');
+      await Process.run('chmod', ['755', stub.path]);
+      final helper = p.join(runnerDir, 'tool', 'raccoon-device');
+      final environment = {
+        if (sdk != null) 'FLUTTER_ROOT': sdk,
+        'XDG_DATA_HOME': data,
+        'TMPDIR': '${temp.path}/',
+        'RACCOON_PLUGINS': 'off',
+      };
+      final install = await Process.run(
+        helper,
+        ['install', bundle.path, 'app'],
+        environment: {...environment, 'RACCOON_RUNNER': binary!},
+      );
+      expect(install.exitCode, 0, reason: '${install.stderr}');
+      // A bundle is made for an app with native plugins or native assets.
+      Directory(
+        p.join(data, 'raccoon', 'apps', 'app', 'native_assets'),
+      ).createSync();
+      final run = await Process.run(
+        helper,
+        ['run', 'app'],
+        environment: {...environment, 'RACCOON_RUNNER': stub.path},
+      );
+      expect(run.exitCode, 0, reason: '${run.stderr}');
+      final plist =
+          File(
+            p.join(
+              data,
+              'raccoon',
+              'apps',
+              'app',
+              'app.app',
+              'Contents',
+              'Info.plist',
+            ),
+          ).readAsStringSync();
+      expect(
+        plist,
+        contains('<key>CFBundleShortVersionString</key><string>1.0.0</string>'),
+      );
+      expect(plist, contains('<key>CFBundleVersion</key><string>1</string>'));
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isMacOS)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'app bundles are made on macOS',
+      _ => false,
+    },
+  );
+
   // #341: two installs of one app at once emptied and filled its folder
   // over each other, and left it without its kernel or nested in itself.
   test(
