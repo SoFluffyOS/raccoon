@@ -150,28 +150,38 @@ void main() {
     'the Windows plugin builder says so of a config that is not one',
     () async {
       final builder = p.join(p.dirname(script), 'plugins_windows.dart');
-      final file = File(p.join(temp.path, '.dart_tool', 'package_config.json'))
-        ..createSync(recursive: true);
-      for (final bytes in [
+      final cases = [
         '{oops'.codeUnits,
         '[1]'.codeUnits,
         [0xff, 0xfe],
-      ]) {
-        file.writeAsBytesSync(bytes);
-        final result = await Process.run(Platform.resolvedExecutable, [
-          noPackages,
-          builder,
-          file.path,
-          p.join(temp.path, 'out'),
-          '',
-          p.join(temp.path, 'cache'),
-          '0.3.0',
-          p.join(temp.path, 'engine'),
-        ]);
-        expect(result.exitCode, 1, reason: '$bytes');
+      ];
+      // At once, a config each: each run compiles the builder anew, and one
+      // after another can take past 30 s on a slow host (#339).
+      final results = await Future.wait([
+        for (final (i, bytes) in cases.indexed)
+          () {
+            final file = File(
+              p.join(temp.path, '$i', '.dart_tool', 'package_config.json'),
+            )..createSync(recursive: true);
+            file.writeAsBytesSync(bytes);
+            return Process.run(Platform.resolvedExecutable, [
+              noPackages,
+              builder,
+              file.path,
+              p.join(temp.path, '$i', 'out'),
+              '',
+              p.join(temp.path, '$i', 'cache'),
+              '0.3.0',
+              p.join(temp.path, 'engine'),
+            ]);
+          }(),
+      ]);
+      for (final (i, result) in results.indexed) {
+        expect(result.exitCode, 1, reason: '${cases[i]}');
         expect('${result.stderr}', contains('is not a package config'));
         expect('${result.stderr}', isNot(contains('#0')));
       }
     },
+    timeout: const Timeout(Duration(minutes: 2)),
   );
 }
