@@ -3484,6 +3484,7 @@ class Report extends StatelessWidget {
       );
       final lines = <String>[];
       final done = Completer<void>();
+      String? heldPath;
       var framesSeen = 0;
       var framesAtIdle = 0;
       var framesAfterIdle = 0;
@@ -3600,6 +3601,24 @@ class Report extends StatelessWidget {
             reason: 'right $right',
           );
           File(path).deleteSync();
+          // Stopped as soon as it started, before the loop's next turn: a
+          // video of one frame, not a failure and an empty file.
+          final instant = lines
+              .firstWhere((l) => l.startsWith('video_instant '))
+              .substring('video_instant '.length);
+          final one = await Process.run(testVideo, ['--probe', instant]);
+          expect(
+            '${one.stdout}',
+            matches(RegExp(r'frames=[1-9]')),
+            reason: '$instant: ${one.stdout}${one.stderr}',
+          );
+          File(instant).deleteSync();
+          // The recording never stopped is the next file by the same name.
+          final name = RegExp(
+            r'^(.*raccoon_camera_\d+_)(\d+)\.mp4$',
+          ).firstMatch(instant);
+          heldPath = '${name?[1]}${int.parse(name?[2] ?? '0') + 1}.mp4';
+          expect(lines, contains('video_held'));
         } else {
           expect(video, 'video refused videoRecordingFailed');
         }
@@ -3610,6 +3629,17 @@ class Report extends StatelessWidget {
         await client.close();
         await _expectExit(runner);
         temp.deleteSync(recursive: true);
+      }
+      // The runner went with a recording under way: the file is a video
+      // all the same, not one without its index that nothing plays.
+      if (heldPath case final held?) {
+        final probe = await Process.run(testVideo, ['--probe', held]);
+        expect(
+          '${probe.stdout}',
+          matches(RegExp(r'frames=[1-9]')),
+          reason: '$held: ${probe.stdout}${probe.stderr}',
+        );
+        File(held).deleteSync();
       }
     },
     skip:

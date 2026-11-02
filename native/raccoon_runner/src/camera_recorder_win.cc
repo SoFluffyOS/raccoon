@@ -39,6 +39,12 @@ void SetVideoType(IMFMediaType* type, const GUID& subtype, UINT32 width, UINT32 
 class MediaFoundationRecorder : public CameraRecorder {
  public:
   ~MediaFoundationRecorder() override {
+    // A recording the runner stops in the middle of (it was told to go, or
+    // its tool went): finished, or the MP4 has no index and nothing plays it.
+    if (writer_ && !finished_) {
+      std::string ignored;
+      Finish(&ignored);
+    }
     writer_.Reset();
     if (started_) MFShutdown();
     if (com_) CoUninitialize();
@@ -104,6 +110,7 @@ class MediaFoundationRecorder : public CameraRecorder {
   }
 
   bool Finish(std::string* error) override {
+    finished_ = true;
     const HRESULT result = writer_->Finalize();
     if (FAILED(result)) {
       *error = Hresult("could not finish the file", result);
@@ -115,6 +122,7 @@ class MediaFoundationRecorder : public CameraRecorder {
  private:
   bool com_ = false;
   bool started_ = false;
+  bool finished_ = false;
   ComPtr<IMFSinkWriter> writer_;
   DWORD stream_ = 0;
   size_t width_ = 0;

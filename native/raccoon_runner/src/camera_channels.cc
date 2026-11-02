@@ -366,6 +366,10 @@ CodecValue CameraChannels::StartRecording(const CodecValue& args, std::string* e
   recording_->path = path;
   recording_->started_micros = Now();
   recording_->next_frame_micros = recording_->started_micros;
+  // The frame the camera shows as it starts, at once: a recording stopped
+  // or paused before the loop's next turn still holds a frame, as a real
+  // camera's would, and an encoder given none can't finish its file.
+  ServiceRecording(recording_->started_micros);
   if (args.Get("enableStream").bool_value()) {
     stream_camera_ = id;
     streaming_ = true;

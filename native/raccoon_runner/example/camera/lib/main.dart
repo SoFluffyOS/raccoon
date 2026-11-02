@@ -108,6 +108,11 @@ Future<void> main() async {
       recording.stop();
       _say('video_ms ${recording.elapsedMilliseconds}');
       _say('video ${video.path}');
+      // Stopped as soon as it started: still a video, of the one frame
+      // the camera showed then.
+      await recorder.startVideoRecording();
+      final instant = await recorder.stopVideoRecording();
+      _say('video_instant ${instant.path}');
     } on CameraException catch (error) {
       _say('video refused ${error.code}');
     }
@@ -130,6 +135,21 @@ Future<void> main() async {
     _say('shown end');
     preview.value = null;
     await idle.dispose();
+    // A recording never stopped: the runner that stops while it goes on
+    // finishes the file all the same.
+    final held = CameraController(
+      cameras.first,
+      ResolutionPreset.low,
+      enableAudio: false,
+    );
+    await held.initialize();
+    try {
+      await held.startVideoRecording();
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      _say('video_held');
+    } on CameraException catch (error) {
+      _say('video_held refused ${error.code}');
+    }
     _say('done');
   } catch (error) {
     _say('error $error');
