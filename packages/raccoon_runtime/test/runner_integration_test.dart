@@ -786,66 +786,82 @@ void main() {
 
   // #118: a socket path must fit in 104 bytes on macOS. An app whose key
   // doesn't fit runs under a shorter socket name, its key in a .name file.
-  test(
-    'an app whose name is too long for a socket path still runs',
-    () async {
-      final temp = Directory.systemTemp.createTempSync('raccoon_long');
-      final helper = p.join(runnerDir, 'tool', 'raccoon-device');
-      final name = 'a_flutter_app_${'with_a_very_long_name_' * 4}x';
-      final environment = {
-        'RACCOON_RUNNER': binary!,
-        if (sdk != null) 'FLUTTER_ROOT': sdk,
-        'XDG_DATA_HOME': p.join(temp.path, 'data'),
-        'XDG_RUNTIME_DIR': temp.path,
-        'TMPDIR': '${temp.path}/',
-      };
-      final install = await Process.run(helper, [
-        'install',
-        assets,
-        name,
-      ], environment: environment);
-      expect(install.exitCode, 0, reason: '${install.stderr}');
-      final run = await Process.start(helper, [
-        'run',
-        name,
-      ], environment: environment);
-      final output = <String>[];
-      run.stderr.transform(utf8.decoder).listen(output.add);
-      run.stdout.drain<void>().ignore();
-      try {
-        final discovery = RunnerDiscovery(p.join(temp.path, 'raccoon'));
-        final deadline = DateTime.now().add(const Duration(seconds: 30));
-        while (discovery.list().isEmpty && DateTime.now().isBefore(deadline)) {
-          await Future<void>.delayed(const Duration(milliseconds: 100));
-        }
-        final found = discovery.list();
-        expect(found, hasLength(1), reason: output.join());
-        expect(RunnerDiscovery.appNameOf(found.single), name);
-        expect(
-          FileStat.statSync(p.join(temp.path, 'raccoon')).mode & 0x1ff,
-          0x1c0,
-          reason: 'the helper leaves its socket directory rwx------',
-        );
-        final client = await RunnerClient.connect(found.single);
+  // Non-ASCII names count in bytes, and are cut by whole characters, in a
+  // UTF-8 locale or in none (an IDE started from the Finder) (#340).
+  for (final (label, name, locale) in [
+    ('', 'a_flutter_app_${'with_a_very_long_name_' * 4}x', null),
+    (
+      ' (Vietnamese, UTF-8 locale)',
+      'ứng_dụng_${'thời_tiết_của_tôi_' * 4}x',
+      Platform.isMacOS ? 'en_US.UTF-8' : 'C.UTF-8',
+    ),
+    // An emoji is 4 bytes: one of these four offsets has the cut land
+    // inside one.
+    for (final lead in ['', 'a', 'aa', 'aaa'])
+      (' (emoji after "$lead", C locale)', '$lead${'🦝' * 30}', 'C'),
+  ]) {
+    test(
+      'an app whose name is too long for a socket path still runs$label',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('raccoon_long');
+        final helper = p.join(runnerDir, 'tool', 'raccoon-device');
+        final environment = {
+          if (locale != null) 'LC_ALL': locale,
+          'RACCOON_RUNNER': binary!,
+          if (sdk != null) 'FLUTTER_ROOT': sdk,
+          'XDG_DATA_HOME': p.join(temp.path, 'data'),
+          'XDG_RUNTIME_DIR': temp.path,
+          'TMPDIR': '${temp.path}/',
+        };
+        final install = await Process.run(helper, [
+          'install',
+          assets,
+          name,
+        ], environment: environment);
+        expect(install.exitCode, 0, reason: '${install.stderr}');
+        final run = await Process.start(helper, [
+          'run',
+          name,
+        ], environment: environment);
+        final output = <String>[];
+        run.stderr.transform(utf8.decoder).listen(output.add);
+        run.stdout.drain<void>().ignore();
         try {
-          await client.frames.first.timeout(const Duration(seconds: 15));
+          final discovery = RunnerDiscovery(p.join(temp.path, 'raccoon'));
+          final deadline = DateTime.now().add(const Duration(seconds: 30));
+          while (discovery.list().isEmpty &&
+              DateTime.now().isBefore(deadline)) {
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+          }
+          final found = discovery.list();
+          expect(found, hasLength(1), reason: output.join());
+          expect(RunnerDiscovery.appNameOf(found.single), name);
+          expect(
+            FileStat.statSync(p.join(temp.path, 'raccoon')).mode & 0x1ff,
+            0x1c0,
+            reason: 'the helper leaves its socket directory rwx------',
+          );
+          final client = await RunnerClient.connect(found.single);
+          try {
+            await client.frames.first.timeout(const Duration(seconds: 15));
+          } finally {
+            client.shutdown();
+            await client.close();
+          }
         } finally {
-          client.shutdown();
-          await client.close();
+          run.kill();
+          await run.exitCode;
+          temp.deleteSync(recursive: true);
         }
-      } finally {
-        run.kill();
-        await run.exitCode;
-        temp.deleteSync(recursive: true);
-      }
-    },
-    skip: switch ((ready, Platform.isWindows)) {
-      (false, _) => 'build the runner and example first',
-      (_, true) => 'the helper runs in Git Bash on Windows',
-      _ => false,
-    },
-    timeout: const Timeout(Duration(minutes: 2)),
-  );
+      },
+      skip: switch ((ready, Platform.isWindows)) {
+        (false, _) => 'build the runner and example first',
+        (_, true) => 'the helper runs in Git Bash on Windows',
+        _ => false,
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
+  }
   final nativeAssetsApp = p.join(runnerDir, 'example', 'native_assets_app');
   final nativeAssetsBundle = p.join(nativeAssetsApp, 'build', 'flutter_assets');
   test(

@@ -294,16 +294,33 @@ read_word() {
 # path may hold (104 bytes on macOS, whose temp dir alone takes about 50),
 # a shorter name, as much of the key as fits and ~<checksum>, with the key
 # in a .name file beside it, which discovery reads (#118).
+# The length of |2| in bytes, into the variable named |1|: a UTF-8
+# locale's ${#} counts characters. In this shell, no fork.
+byte_count() {
+  local LC_ALL=C
+  printf -v "$1" '%s' "${#2}"
+}
+
 socket_path() {
-  local key="$1" path="$SOCKETS/$1.sock" tail room short
-  if [ "${#path}" -le 100 ]; then
+  local key="$1" path="$SOCKETS/$1.sock" tail room short bytes
+  # Counted in bytes, as sun_path's limit is (104 on macOS): a name in
+  # Vietnamese, say, has more bytes than characters (#340).
+  byte_count bytes "$path"
+  if [ "$bytes" -le 100 ]; then
     echo "$path"
     return 0
   fi
   tail="~$(printf '%s' "$key" | cksum | cut -d' ' -f1)"
-  room=$((100 - ${#SOCKETS} - 1 - ${#tail} - 5))
+  byte_count bytes "$SOCKETS"
+  room=$((100 - bytes - 1 - ${#tail} - 5))
   [ "$room" -lt 0 ] && room=0
-  short="${key:0:$room}$tail"
+  # Whole characters, until the bytes fit: a name cut inside one is not
+  # UTF-8, which APFS refuses. By perl, whatever the locale (an IDE started
+  # from the Finder has none, and bash's slices are bytes then).
+  short="$(perl -MEncode -e 'my ($key, $room) = @ARGV;
+    my $s = decode("UTF-8", $key);
+    chop $s while length(encode("UTF-8", $s)) > $room;
+    print encode("UTF-8", $s)' "$key" "$room")$tail"
   printf '%s\n' "$key" > "$SOCKETS/$short.name"
   echo "$SOCKETS/$short.sock"
 }
