@@ -6961,13 +6961,13 @@ class Report extends StatelessWidget {
         expect(serve.exitCode, -1073741819, reason: '${serve.stderr}');
         expect('${serve.stderr}', contains('RACCOON_CRASH: the reason'));
       } finally {
-        // Windows' error reporting holds the crashed process's files for a
-        // moment after it ends: a few tries.
-        for (var attempt = 0; temp.existsSync(); attempt++) {
+        // Windows' error reporting can hold the crashed process's files for
+        // a while after it ends (past 10 s on a CI machine): the folder goes
+        // if it can, and is the temp folder's to clear if not.
+        for (var attempt = 0; attempt < 6 && temp.existsSync(); attempt++) {
           try {
             temp.deleteSync(recursive: true);
           } on FileSystemException {
-            if (attempt >= 20) rethrow;
             await Future<void>.delayed(const Duration(milliseconds: 500));
           }
         }
