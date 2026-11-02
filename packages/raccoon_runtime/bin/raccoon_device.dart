@@ -71,6 +71,10 @@ int _add(CustomDevicesFile file, String name, List<String> options) {
       case '--helper' when i + 1 < options.length:
         helper = _helperPath(options[++i]);
         if (helper == null) return 1;
+      // One of them last, with nothing after it (#339).
+      case '--size' || '--label' || '--helper':
+        stderr.writeln('${options[i]} needs a value');
+        return 2;
       default:
         stderr.writeln('unknown option ${options[i]}');
         return 2;

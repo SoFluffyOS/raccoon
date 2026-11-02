@@ -78,4 +78,22 @@ void main() {
     expect('${result.stderr}', contains('no helper at'));
     expect(devicesFile().existsSync(), isFalse);
   });
+
+  test('add says an option given last needs its value', () async {
+    for (final option in ['--size', '--label', '--helper']) {
+      final result = await _run(
+        ['add', 'my', option],
+        directory: project.path,
+        config: config,
+      );
+      expect(result.exitCode, 2, reason: option);
+      expect('${result.stderr}', contains('$option needs a value'));
+    }
+    final unknown = await _run(
+      ['add', 'my', '--bogus'],
+      directory: project.path,
+      config: config,
+    );
+    expect('${unknown.stderr}', contains('unknown option --bogus'));
+  });
 }
