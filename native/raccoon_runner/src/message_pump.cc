@@ -51,18 +51,22 @@ LRESULT CALLBACK MessagePump::OnFilteredMessage(int code, WPARAM wparam, LPARAM 
   return CallNextHookEx(nullptr, code, wparam, lparam);
 }
 
+// A turn's own look at the sockets dispatches nothing, so the timer fires
+// inside a turn only when a loop the turn started dispatches it: a second
+// dialog, opened by a call the first one's loop took, holds that turn as
+// the first held the runner's, and takes turns of its own meanwhile.
 void CALLBACK MessagePump::OnTimer(HWND, UINT, UINT_PTR, DWORD) {
   MessagePump* pump = g_pump;
-  if (pump == nullptr || !pump->modal_ || pump->turning_) return;
-  pump->turning_ = true;
+  if (pump == nullptr || !pump->modal_) return;
+  ++pump->turning_;
   pump->turn_();
-  pump->turning_ = false;
+  --pump->turning_;
 }
 
 int MessagePump::Wait(pollfd* fds, size_t count, int timeout_ms) {
   // A turn from the timer, inside a modal loop: the sockets now, nothing
   // dispatched here, nothing waited for.
-  if (turning_) return WSAPoll(fds, static_cast<ULONG>(count), 0);
+  if (turning_ > 0) return WSAPoll(fds, static_cast<ULONG>(count), 0);
   // The runner's own loop is turning again: whatever modal loop there was
   // has given back.
   if (modal_) {

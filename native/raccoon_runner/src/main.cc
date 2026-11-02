@@ -1532,6 +1532,12 @@ int Serve(const Options& options) {
   if (plugins) plugins->SetModalTurn([&] {
     Turn();
     loop.RunOnce(0);
+#if defined(_WIN32)
+    // Told to stop while a plugin's dialog holds the loop that would: the
+    // dialog's loop is asked to end, as at a session's end, and each loop
+    // under it passes WM_QUIT on to the next until the runner's own.
+    if (stop || g_stop != 0) PostQuitMessage(0);
+#endif
   });
 #endif
   while (!stop && g_stop == 0) {

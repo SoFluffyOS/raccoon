@@ -49,9 +49,10 @@ class MessagePump {
   // A modal loop holds the runner's, and the timer that turns it meanwhile.
   bool modal_ = false;
   UINT_PTR timer_ = 0;
-  // Inside a turn taken from the timer: the loop's look at its sockets
-  // must neither dispatch messages nor end the modal state.
-  bool turning_ = false;
+  // How many turns taken from the timer are under way, one inside another
+  // when a dialog opens over a dialog: the loop's look at its sockets must
+  // then neither dispatch messages nor end the modal state.
+  int turning_ = 0;
 };
 
 }  // namespace raccoon

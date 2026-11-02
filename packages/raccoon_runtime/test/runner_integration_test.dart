@@ -6668,10 +6668,17 @@ class Report extends StatelessWidget {
       );
       final client = await RunnerClient.connect(endpoint);
       var modal = false;
+      var inner = false;
       var during = 0;
+      var duringInner = 0;
       final done = Completer<String>();
       runner.stdout.listen((line) {
         if (line.contains('MODAL:start')) modal = true;
+        if (line.contains('MODAL:inner done')) {
+          inner = false;
+        } else if (line.contains('MODAL:inner')) {
+          inner = true;
+        }
         if (line.contains('MODAL:done') || line.contains('MODAL:error')) {
           modal = false;
           if (!done.isCompleted) done.complete(line);
@@ -6679,6 +6686,7 @@ class Report extends StatelessWidget {
       });
       final frames = client.frames.listen((_) {
         if (modal) during++;
+        if (inner) duringInner++;
       });
       try {
         await client.hello.timeout(const Duration(seconds: 10));
@@ -6690,6 +6698,9 @@ class Report extends StatelessWidget {
         // 4 tells them apart on a loaded CI runner too (one drew 27, a
         // macos-x64 one 10).
         expect(during, greaterThan(4));
+        // A dialog opened from a turn the first one's loop took has a loop
+        // of its own, which takes turns too: a second of it is 60 frames.
+        expect(duringInner, greaterThan(2));
       } finally {
         await frames.cancel();
         client.shutdown();
@@ -6700,6 +6711,66 @@ class Report extends StatelessWidget {
     },
     skip:
         ready &&
+                File(pluginLibrary).existsSync() &&
+                Directory(pluginsModalAssets).existsSync()
+            ? false
+            : 'build the runner with plugins and example/plugins_modal first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'on Windows a stop while a plugin\'s dialog is open ends the runner',
+    () async {
+      // The client's Shutdown, a tool gone or a later run taking the socket
+      // all come in a turn the dialog's loop takes; the runner's own loop,
+      // which would act on them, waits under the dialog. The dialog is
+      // asked to end instead.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final manifest = File(p.join(temp.path, 'plugins.json'))
+        ..writeAsStringSync(
+          jsonEncode({
+            'plugins': [
+              _pluginEntry('raccoon_echo', pluginLibrary, 'RaccoonEchoPlugin'),
+            ],
+          }),
+        );
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: pluginsModalAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          plugins: manifest.path,
+        ),
+      );
+      final started = Completer<void>();
+      runner.stdout.listen((line) {
+        if (line.contains('MODAL:start') && !started.isCompleted) {
+          started.complete();
+        }
+      });
+      final client = await RunnerClient.connect(endpoint);
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        await started.future.timeout(const Duration(seconds: 20));
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        final stopping = Stopwatch()..start();
+        client.shutdown();
+        // The dialog would close by itself 2.7 s from here.
+        expect(await _exitCode(runner), 0);
+        expect(stopping.elapsedMilliseconds, lessThan(1500));
+      } finally {
+        await client.close();
+        runner.kill();
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        !Platform.isWindows
+            ? 'the dialog is ended by a message to its loop on Windows'
+            : ready &&
                 File(pluginLibrary).existsSync() &&
                 Directory(pluginsModalAssets).existsSync()
             ? false
