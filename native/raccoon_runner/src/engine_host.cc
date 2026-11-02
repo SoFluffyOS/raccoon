@@ -1135,18 +1135,21 @@ void EngineHost::SendKey(const FlutterKeyEvent& event) {
       });
 }
 
-void EngineHost::SendPlatformMessage(
+bool EngineHost::SendPlatformMessage(
     const std::string& channel, const uint8_t* data, size_t size,
     std::function<void(const uint8_t* data, size_t size)> on_reply) {
-  if (engine_ == nullptr) return;
+  if (engine_ == nullptr) return false;
   const auto& procs = loader_.procs();
   FlutterPlatformMessageResponseHandle* handle = nullptr;
+  ReplyContext* context = nullptr;
   if (on_reply) {
-    auto* context = new ReplyContext{std::move(on_reply)};
+    context = new ReplyContext{std::move(on_reply)};
+    // No handle, no answer: the message isn't sent without one, as the
+    // sender would wait for an answer that can't come.
     if (procs.PlatformMessageCreateResponseHandle(engine_, OnReply, context,
                                                   &handle) != kSuccess) {
       delete context;
-      handle = nullptr;
+      return false;
     }
   }
   FlutterPlatformMessage message{};
@@ -1155,10 +1158,13 @@ void EngineHost::SendPlatformMessage(
   message.message = data;
   message.message_size = size;
   message.response_handle = handle;
-  procs.SendPlatformMessage(engine_, &message);
+  const bool sent = procs.SendPlatformMessage(engine_, &message) == kSuccess;
   if (handle != nullptr) {
     procs.PlatformMessageReleaseResponseHandle(engine_, handle);
   }
+  // Not taken, so never answered.
+  if (!sent) delete context;
+  return sent;
 }
 
 void EngineHost::Respond(const FlutterPlatformMessageResponseHandle* handle,
@@ -1235,7 +1241,8 @@ bool EngineHost::LoadPlugins(const std::string& manifest, std::string* error) {
     PluginHost::Bridge bridge;
     bridge.send = [this](const std::string& channel, const uint8_t* data, size_t size,
                          std::function<void(const uint8_t*, size_t)> on_reply) {
-      PluginCall([&] { SendPlatformMessage(channel, data, size, std::move(on_reply)); return true; });
+      return PluginCall(
+          [&] { return SendPlatformMessage(channel, data, size, std::move(on_reply)); });
     };
     bridge.respond = [this](const FlutterPlatformMessageResponseHandle* handle,
                             const uint8_t* data, size_t size) {

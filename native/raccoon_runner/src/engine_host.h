@@ -138,7 +138,9 @@ class EngineHost {
   // handle goes to the text field, when one is active.
   void SendKey(const FlutterKeyEvent& event);
   // Sends a message to the framework; |on_reply| gets its answer, if asked.
-  void SendPlatformMessage(
+  // False when the engine didn't take it, and |on_reply| is then never
+  // called.
+  bool SendPlatformMessage(
       const std::string& channel, const uint8_t* data, size_t size,
       std::function<void(const uint8_t* data, size_t size)> on_reply = nullptr);
   void Shutdown();

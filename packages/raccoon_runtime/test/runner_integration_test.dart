@@ -7141,6 +7141,77 @@ class Report extends StatelessWidget {
   );
 
   test(
+    'on Windows a plugin\'s message after the engine stopped is not said to be sent',
+    () async {
+      // The echo plugin sends one with a reply as it is destroyed, after the
+      // engine is gone. Flutter's own DLL says false then; a true leaves a
+      // plugin waiting for a reply that never comes (#345).
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final manifest = File(p.join(temp.path, 'plugins.json'))
+        ..writeAsStringSync(
+          jsonEncode({
+            'plugins': [
+              _pluginEntry('raccoon_echo', pluginLibrary, 'RaccoonEchoPlugin'),
+            ],
+          }),
+        );
+      final socket = p.join(temp.path, 'late.sock');
+      final said = File(p.join(temp.path, 'late.txt'));
+      final process = await Process.start(
+        binary!,
+        [
+          'serve',
+          '--engine-dir',
+          engineDir!,
+          '--assets',
+          pluginsModalAssets,
+          '--icu',
+          icu!,
+          '--plugins',
+          manifest.path,
+          '--socket',
+          socket,
+        ],
+        environment: {'RACCOON_ECHO_LATE_SEND': said.path},
+      );
+      final errors = StringBuffer();
+      final read = process.stderr.transform(utf8.decoder).forEach(errors.write);
+      final listening = Completer<void>();
+      process.stdout.transform(utf8.decoder).listen((text) {
+        if (text.contains('listening on') && !listening.isCompleted) {
+          listening.complete();
+        }
+      });
+      try {
+        await listening.future.timeout(const Duration(seconds: 20));
+        final client = await RunnerClient.connect(UnixSocketEndpoint(socket));
+        await client.hello.timeout(const Duration(seconds: 10));
+        client.shutdown();
+        await client.close();
+        expect(
+          await process.exitCode.timeout(const Duration(seconds: 20)),
+          0,
+          reason: '$errors',
+        );
+        await read;
+        expect(said.readAsStringSync().trim(), 'sent=0 replied=0');
+      } finally {
+        process.kill();
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        !Platform.isWindows
+            ? 'the echo plugin sends late on request on Windows'
+            : ready &&
+                File(pluginLibrary).existsSync() &&
+                Directory(pluginsModalAssets).existsSync()
+            ? false
+            : 'build the runner with plugins and example/plugins_modal first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
+  test(
     'a plugin library that dies as it loads still says why',
     () async {
       // #201: stderr is held while a library maps (#198); a fatal signal

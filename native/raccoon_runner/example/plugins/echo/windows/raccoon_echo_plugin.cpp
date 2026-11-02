@@ -27,6 +27,13 @@ using flutter::EncodableValue;
 // Posted to the view's window with a Pending as its lparam.
 constexpr UINT kEchoMessage = WM_APP + 0x52;
 
+// The messenger as the C API has it, for the runner's tests: with
+// RACCOON_ECHO_LATE_SEND naming a file, the plugin sends a message as it is
+// destroyed, after the engine stopped, and writes there whether the send
+// claimed it went and whether a reply came.
+FlutterDesktopMessengerRef g_messenger = nullptr;
+bool g_late_replied = false;
+
 struct Pending {
   std::string text;
   std::unique_ptr<flutter::MethodResult<EncodableValue>> result;
@@ -62,6 +69,20 @@ class RaccoonEchoPlugin : public flutter::Plugin {
 
   ~RaccoonEchoPlugin() override {
     registrar_->UnregisterTopLevelWindowProcDelegate(delegate_);
+    // Into the file named, as stderr may be gone by now.
+    char path[MAX_PATH] = {};
+    if (g_messenger == nullptr ||
+        GetEnvironmentVariableA("RACCOON_ECHO_LATE_SEND", path, sizeof(path)) == 0) {
+      return;
+    }
+    const uint8_t message[] = {0};
+    const bool sent = FlutterDesktopMessengerSendWithReply(
+        g_messenger, "raccoon_echo/late", message, sizeof(message),
+        [](const uint8_t*, size_t, void*) { g_late_replied = true; }, nullptr);
+    FILE* file = nullptr;
+    if (fopen_s(&file, path, "w") != 0 || file == nullptr) return;
+    std::fprintf(file, "sent=%d replied=%d\n", sent ? 1 : 0, g_late_replied ? 1 : 0);
+    std::fclose(file);
   }
 
   void Handle(const flutter::MethodCall<EncodableValue>& call,
@@ -143,6 +164,7 @@ void RaccoonEchoPluginRegisterWithRegistrar(FlutterDesktopPluginRegistrarRef reg
     std::fprintf(stderr, "RACCOON_CRASH: the reason\n");
     *static_cast<volatile int*>(nullptr) = 0;
   }
+  g_messenger = FlutterDesktopPluginRegistrarGetMessenger(registrar);
   auto* windows = flutter::PluginRegistrarManager::GetInstance()
                       ->GetRegistrar<flutter::PluginRegistrarWindows>(registrar);
   auto plugin = std::make_unique<RaccoonEchoPlugin>(windows);

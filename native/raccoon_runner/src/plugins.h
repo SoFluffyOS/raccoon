@@ -57,8 +57,9 @@ class PluginHost {
   // What plugins need from the runner.
   struct Bridge {
     // Host to app: a message on a channel, |on_reply| once with the answer
-    // (null data when nothing answered).
-    std::function<void(const std::string& channel, const uint8_t* data, size_t size,
+    // (null data when nothing answered). False when it wasn't sent (the
+    // engine is stopping or gone), and |on_reply| is then never called.
+    std::function<bool(const std::string& channel, const uint8_t* data, size_t size,
                        std::function<void(const uint8_t* data, size_t size)> on_reply)>
         send;
     // The answer to a message from the app.

@@ -127,8 +127,9 @@ bool PluginHost::SendPlatformMessage(void* user_data, const char* channel,
       reply(answer, answer_size, reply_data);
     };
   }
-  self->bridge_.send(channel, data, size, std::move(on_reply));
-  return true;
+  // False when the runner didn't send it, as Flutter's own DLL says: the
+  // C++ wrapper then frees what it kept for the reply, which won't come.
+  return self->bridge_.send(channel, data, size, std::move(on_reply));
 }
 
 void PluginHost::SendPlatformMessageResponse(void* user_data,
