@@ -846,9 +846,13 @@ void main() {
       addTearDown(() => temp.deleteSync(recursive: true));
       final app = Directory(p.join(temp.path, 'app'));
       final bundle = p.join(app.path, 'build', 'flutter_assets');
-      Directory(p.dirname(bundle)).createSync(recursive: true);
-      final copied = await Process.run('cp', ['-R', assets, bundle]);
-      expect(copied.exitCode, 0, reason: '${copied.stderr}');
+      for (final entity in Directory(assets).listSync(recursive: true)) {
+        final target = p.join(bundle, p.relative(entity.path, from: assets));
+        if (entity is File) {
+          File(target).parent.createSync(recursive: true);
+          entity.copySync(target);
+        }
+      }
       File(p.join(app.path, 'pubspec.yaml')).writeAsStringSync('name: app\n');
       List<String> listing(String root) => [
         for (final entity in Directory(root).listSync(recursive: true))
@@ -866,10 +870,10 @@ void main() {
       for (var round = 0; round < 3; round++) {
         final results = await Future.wait([
           for (var i = 0; i < 4; i++)
-            Process.run(
-              p.join(runnerDir, 'tool', 'raccoon-device'),
+            _runHelper(
+              runnerDir,
               ['install', bundle, 'app'],
-              environment: {
+              {
                 'RACCOON_RUNNER': binary!,
                 if (sdk != null) 'FLUTTER_ROOT': sdk,
                 'XDG_DATA_HOME': p.join(temp.path, 'data'),
@@ -883,10 +887,9 @@ void main() {
         expect(listing(installed), expected, reason: 'round $round');
       }
     },
-    skip: switch ((ready, Platform.isWindows)) {
-      (false, _) => 'build the runner and example first',
-      (_, true) => 'the helper runs in Git Bash on Windows',
-      _ => false,
+    skip: switch (ready) {
+      false => 'build the runner and example first',
+      true => false,
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );
@@ -903,10 +906,10 @@ void main() {
       File(p.join(app.path, '.dart_tool', 'package_config.json'))
         ..createSync(recursive: true)
         ..writeAsStringSync('{"configVersion": 2, "packages": ');
-      Future<ProcessResult> install(Map<String, String> extra) => Process.run(
-        p.join(runnerDir, 'tool', 'raccoon-device'),
+      Future<ProcessResult> install(Map<String, String> extra) => _runHelper(
+        runnerDir,
         ['install', bundle.path, 'app'],
-        environment: {
+        {
           'RACCOON_RUNNER': binary!,
           if (sdk != null) 'FLUTTER_ROOT': sdk,
           'XDG_DATA_HOME': p.join(temp.path, 'data'),
@@ -916,21 +919,24 @@ void main() {
         },
       );
 
+      // On Windows the plugin builder is plugins_windows.dart, which says
+      // the same (#310).
       final built = await install({});
       expect(built.exitCode, 1);
       expect('${built.stderr}', contains('is not a package config'));
       expect('${built.stderr}', isNot(contains('Traceback')));
 
-      // Native assets read it too, on their own.
+      // Native assets read it too, on their own: on macOS and Linux, the
+      // hosts that build them.
+      if (Platform.isWindows) return;
       final assetsOnly = await install({'RACCOON_PLUGINS': 'off'});
       expect('${assetsOnly.stderr}', contains('is not a package config'));
       expect('${assetsOnly.stderr}', isNot(contains('Traceback')));
       expect('${assetsOnly.stderr}', isNot(contains('substitution')));
     },
-    skip: switch ((binary != null, Platform.isWindows)) {
-      (false, _) => 'build the runner first',
-      (_, true) => 'the helper runs in Git Bash on Windows',
-      _ => false,
+    skip: switch (binary != null) {
+      false => 'build the runner first',
+      true => false,
     },
   );
 
