@@ -741,6 +741,60 @@ void main() {
     },
   );
 
+  // #341: two installs of one app at once emptied and filled its folder
+  // over each other, and left it without its kernel or nested in itself.
+  test(
+    'installs of one app at once leave it whole',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_at_once');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final app = Directory(p.join(temp.path, 'app'));
+      final bundle = p.join(app.path, 'build', 'flutter_assets');
+      Directory(p.dirname(bundle)).createSync(recursive: true);
+      final copied = await Process.run('cp', ['-R', assets, bundle]);
+      expect(copied.exitCode, 0, reason: '${copied.stderr}');
+      File(p.join(app.path, 'pubspec.yaml')).writeAsStringSync('name: app\n');
+      List<String> listing(String root) => [
+        for (final entity in Directory(root).listSync(recursive: true))
+          p.relative(entity.path, from: root),
+      ]..sort();
+      final expected = listing(bundle);
+      final installed = p.join(
+        temp.path,
+        'data',
+        'raccoon',
+        'apps',
+        'app',
+        'flutter_assets',
+      );
+      for (var round = 0; round < 3; round++) {
+        final results = await Future.wait([
+          for (var i = 0; i < 4; i++)
+            Process.run(
+              p.join(runnerDir, 'tool', 'raccoon-device'),
+              ['install', bundle, 'app'],
+              environment: {
+                'RACCOON_RUNNER': binary!,
+                if (sdk != null) 'FLUTTER_ROOT': sdk,
+                'XDG_DATA_HOME': p.join(temp.path, 'data'),
+                'RACCOON_PLUGINS': 'off',
+              },
+            ),
+        ]);
+        for (final result in results) {
+          expect(result.exitCode, 0, reason: '${result.stderr}');
+        }
+        expect(listing(installed), expected, reason: 'round $round');
+      }
+    },
+    skip: switch ((ready, Platform.isWindows)) {
+      (false, _) => 'build the runner and example first',
+      (_, true) => 'the helper runs in Git Bash on Windows',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   test(
     'the helper says so of a package config that is not one',
     () async {

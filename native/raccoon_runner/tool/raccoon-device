@@ -2217,8 +2217,10 @@ PY
 # then, so an app with neither pays nothing for it.
 lock_build() {
   [ -z "${BUILD_LOCK:-}" ] || return 0
+  # A folder that can't be made (a project not ours to write) holds no
+  # lock: the install goes on without one rather than wait for ever.
+  [ -d "$1/build/raccoon" ] || mkdir -p "$1/build/raccoon" 2>/dev/null || return 0
   BUILD_LOCK="$1/build/raccoon/.install-lock"
-  [ -d "$1/build/raccoon" ] || mkdir -p "$1/build/raccoon"
   # The holder's pid is in the lock: one whose holder is gone is stale, and
   # an exit takes away only its own. A cold build can hold it for longer
   # than ten minutes (#225); an hour is past any, and frees a lock whose
@@ -2236,7 +2238,9 @@ lock_build() {
     sleep 0.2
   done
   echo $$ > "$BUILD_LOCK/pid"
-  trap '[ "$(cat "$BUILD_LOCK/pid" 2>/dev/null)" = $$ ] && rm -f "$BUILD_LOCK/pid" && rmdir "$BUILD_LOCK" 2>/dev/null' EXIT
+  # Every install takes it now (#341): the pid read in the shell, and the
+  # lock gone in one process.
+  trap 'owner=""; read -r owner 2>/dev/null < "$BUILD_LOCK/pid"; [ "$owner" = $$ ] && rm -r "$BUILD_LOCK" 2>/dev/null' EXIT
 }
 
 # A linux/ holding only flutter/ephemeral is the Linux target's engine copy,
@@ -2530,9 +2534,6 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
         break
       done
     fi
-    rm -rf "${APPS:?}/$key"
-    mkdir -p "$APPS/$key"
-    clone_tree "$local_path" "$APPS/$key/flutter_assets"
     # The project is the nearest folder above its bundle with a pubspec:
     # two levels up by default, more under `flutter config --build-dir`
     # (#225). Its native plugins are built for this host and loaded into
@@ -2544,6 +2545,13 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
       [ -n "$project" ] || project=/
     done
     [ -f "$project/pubspec.yaml" ] || project="$(cd "$local_path/../.." && pwd)"
+    # One install of a project at a time: two at once (two runs started
+    # together) emptied and filled the app's folder over each other, and
+    # left it without its kernel, or nested in itself (#341).
+    lock_build "$project"
+    rm -rf "${APPS:?}/$key"
+    mkdir -p "$APPS/$key"
+    clone_tree "$local_path" "$APPS/$key/flutter_assets"
     pubspec_version "$project" > "$APPS/$key/version"
     # The project's Firebase config for Apple hosts, where its Runner keeps
     # it: the macOS one, else the iOS one. The app's bundle carries it.
@@ -2556,8 +2564,6 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
         break
       done
     fi
-    # A workspace member's config is written into build/raccoon.
-    [ -f "$project/.dart_tool/package_config.json" ] || lock_build "$project"
     # Worked out once: for a pub workspace member it runs package_scope.
     config="$(package_config "$project")" || config=""
     build_plugins "$project" "$APPS/$key/plugins" "$config"
