@@ -14,6 +14,7 @@
 #include <windows.h>
 #include <objbase.h>
 
+#include <cstdio>
 #include <memory>
 #include <optional>
 #include <string>
@@ -135,6 +136,13 @@ class RaccoonEchoPlugin : public flutter::Plugin {
 }  // namespace
 
 void RaccoonEchoPluginRegisterWithRegistrar(FlutterDesktopPluginRegistrarRef registrar) {
+  // For the runner's tests: a plugin that crashes as it registers, after
+  // saying why, so the test sees how the runner dies and that it says so.
+  char crash[8] = {};
+  if (GetEnvironmentVariableA("RACCOON_ECHO_CRASH", crash, sizeof(crash)) > 0) {
+    std::fprintf(stderr, "RACCOON_CRASH: the reason\n");
+    *static_cast<volatile int*>(nullptr) = 0;
+  }
   auto* windows = flutter::PluginRegistrarManager::GetInstance()
                       ->GetRegistrar<flutter::PluginRegistrarWindows>(registrar);
   auto plugin = std::make_unique<RaccoonEchoPlugin>(windows);

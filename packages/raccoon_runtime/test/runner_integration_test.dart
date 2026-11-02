@@ -6913,6 +6913,57 @@ class Report extends StatelessWidget {
   );
 
   test(
+    'on Windows a plugin that crashes ends the runner as that crash, and says why',
+    () async {
+      // The crash handler copies out what stderr's pipe still holds; then
+      // the process ends as the access violation it was, as Windows reports
+      // a crash, not with the C runtime's exit code 3 for a signal.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final manifest = File(p.join(temp.path, 'plugins.json'))
+        ..writeAsStringSync(
+          jsonEncode({
+            'plugins': [
+              _pluginEntry('raccoon_echo', pluginLibrary, 'RaccoonEchoPlugin'),
+            ],
+          }),
+        );
+      try {
+        final serve = await Process.run(
+          binary!,
+          [
+            'serve',
+            '--engine-dir',
+            engineDir!,
+            '--assets',
+            pluginsModalAssets,
+            '--icu',
+            icu!,
+            '--plugins',
+            manifest.path,
+            '--socket',
+            p.join(temp.path, 'crash.sock'),
+          ],
+          environment: {'RACCOON_ECHO_CRASH': '1'},
+        ).timeout(const Duration(seconds: 30));
+        // STATUS_ACCESS_VIOLATION, as a signed exit code.
+        expect(serve.exitCode, -1073741819, reason: '${serve.stderr}');
+        expect('${serve.stderr}', contains('RACCOON_CRASH: the reason'));
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        !Platform.isWindows
+            ? 'the echo plugin crashes on request on Windows'
+            : ready &&
+                File(pluginLibrary).existsSync() &&
+                Directory(pluginsModalAssets).existsSync()
+            ? false
+            : 'build the runner with plugins and example/plugins_modal first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
+  test(
     'a plugin library that dies as it loads still says why',
     () async {
       // #201: stderr is held while a library maps (#198); a fatal signal

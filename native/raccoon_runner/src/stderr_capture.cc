@@ -21,6 +21,10 @@ namespace {
 // For the crash handler, which may only touch descriptors.
 volatile int g_read_fd = -1;
 volatile int g_saved_fd = -1;
+#if defined(_WIN32)
+// Whether the reader thread has finished, for the crash handler.
+std::atomic<bool>* volatile g_finished = nullptr;
+#endif
 
 #if defined(_WIN32)
 // No SIGBUS on Windows; the C runtime raises SIGSEGV for an access violation
@@ -71,18 +75,30 @@ void WriteAll(int fd, const char* data, size_t size) {
 }
 
 // Copies what the pipe still holds to the real stderr, then lets the
-// signal do what it would have done (Windows resets the handler before
-// calling it, as SA_RESETHAND does). Only async-signal-safe calls.
+// signal do what it would have done. Only async-signal-safe calls.
 void OnCrash(int signal) {
   const int from = g_read_fd;
   const int to = g_saved_fd;
+#if defined(_WIN32)
+  // The reader thread copies all it reads to the real stderr. A read here
+  // too would race it for the pipe, and wait for good when it wins: a
+  // crash right after a line said why hung the runner (raccoon#335). With
+  // descriptor 2 back on the real stderr, the pipe's last writer is gone:
+  // the thread copies what the pipe holds, reads its end, and finishes. A
+  // crash on that thread itself is given a second.
   if (from >= 0 && to >= 0) {
-#if !defined(_WIN32)
+    _dup2(to, kStderr);
+    for (int waited = 0; waited < 1000 && g_finished != nullptr && !g_finished->load();
+         ++waited) {
+      Sleep(1);
+    }
+  }
+#else
+  if (from >= 0 && to >= 0) {
     // The reader thread may take what Pending saw first, and a blocking
     // read would then wait for good: the pipe's other end is stderr itself
     // (raccoon#235).
     fcntl(from, F_SETFL, fcntl(from, F_GETFL) | O_NONBLOCK);
-#endif
     char buffer[4096];
     while (Pending(from)) {
       const auto got = ReadFd(from, buffer, sizeof(buffer));
@@ -90,7 +106,23 @@ void OnCrash(int signal) {
       WriteAll(to, buffer, static_cast<size_t>(got));
     }
   }
+#endif
+#if defined(_WIN32)
+  // The C runtime's default for a signal raised again is _exit(3), which
+  // runs every DLL's detach code from a crashed process and can hang there;
+  // Windows' error reporting (a fail-fast) can hold the process, its pipes
+  // and its files for half a minute. The process ends here instead, at
+  // once: a crash with its exception's code (0xC0000005 for an access
+  // violation), an abort with abort's 3.
+  UINT code = 3;
+  if (signal != SIGABRT && _pxcptinfoptrs != nullptr) {
+    code = static_cast<EXCEPTION_POINTERS*>(_pxcptinfoptrs)->ExceptionRecord->ExceptionCode;
+  }
+  TerminateProcess(GetCurrentProcess(), code);
+#else
+  // The handler was reset before it ran (SA_RESETHAND).
   raise(signal);
+#endif
 }
 
 void InstallCrashHandlers() {
@@ -170,6 +202,9 @@ bool StderrCapture::Start(LineCallback on_line) {
   stop_write_fd_ = stop[1];
   g_read_fd = read_fd_;
   g_saved_fd = saved_fd_;
+#if defined(_WIN32)
+  g_finished = &finished_;
+#endif
   InstallCrashHandlers();
   thread_ = std::thread([this] { Run(); });
   return true;
@@ -199,6 +234,9 @@ void StderrCapture::Stop() {
   for (const int signal : kCrashSignals) std::signal(signal, SIG_DFL);
   g_read_fd = -1;
   g_saved_fd = -1;
+#if defined(_WIN32)
+  g_finished = nullptr;
+#endif
   for (const int fd : {read_fd_, saved_fd_, stop_read_fd_, stop_write_fd_}) {
     if (fd >= 0) CloseFd(fd);
   }
