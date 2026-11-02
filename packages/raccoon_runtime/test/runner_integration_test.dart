@@ -423,31 +423,28 @@ void main() {
       final apps = Directory(p.join(temp.path, 'data', 'raccoon', 'apps'));
       final kept = Directory(p.join(apps.path, 'kept'))
         ..createSync(recursive: true);
-      final helper = p.join(runnerDir, 'tool', 'raccoon-device');
       final environment = {'XDG_DATA_HOME': p.join(temp.path, 'data')};
       for (final name in ['', '.', '..', 'kept/..', r'kept\..']) {
         for (final verb in ['uninstall', 'run']) {
-          final result = await Process.run(helper, [
-            verb,
-            name,
-          ], environment: environment);
+          final result = await _runHelper(
+            runnerDir,
+            [verb, name],
+            environment,
+            asGiven: true,
+          );
           expect(result.exitCode, 1, reason: '$verb "$name"');
           expect('${result.stderr}', contains('not an app name'));
         }
       }
       expect(kept.existsSync(), isTrue);
 
-      final result = await Process.run(helper, [
+      final result = await _runHelper(runnerDir, [
         'uninstall',
         'kept',
-      ], environment: environment);
+      ], environment);
       expect(result.exitCode, 0, reason: '${result.stderr}');
       expect(kept.existsSync(), isFalse);
       expect(apps.existsSync(), isTrue);
-    },
-    skip: switch (Platform.isWindows) {
-      true => 'the helper runs in Git Bash on Windows',
-      false => false,
     },
   );
 
@@ -494,13 +491,10 @@ void main() {
     () async {
       final temp = Directory.systemTemp.createTempSync('raccoon_args');
       addTearDown(() => temp.deleteSync(recursive: true));
-      Future<ProcessResult> helper(List<String> args) => Process.run(
-        p.join(runnerDir, 'tool', 'raccoon-device'),
+      Future<ProcessResult> helper(List<String> args) => _runHelper(
+        runnerDir,
         args,
-        environment: {
-          'RACCOON_RUNNER': binary!,
-          'XDG_DATA_HOME': p.join(temp.path, 'data'),
-        },
+        {'RACCOON_RUNNER': binary!, 'XDG_DATA_HOME': p.join(temp.path, 'data')},
       );
 
       for (final (args, said) in [
@@ -519,10 +513,9 @@ void main() {
         expect('${result.stderr}', isNot(contains('unbound variable')));
       }
     },
-    skip: switch ((binary != null, Platform.isWindows)) {
-      (false, _) => 'build the runner first',
-      (_, true) => 'the helper runs in Git Bash on Windows',
-      _ => false,
+    skip: switch (binary != null) {
+      false => 'build the runner first',
+      true => false,
     },
   );
 
@@ -8441,18 +8434,23 @@ String? _sdkRoot(Map<String, String> environment) {
 }
 
 /// Runs the device helper with [arguments]: on Windows through Git Bash, as
-/// Flutter's custom device entry does, its paths with forward slashes.
+/// Flutter's custom device entry does, its paths with forward slashes. With
+/// [asGiven], the arguments go as they are (a name with a backslash).
 Future<ProcessResult> _runHelper(
   String runnerDir,
   List<String> arguments,
-  Map<String, String> environment,
-) {
+  Map<String, String> environment, {
+  bool asGiven = false,
+}) {
   String posix(String value) => value.replaceAll(r'\', '/');
   final helper = p.join(runnerDir, 'tool', 'raccoon-device');
   final launcher = CustomDeviceConfig.hostLauncher;
   return Process.run(
     launcher.firstOrNull ?? helper,
-    [if (launcher.isNotEmpty) posix(helper), ...arguments.map(posix)],
+    [
+      if (launcher.isNotEmpty) posix(helper),
+      ...asGiven ? arguments : arguments.map(posix),
+    ],
     environment: {
       for (final MapEntry(:key, :value) in environment.entries)
         key: posix(value),
