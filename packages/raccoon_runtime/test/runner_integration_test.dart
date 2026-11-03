@@ -224,26 +224,27 @@ void main() {
         // the runner takes pixels. A client that never resizes sees the size
         // the runner started at.
         final temp = Directory.systemTemp.createTempSync('raccoon_size');
-        final helper = p.join(runnerDir, 'tool', 'raccoon-device');
         final helperEnvironment = {
           'RACCOON_RUNNER': binary!,
           if (sdk != null) 'FLUTTER_ROOT': sdk,
           'XDG_DATA_HOME': p.join(temp.path, 'data'),
           'XDG_RUNTIME_DIR': temp.path,
           'TMPDIR': '${temp.path}/',
+          // Where Windows puts the sockets.
+          'TMP': temp.path,
         };
-        final install = await Process.run(helper, [
+        final install = await _runHelper(runnerDir, [
           'install',
           assets,
           'sized',
-        ], environment: helperEnvironment);
+        ], helperEnvironment);
         expect(install.exitCode, 0, reason: '${install.stderr}');
-        final run = await Process.start(helper, [
+        final run = await _startHelper(runnerDir, [
           'run',
           '--size',
           size,
           'sized',
-        ], environment: helperEnvironment);
+        ], helperEnvironment);
         final socket = File(p.join(temp.path, 'raccoon', 'sized.sock'));
         try {
           final deadline = DateTime.now().add(const Duration(seconds: 30));
@@ -268,10 +269,9 @@ void main() {
           temp.deleteSync(recursive: true);
         }
       },
-      skip: switch ((ready, Platform.isWindows)) {
-        (false, _) => 'build the runner and example first',
-        (_, true) => 'the helper runs in Git Bash on Windows',
-        _ => false,
+      skip: switch (ready) {
+        false => 'build the runner and example first',
+        true => false,
       },
       timeout: const Timeout(Duration(minutes: 2)),
     );
@@ -654,7 +654,7 @@ void main() {
     },
     skip: switch ((binary != null && sdk != null, Platform.isWindows)) {
       (false, _) => 'build the runner first, with a Flutter SDK on PATH',
-      (_, true) => 'the helper runs in Git Bash on Windows',
+      (_, true) => 'the hint is for native assets, built on macOS and Linux',
       _ => false,
     },
   );
