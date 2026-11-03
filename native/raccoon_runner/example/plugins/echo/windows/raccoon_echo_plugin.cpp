@@ -69,12 +69,13 @@ class RaccoonEchoPlugin : public flutter::Plugin {
 
   ~RaccoonEchoPlugin() override {
     registrar_->UnregisterTopLevelWindowProcDelegate(delegate_);
-    // Into the file named, as stderr may be gone by now.
     char path[MAX_PATH] = {};
     if (g_messenger == nullptr ||
         GetEnvironmentVariableA("RACCOON_ECHO_LATE_SEND", path, sizeof(path)) == 0) {
       return;
     }
+    // A plugin's last words reach the runner's stderr too.
+    std::fprintf(stderr, "RACCOON_ECHO: destroyed\n");
     const uint8_t message[] = {0};
     const bool sent = FlutterDesktopMessengerSendWithReply(
         g_messenger, "raccoon_echo/late", message, sizeof(message),

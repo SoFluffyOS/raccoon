@@ -1390,6 +1390,12 @@ void EngineHost::Shutdown() {
   }
   DropRetired(false);
   if (gpu_) gpu_->Shutdown();
+#if RACCOON_HAS_PLUGINS
+  // The plugins go now, the engine gone, rather than as the host is: what
+  // they say as they go reaches stderr while the runner still reads it
+  // (#345).
+  plugins_.reset();
+#endif
 }
 
 std::string EngineHost::vm_service_uri() const {

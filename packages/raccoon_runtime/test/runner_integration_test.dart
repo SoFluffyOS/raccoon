@@ -7195,6 +7195,9 @@ class Report extends StatelessWidget {
         );
         await read;
         expect(said.readAsStringSync().trim(), 'sent=0 replied=0');
+        // What it says as it goes reaches the runner's stderr: the capture
+        // stops after the plugins are destroyed (#345).
+        expect('$errors', contains('RACCOON_ECHO: destroyed'));
       } finally {
         process.kill();
         temp.deleteSync(recursive: true);
