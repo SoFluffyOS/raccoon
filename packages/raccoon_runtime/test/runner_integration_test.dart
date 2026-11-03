@@ -409,7 +409,7 @@ void main() {
     },
     skip: switch ((ready, Platform.isWindows)) {
       (false, _) => 'build the runner and example first',
-      (_, true) => 'the helper runs in Git Bash on Windows',
+      (_, true) => 'native assets are built on macOS and Linux',
       _ => false,
     },
     timeout: const Timeout(Duration(minutes: 3)),
@@ -481,7 +481,7 @@ void main() {
     },
     skip: switch ((ready, Platform.isWindows)) {
       (false, _) => 'build the runner and example first',
-      (_, true) => 'the helper runs in Git Bash on Windows',
+      (_, true) => 'Windows has no socket directory owners to check',
       _ => false,
     },
   );
@@ -1012,7 +1012,7 @@ void main() {
       },
       skip: switch ((ready, Platform.isWindows)) {
         (false, _) => 'build the runner and example first',
-        (_, true) => 'the helper runs in Git Bash on Windows',
+        (_, true) => 'Windows keeps sockets under %TEMP%, with its own limit',
         _ => false,
       },
       timeout: const Timeout(Duration(minutes: 2)),
@@ -1156,7 +1156,7 @@ void main() {
       Platform.isWindows,
     )) {
       (false, _) => 'build the runner and example/native_assets_app first',
-      (_, true) => 'the helper runs in Git Bash on Windows',
+      (_, true) => 'native assets are built on macOS and Linux',
       _ => false,
     },
     timeout: const Timeout(Duration(minutes: 5)),
