@@ -512,6 +512,16 @@ void main() {
         expect('${result.stderr}', contains(said), reason: '$args');
         expect('${result.stderr}', isNot(contains('unbound variable')));
       }
+
+      // A bundle that isn't there is said so, and nothing is made (#346).
+      final nowhere = await helper([
+        'install',
+        p.join(temp.path, 'nowhere', 'build', 'flutter_assets'),
+        'app',
+      ]);
+      expect(nowhere.exitCode, 1, reason: '${nowhere.stderr}');
+      expect('${nowhere.stderr}', contains('no app bundle at'));
+      expect(Directory(p.join(temp.path, 'data')).existsSync(), isFalse);
     },
     skip: switch (binary != null) {
       false => 'build the runner first',

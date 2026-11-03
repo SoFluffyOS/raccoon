@@ -2523,6 +2523,10 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
     ;;
   install)
     local_path="$1"; key="$(app_key "$2")"
+    if [ ! -d "$local_path" ]; then
+      echo "🦝 no app bundle at $local_path: flutter run builds it there first" >&2
+      exit 1
+    fi
     # The app's own setting (raccoon_runtime's AppPlugins, as a host saves
     # it), shared by its instances, else the host's default, where the
     # environment says none (#214).
