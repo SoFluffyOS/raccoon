@@ -697,6 +697,20 @@ pid_t g_parent_at_start = 0;
 #endif
 
 int Serve(const Options& options) {
+#if defined(_WIN32)
+  // The ancestors to watch, first: a watch holds its process's handle, so
+  // its pid isn't handed out again while the runner lives. Taken after the
+  // engine and plugins started, a launcher gone meanwhile could already
+  // have its pid reused, and the runner would watch nothing, as the parent
+  // at the start of main is taken on the other hosts (#244, #345).
+  std::vector<std::unique_ptr<ProcessWatch>> watches;
+  for (const uint32_t pid : AncestorsToWatch()) {
+    watches.push_back(std::make_unique<ProcessWatch>(pid));
+  }
+  if (const char* tool = std::getenv("RACCOON_PARENT_PID"); tool != nullptr) {
+    watches.push_back(std::make_unique<ProcessWatch>(static_cast<uint32_t>(std::atoi(tool))));
+  }
+#endif
   raccoon::EventLoop loop;
   g_loop = &loop;
   std::signal(SIGINT, OnSignal);
@@ -909,13 +923,7 @@ int Serve(const Options& options) {
   // variable too where it names a process.
   const char* tool_env = std::getenv("RACCOON_PARENT_PID");
 #if defined(_WIN32)
-  std::vector<std::unique_ptr<ProcessWatch>> watches;
-  for (const uint32_t pid : AncestorsToWatch()) {
-    watches.push_back(std::make_unique<ProcessWatch>(pid));
-  }
-  if (tool_env != nullptr) {
-    watches.push_back(std::make_unique<ProcessWatch>(static_cast<uint32_t>(std::atoi(tool_env))));
-  }
+  // The watches, taken at the start (see the top of Serve).
   // The pid that is gone, or 0.
   auto GonePid = [&watches]() -> int {
     for (const auto& watch : watches) {
