@@ -380,8 +380,10 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   a run that can't start: an app not installed, no runner binary, or an
   engine that can't be downloaded (#119). Each run's socket is
   `<socket dir>/<app>.sock`; a key too long for a socket path (104 bytes
-  on macOS) gets as much of it as fits and `~<checksum>`, with the key in
-  a `.name` file beside the socket, which `RunnerDiscovery` reads (#118).
+  on macOS) gets as much of it as fits, in whole characters, and
+  `~<checksum>`, with the key in a `.name` file beside the socket, which
+  `RunnerDiscovery` reads (#118, #340). Installs of one project go one at
+  a time (#341).
 
 ## Build
 
