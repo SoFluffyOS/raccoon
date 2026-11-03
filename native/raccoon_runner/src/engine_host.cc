@@ -141,6 +141,16 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
       procs.Run(FLUTTER_ENGINE_VERSION, &renderer, &args, this, &engine_);
   if (result != kSuccess) {
     *error = "FlutterEngineRun failed with " + std::to_string(result);
+    // The usual reason it refuses: a bundle without its kernel, which the
+    // engine says only in its own words (#347).
+    if (result == kInvalidArguments) {
+      if (FILE* kernel = std::fopen((assets_ + "/kernel_blob.bin").c_str(), "rb")) {
+        std::fclose(kernel);
+      } else {
+        *error = "no kernel_blob.bin in " + assets_ +
+                 ": the runner runs debug bundles (flutter build bundle)";
+      }
+    }
     return false;
   }
   platform_->SetEngine(engine_);

@@ -529,6 +529,40 @@ void main() {
     },
   );
 
+  // #347: a bundle without its kernel failed as "FlutterEngineRun failed
+  // with 2", the reason only in the engine's own words.
+  test(
+    'a bundle without its kernel says so',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_no_kernel');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      for (final entity in Directory(assets).listSync(recursive: true)) {
+        final target = p.join(temp.path, p.relative(entity.path, from: assets));
+        if (entity is File && p.basename(entity.path) != 'kernel_blob.bin') {
+          File(target).parent.createSync(recursive: true);
+          entity.copySync(target);
+        }
+      }
+      final result = await Process.run(binary!, [
+        'render',
+        '--engine-dir',
+        engineDir!,
+        '--assets',
+        temp.path,
+        '--icu',
+        icu!,
+        '--out',
+        p.join(temp.path, 'frame.ppm'),
+      ]);
+      expect(result.exitCode, isNot(0));
+      expect('${result.stderr}', contains('no kernel_blob.bin in'));
+    },
+    skip:
+        ready
+            ? false
+            : 'build the runner and example first: $binary / $engineDir / $icu',
+  );
+
   test(
     'a named renderer is that one or none, and an unknown name is auto',
     () async {
