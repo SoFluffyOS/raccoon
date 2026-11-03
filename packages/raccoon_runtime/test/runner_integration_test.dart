@@ -2565,10 +2565,10 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
     final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
       ..createSync(recursive: true);
     final data = p.join(temp.path, 'data');
-    final result = await Process.run(
-      p.join(runnerDir, 'tool', 'raccoon-device'),
+    final result = await _runHelper(
+      runnerDir,
       ['install', bundle.path, 'app'],
-      environment: {
+      {
         'RACCOON_RUNNER': binary ?? '',
         if (sdk != null) 'FLUTTER_ROOT': sdk,
         'XDG_DATA_HOME': data,
@@ -2610,10 +2610,9 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
         [('mobile_only', 'no_host')],
       );
     },
-    skip: switch ((binary != null && sdk != null, Platform.isWindows)) {
-      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
-      (_, true) => 'the helper runs in Git Bash on Windows',
-      _ => false,
+    skip: switch (binary != null && sdk != null) {
+      false => 'build the runner first, with a Flutter SDK on PATH',
+      true => false,
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );
@@ -6410,14 +6409,13 @@ class Report extends StatelessWidget {
       // prebuilt archive: cached leaves it out and says so, off has none,
       // and once built, cached takes it.
       final temp = Directory.systemTemp.createTempSync('raccoon_plugins');
-      final helper = p.join(runnerDir, 'tool', 'raccoon-device');
       final data = p.join(temp.path, 'data');
       final out = p.join(data, 'raccoon', 'apps', 'plugins_app', 'plugins');
       Future<String> install(String? mode, {bool pods = false}) async {
-        final result = await Process.run(
-          helper,
+        final result = await _runHelper(
+          runnerDir,
           ['install', pluginsAppAssets, 'plugins_app'],
-          environment: {
+          {
             'RACCOON_RUNNER': binary!,
             if (sdk != null) 'FLUTTER_ROOT': sdk,
             'XDG_DATA_HOME': data,
@@ -6516,13 +6514,11 @@ class Report extends StatelessWidget {
         temp.deleteSync(recursive: true);
       }
     },
-    skip: switch ((
-      binary != null && sdk != null && Directory(pluginsAppAssets).existsSync(),
-      Platform.isWindows,
-    )) {
-      (false, _) => 'build the runner and example/plugins_app first',
-      (_, true) => 'the helper runs in Git Bash on Windows',
-      _ => false,
+    skip: switch (binary != null &&
+        sdk != null &&
+        Directory(pluginsAppAssets).existsSync()) {
+      false => 'build the runner and example/plugins_app first',
+      true => false,
     },
     timeout: const Timeout(Duration(minutes: 5)),
   );
