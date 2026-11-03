@@ -282,29 +282,30 @@ void main() {
     'a run whose engine can\'t be downloaded says so',
     () async {
       final temp = Directory.systemTemp.createTempSync('raccoon_offline');
-      final helper = p.join(runnerDir, 'tool', 'raccoon-device');
       final environment = {
         'RACCOON_RUNNER': binary!,
         if (sdk != null) 'FLUTTER_ROOT': sdk,
         'XDG_DATA_HOME': p.join(temp.path, 'data'),
         'XDG_RUNTIME_DIR': temp.path,
         'TMPDIR': '${temp.path}/',
+        // Where Windows puts the sockets.
+        'TMP': temp.path,
         // No engine cached, and no way to fetch one.
         'RACCOON_ENGINE_CACHE': p.join(temp.path, 'engines'),
         'https_proxy': 'http://127.0.0.1:9',
         'HTTPS_PROXY': 'http://127.0.0.1:9',
       };
       try {
-        final install = await Process.run(helper, [
+        final install = await _runHelper(runnerDir, [
           'install',
           assets,
           'offline',
-        ], environment: environment);
+        ], environment);
         expect(install.exitCode, 0, reason: '${install.stderr}');
-        final run = await Process.run(helper, [
+        final run = await _runHelper(runnerDir, [
           'run',
           'offline',
-        ], environment: environment).timeout(const Duration(seconds: 60));
+        ], environment).timeout(const Duration(seconds: 60));
         expect(run.exitCode, isNot(0));
         expect(
           '${run.stderr}',
@@ -313,10 +314,10 @@ void main() {
         expect('${run.stderr}', isNot(contains('usage:')));
 
         // A runner that isn't there says so too, the engine found as usual.
-        final missing = await Process.run(
-          helper,
+        final missing = await _runHelper(
+          runnerDir,
           ['run', 'offline'],
-          environment: {
+          {
             for (final MapEntry(:key, :value) in environment.entries)
               if (!key.toLowerCase().contains('proxy') &&
                   key != 'RACCOON_ENGINE_CACHE')
@@ -328,10 +329,10 @@ void main() {
         expect('${missing.stderr}', contains('no runner at'));
 
         // And an app that was never installed.
-        final absent = await Process.run(helper, [
+        final absent = await _runHelper(runnerDir, [
           'run',
           'never_installed',
-        ], environment: environment).timeout(const Duration(seconds: 60));
+        ], environment).timeout(const Duration(seconds: 60));
         expect(absent.exitCode, isNot(0));
         expect(
           '${absent.stderr}',
@@ -341,10 +342,9 @@ void main() {
         temp.deleteSync(recursive: true);
       }
     },
-    skip: switch ((ready, Platform.isWindows)) {
-      (false, _) => 'build the runner and example first',
-      (_, true) => 'the helper runs in Git Bash on Windows',
-      _ => false,
+    skip: switch (ready) {
+      false => 'build the runner and example first',
+      true => false,
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );
@@ -1353,7 +1353,6 @@ void main() {
       // A device that names no size: the helper reads AppSizes, so the app
       // opens as the board left it (#89).
       final temp = Directory.systemTemp.createTempSync('raccoon_size');
-      final helper = p.join(runnerDir, 'tool', 'raccoon-device');
       final data = p.join(temp.path, 'data');
       final helperEnvironment = {
         'RACCOON_RUNNER': binary!,
@@ -1361,20 +1360,22 @@ void main() {
         'XDG_DATA_HOME': data,
         'XDG_RUNTIME_DIR': temp.path,
         'TMPDIR': '${temp.path}/',
+        // Where Windows puts the sockets.
+        'TMP': temp.path,
       };
-      final install = await Process.run(helper, [
+      final install = await _runHelper(runnerDir, [
         'install',
         assets,
         'saved',
-      ], environment: helperEnvironment);
+      ], helperEnvironment);
       expect(install.exitCode, 0, reason: '${install.stderr}');
       AppSizes.forHost(
         helperEnvironment,
       ).save('saved', width: 200, height: 150, pixelRatio: 2);
-      final run = await Process.start(helper, [
+      final run = await _startHelper(runnerDir, [
         'run',
         'saved',
-      ], environment: helperEnvironment);
+      ], helperEnvironment);
       final socket = File(p.join(temp.path, 'raccoon', 'saved.sock'));
       try {
         final deadline = DateTime.now().add(const Duration(seconds: 30));
@@ -1399,10 +1400,9 @@ void main() {
         temp.deleteSync(recursive: true);
       }
     },
-    skip: switch ((ready, Platform.isWindows)) {
-      (false, _) => 'build the runner and example first',
-      (_, true) => 'the helper runs in Git Bash on Windows',
-      _ => false,
+    skip: switch (ready) {
+      false => 'build the runner and example first',
+      true => false,
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );
@@ -8457,6 +8457,25 @@ Future<ProcessResult> _runHelper(
       if (launcher.isNotEmpty) posix(helper),
       ...asGiven ? arguments : arguments.map(posix),
     ],
+    environment: {
+      for (final MapEntry(:key, :value) in environment.entries)
+        key: posix(value),
+    },
+  );
+}
+
+/// Starts the device helper as [_runHelper] runs it.
+Future<Process> _startHelper(
+  String runnerDir,
+  List<String> arguments,
+  Map<String, String> environment,
+) {
+  String posix(String value) => value.replaceAll(r'\', '/');
+  final helper = p.join(runnerDir, 'tool', 'raccoon-device');
+  final launcher = CustomDeviceConfig.hostLauncher;
+  return Process.start(
+    launcher.firstOrNull ?? helper,
+    [if (launcher.isNotEmpty) posix(helper), ...arguments.map(posix)],
     environment: {
       for (final MapEntry(:key, :value) in environment.entries)
         key: posix(value),
