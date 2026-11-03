@@ -164,6 +164,21 @@ void RaccoonEchoPluginRegisterWithRegistrar(FlutterDesktopPluginRegistrarRef reg
     std::fprintf(stderr, "RACCOON_CRASH: the reason\n");
     *static_cast<volatile int*>(nullptr) = 0;
   }
+  // For the runner's tests: the DPI awareness a plugin's windows get, into
+  // the file RACCOON_ECHO_DPI names.
+  char dpi_path[MAX_PATH] = {};
+  FILE* dpi_file = nullptr;
+  if (GetEnvironmentVariableA("RACCOON_ECHO_DPI", dpi_path, sizeof(dpi_path)) > 0 &&
+      fopen_s(&dpi_file, dpi_path, "w") == 0 && dpi_file != nullptr) {
+    const DPI_AWARENESS_CONTEXT context = GetThreadDpiAwarenessContext();
+    const char* awareness =
+        AreDpiAwarenessContextsEqual(context, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+            ? "per-monitor-v2"
+            : GetAwarenessFromDpiAwarenessContext(context) == DPI_AWARENESS_UNAWARE ? "unaware"
+                                                                                    : "other";
+    std::fprintf(dpi_file, "%s\n", awareness);
+    std::fclose(dpi_file);
+  }
   g_messenger = FlutterDesktopPluginRegistrarGetMessenger(registrar);
   auto* windows = flutter::PluginRegistrarManager::GetInstance()
                       ->GetRegistrar<flutter::PluginRegistrarWindows>(registrar);
