@@ -2230,7 +2230,8 @@ lock_build() {
   # killed holder's pid went to another process since.
   local holder
   until mkdir "$BUILD_LOCK" 2>/dev/null; do
-    holder="$(cat "$BUILD_LOCK/pid" 2>/dev/null || true)"
+    holder=""
+    read -r holder 2>/dev/null < "$BUILD_LOCK/pid" || true
     if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; } ||
        { [ -z "$holder" ] && [ -n "$(find "$BUILD_LOCK" -maxdepth 0 -mmin +10 2>/dev/null)" ]; } ||
        [ -n "$(find "$BUILD_LOCK" -maxdepth 0 -mmin +60 2>/dev/null)" ]; then
@@ -2411,11 +2412,12 @@ PY
   fi
   log="$app/native_assets.log"
   mkdir -p "$out"
-  local status=0 started unchanged="" stamp="$out/raccoon_inputs"
+  local status=0 started unchanged="" stamp="$out/raccoon_inputs" saved=""
+  [ ! -f "$stamp" ] || read_word saved "$stamp"
   # perl, as the run log's timestamps: a Python start only to read the
   # clock cost ~25 ms (#336).
   started="$(perl -MTime::HiRes=time -e 'printf "%.6f", time')"
-  if [ -n "$inputs" ] && [ -f "$manifest" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$inputs" ]; then
+  if [ -n "$inputs" ] && [ -f "$manifest" ] && [ "$saved" = "$inputs" ]; then
     unchanged=1
   else
     rm -f "$stamp"
