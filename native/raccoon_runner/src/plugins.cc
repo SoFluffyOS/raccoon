@@ -63,12 +63,16 @@ bool PluginHost::LoadManifest(const std::string& path, std::string* error) {
     *error = path + ": not a manifest";
     return false;
   }
+  const nlohmann::json& plugins = List(manifest, "plugins");
+  // One that lists only statuses (every plugin skipped, say) has nothing
+  // to load, and no FlutterMacOS to load first.
   std::string unprepared;
-  const bool prepared = Prepare(Str(manifest, "flutter_framework"), &unprepared);
+  const bool prepared =
+      plugins.empty() || Prepare(Str(manifest, "flutter_framework"), &unprepared);
   if (!prepared) {
     std::fprintf(stderr, "🦝 plugins: %s\n", unprepared.c_str());
   }
-  for (const auto& item : List(manifest, "plugins")) {
+  for (const auto& item : plugins) {
     if (!item.is_object()) continue;
     PluginEntry entry;
     entry.name = Str(item, "name");

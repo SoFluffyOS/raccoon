@@ -20,7 +20,8 @@
 # RACCOON_PLUGINS says what an install does with the app's native plugins:
 # build (the default) builds what isn't cached; cached takes the cache and
 # the release's prebuilt plugins but compiles nothing, and says which it
-# left out; off has none at all. Unset, the app's own setting says, else
+# left out, native assets too unless their last build is up to date; off
+# has none at all, nor native assets. Unset, the app's own setting says, else
 # the host's default, as raccoon_runtime's AppPlugins saves them (#214).
 set -euo pipefail
 
@@ -2275,6 +2276,10 @@ build_native_assets() {
   local -a target
   if [ $# -ge 3 ]; then config="$3"; else config="$(package_config "$project")" || config=""; fi
   [ -n "$config" ] || return 0
+  if [ "${RACCOON_PLUGINS:-}" = off ]; then
+    echo "🦝 native assets off (RACCOON_PLUGINS=off)" >&2
+    return 0
+  fi
   # The plugin pass, just run on the same config, found no build hook: as
   # the scan below would, at the cost of a Python start (#314).
   [ -f "$app/plugins/.no_hooks" ] && return 0
@@ -2400,11 +2405,14 @@ try:
                 digest.update(b'missing')
 except (OSError, ValueError):
     pass
-print(digest.hexdigest())
+print(digest.hexdigest(), ' '.join(sorted(hooked)))
 PY
 )" || scan=$?
   # 3: no package has a hook. Any other failure: build, and keep no stamp.
   [ "$scan" -eq 3 ] && return 0
+  # The hash, then the hook packages, by name.
+  local hooked="${inputs#* }"
+  inputs="${inputs%% *}"
   lock_build "$project"
   if [ ! -f "$project/lib/main.dart" ]; then
     echo "🦝 native assets skipped: no lib/main.dart to build them with" >&2
@@ -2419,6 +2427,27 @@ PY
   started="$(perl -MTime::HiRes=time -e 'printf "%.6f", time')"
   if [ -n "$inputs" ] && [ -f "$manifest" ] && [ "$saved" = "$inputs" ]; then
     unchanged=1
+  elif [ "${RACCOON_PLUGINS:-}" = cached ]; then
+    # Nothing compiles: no build, or one whose inputs changed, is left out
+    # rather than taken stale. Each hook package is reported as a skipped
+    # plugin is, in the plugins manifest the runner tells clients from.
+    [ -n "$hooked" ] || return 0
+    echo "🦝 native assets not built (RACCOON_PLUGINS=cached): $hooked" >&2
+    python3 - "$app/plugins/manifest.json" $hooked <<'PY'
+import json, os, sys
+path, names = sys.argv[1], sys.argv[2:]
+try:
+    manifest = json.load(open(path))
+except (OSError, ValueError):
+    manifest = {'plugins': []}
+manifest.setdefault('status', []).extend(
+    {'name': name, 'state': 'skipped',
+     'detail': 'not built: native assets are cached only (RACCOON_PLUGINS=cached)'}
+    for name in names)
+os.makedirs(os.path.dirname(path), exist_ok=True)
+json.dump(manifest, open(path, 'w'), indent=1)
+PY
+    return 0
   else
     rm -f "$stamp"
     clear_assembled_linux "$project"

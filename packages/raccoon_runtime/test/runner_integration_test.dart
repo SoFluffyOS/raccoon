@@ -970,13 +970,14 @@ void main() {
       expect('${built.stderr}', contains('is not a package config'));
       expect('${built.stderr}', isNot(contains('Traceback')));
 
-      // Native assets read it too, on their own: on macOS and Linux, the
-      // hosts that build them.
+      // Off reads it for neither: no native plugins and no native assets
+      // (#349).
       if (Platform.isWindows) return;
-      final assetsOnly = await install({'RACCOON_PLUGINS': 'off'});
-      expect('${assetsOnly.stderr}', contains('is not a package config'));
-      expect('${assetsOnly.stderr}', isNot(contains('Traceback')));
-      expect('${assetsOnly.stderr}', isNot(contains('substitution')));
+      final off = await install({'RACCOON_PLUGINS': 'off'});
+      expect(off.exitCode, 0, reason: '${off.stderr}');
+      expect('${off.stderr}', contains('native assets off'));
+      expect('${off.stderr}', isNot(contains('Traceback')));
+      expect('${off.stderr}', isNot(contains('substitution')));
     },
     skip: switch (binary != null) {
       false => 'build the runner first',
@@ -1220,12 +1221,12 @@ void main() {
         'XDG_RUNTIME_DIR': temp.path,
         'TMPDIR': '${temp.path}/',
       };
-      Future<String> install() async {
-        final result = await Process.run(helper, [
-          'install',
-          nativeAssetsBundle,
-          'native_assets_app',
-        ], environment: environment);
+      Future<String> install([Map<String, String> extra = const {}]) async {
+        final result = await Process.run(
+          helper,
+          ['install', nativeAssetsBundle, 'native_assets_app'],
+          environment: {...environment, ...extra},
+        );
         expect(result.exitCode, 0, reason: '${result.stderr}');
         return '${result.stderr}';
       }
@@ -1247,6 +1248,49 @@ void main() {
 
         final again = await install();
         expect(again, contains('1 for this host, unchanged'));
+
+        // #349: cached only reuses an up-to-date build, and builds none:
+        // the hook package is reported as a skipped plugin is.
+        expect(
+          await install({'RACCOON_PLUGINS': 'cached'}),
+          contains('1 for this host, unchanged'),
+        );
+        File(
+          p.join(runnerDir, 'example', 'native_add', 'hook', 'build.dart'),
+        ).setLastModifiedSync(DateTime.now());
+        final skipped = await install({'RACCOON_PLUGINS': 'cached'});
+        expect(skipped, contains('native assets not built'));
+        expect(skipped, isNot(contains('native assets ready')));
+        final app = p.join(
+          temp.path,
+          'data',
+          'raccoon',
+          'apps',
+          'native_assets_app',
+        );
+        expect(Directory(p.join(app, 'native_assets')).existsSync(), isFalse);
+        final status =
+            (jsonDecode(
+                      File(
+                        p.join(app, 'plugins', 'manifest.json'),
+                      ).readAsStringSync(),
+                    )
+                    as Map)['status']
+                as List;
+        expect(status, [
+          {
+            'name': 'native_add',
+            'state': 'skipped',
+            'detail':
+                'not built: native assets are cached only '
+                '(RACCOON_PLUGINS=cached)',
+          },
+        ]);
+        // Off has none, and doesn't look.
+        final off = await install({'RACCOON_PLUGINS': 'off'});
+        expect(off, contains('native assets off'));
+        expect(off, isNot(contains('native assets ready')));
+        expect(await install(), isNot(contains('unchanged')));
 
         // A file gone from the hook package, the newest one kept as is:
         // the build is stale.
