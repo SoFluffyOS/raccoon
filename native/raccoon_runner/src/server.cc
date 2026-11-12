@@ -588,6 +588,16 @@ void RunnerServer::Dispatch(const v1::ClientMessage& message) {
     case v1::ClientMessage::kSettings:
       if (handler_.on_settings) handler_.on_settings(message.settings());
       break;
+    case v1::ClientMessage::kSemanticsRequest:
+      if (handler_.on_semantics_request) {
+        handler_.on_semantics_request(message.semantics_request());
+      }
+      break;
+    case v1::ClientMessage::kSemanticsAction:
+      if (handler_.on_semantics_action) {
+        handler_.on_semantics_action(message.semantics_action());
+      }
+      break;
     case v1::ClientMessage::kShutdown:
       if (handler_.on_shutdown) handler_.on_shutdown();
       break;

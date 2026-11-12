@@ -121,6 +121,16 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   inserts a newline only in a multiline field whose action is newline, and
   always sends the action. A client with an input method says so in its
   hello (`composes`), mirrors the field and types through it (#151).
+- Reads the app's semantics tree for a client that asks
+  (`SemanticsRequest`), as an accessibility service does: each node's
+  label, value, hint, tooltip, test id (`Semantics(identifier:)`), flags,
+  actions and bounds in the view, in the client's pixels, every transform
+  above it applied. Semantics cost the app every frame, so they go on at
+  the first ask and off after a quiet spell, 30 s unless the ask names
+  another. An ask right after input waits up to half a second for the tree
+  that input brings. `SemanticsAction` taps, long presses, scrolls, focuses
+  or sets a field's text by node; a field takes text only while focused.
+  `example/semantics` shows it.
 - Rasterizes on the GPU where the host offers one without a window: through
   EGL on Linux (Mesa: the surfaceless platform or a render node), through
   Metal on macOS, through Vulkan on Windows. By default each frame is read back as pixels in the

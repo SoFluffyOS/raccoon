@@ -14,5 +14,6 @@ export 'package:raccoon_runtime/src/runner_process.dart';
 export 'package:raccoon_runtime/src/runner_transport.dart';
 export 'package:raccoon_runtime/src/runner_version.dart';
 export 'package:raccoon_runtime/src/runtime_store.dart';
+export 'package:raccoon_runtime/src/semantics_bits.dart';
 export 'package:raccoon_runtime/src/startup_failure.dart';
 export 'package:raccoon_runtime/src/views_entrypoint.dart';

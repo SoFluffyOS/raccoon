@@ -1017,6 +1017,8 @@ enum ClientMessage_Message {
   textEditing,
   settings,
   appMessage,
+  semanticsRequest,
+  semanticsAction,
   notSet
 }
 
@@ -1032,6 +1034,8 @@ class ClientMessage extends $pb.GeneratedMessage {
     TextEditing? textEditing,
     Settings? settings,
     AppMessage? appMessage,
+    SemanticsRequest? semanticsRequest,
+    SemanticsAction? semanticsAction,
   }) {
     final result = ClientMessage._();
     if (hello != null) result.hello = hello;
@@ -1044,6 +1048,8 @@ class ClientMessage extends $pb.GeneratedMessage {
     if (textEditing != null) result.textEditing = textEditing;
     if (settings != null) result.settings = settings;
     if (appMessage != null) result.appMessage = appMessage;
+    if (semanticsRequest != null) result.semanticsRequest = semanticsRequest;
+    if (semanticsAction != null) result.semanticsAction = semanticsAction;
     return result;
   }
 
@@ -1068,13 +1074,15 @@ class ClientMessage extends $pb.GeneratedMessage {
     8: ClientMessage_Message.textEditing,
     9: ClientMessage_Message.settings,
     10: ClientMessage_Message.appMessage,
+    11: ClientMessage_Message.semanticsRequest,
+    12: ClientMessage_Message.semanticsAction,
     0: ClientMessage_Message.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'ClientMessage',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
       createEmptyInstance: ClientMessage.$_createMessage)
-    ..oo(0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    ..oo(0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
     ..aOM<ClientHello>(1, _omitFieldNames ? '' : 'hello',
         subBuilder: ClientHello.$_createMessage)
     ..aOM<Resize>(2, _omitFieldNames ? '' : 'resize',
@@ -1095,6 +1103,10 @@ class ClientMessage extends $pb.GeneratedMessage {
         subBuilder: Settings.$_createMessage)
     ..aOM<AppMessage>(10, _omitFieldNames ? '' : 'appMessage',
         subBuilder: AppMessage.$_createMessage)
+    ..aOM<SemanticsRequest>(11, _omitFieldNames ? '' : 'semanticsRequest',
+        subBuilder: SemanticsRequest.$_createMessage)
+    ..aOM<SemanticsAction>(12, _omitFieldNames ? '' : 'semanticsAction',
+        subBuilder: SemanticsAction.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1129,6 +1141,8 @@ class ClientMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(8)
   @$pb.TagNumber(9)
   @$pb.TagNumber(10)
+  @$pb.TagNumber(11)
+  @$pb.TagNumber(12)
   ClientMessage_Message whichMessage() =>
       _ClientMessage_MessageByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(1)
@@ -1141,6 +1155,8 @@ class ClientMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(8)
   @$pb.TagNumber(9)
   @$pb.TagNumber(10)
+  @$pb.TagNumber(11)
+  @$pb.TagNumber(12)
   void clearMessage() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -1252,6 +1268,195 @@ class ClientMessage extends $pb.GeneratedMessage {
   void clearAppMessage() => $_clearField(10);
   @$pb.TagNumber(10)
   AppMessage ensureAppMessage() => $_ensure(9);
+
+  @$pb.TagNumber(11)
+  SemanticsRequest get semanticsRequest => $_getN(10);
+  @$pb.TagNumber(11)
+  set semanticsRequest(SemanticsRequest value) => $_setField(11, value);
+  @$pb.TagNumber(11)
+  $core.bool hasSemanticsRequest() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearSemanticsRequest() => $_clearField(11);
+  @$pb.TagNumber(11)
+  SemanticsRequest ensureSemanticsRequest() => $_ensure(10);
+
+  @$pb.TagNumber(12)
+  SemanticsAction get semanticsAction => $_getN(11);
+  @$pb.TagNumber(12)
+  set semanticsAction(SemanticsAction value) => $_setField(12, value);
+  @$pb.TagNumber(12)
+  $core.bool hasSemanticsAction() => $_has(11);
+  @$pb.TagNumber(12)
+  void clearSemanticsAction() => $_clearField(12);
+  @$pb.TagNumber(12)
+  SemanticsAction ensureSemanticsAction() => $_ensure(11);
+}
+
+/// Asks for the semantics tree of the client's view, as an accessibility
+/// service reads it: what each node says, does and covers. The first ask turns
+/// the app's semantics on, which costs each frame, and the runner answers once
+/// the app sent its tree, or after 3 s with what it has; later asks are
+/// answered at once. Semantics go off again when no ask or action came for
+/// keep_on_millis (30 s when 0). A runner that predates it never answers;
+/// RunnerHello.semantics says whether one does.
+class SemanticsRequest extends $pb.GeneratedMessage {
+  factory SemanticsRequest({
+    $core.int? requestId,
+    $core.int? keepOnMillis,
+  }) {
+    final result = SemanticsRequest._();
+    if (requestId != null) result.requestId = requestId;
+    if (keepOnMillis != null) result.keepOnMillis = keepOnMillis;
+    return result;
+  }
+
+  SemanticsRequest._();
+
+  factory SemanticsRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SemanticsRequest()..mergeFromBuffer(data, registry);
+  factory SemanticsRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SemanticsRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SemanticsRequest',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
+      createEmptyInstance: SemanticsRequest.$_createMessage)
+    ..aI(1, _omitFieldNames ? '' : 'requestId', fieldType: $pb.PbFieldType.OU3)
+    ..aI(2, _omitFieldNames ? '' : 'keepOnMillis',
+        fieldType: $pb.PbFieldType.OU3)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SemanticsRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SemanticsRequest copyWith(void Function(SemanticsRequest) updates) =>
+      super.copyWith((message) => updates(message as SemanticsRequest))
+          as SemanticsRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SemanticsRequest() / SemanticsRequest.new instead')
+  static SemanticsRequest create() => SemanticsRequest._();
+  static $pb.GeneratedMessage $_createMessage() => SemanticsRequest._();
+  @$core.override
+  SemanticsRequest createEmptyInstance() => SemanticsRequest._();
+  @$core.pragma('dart2js:noInline')
+  static SemanticsRequest getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SemanticsRequest>(
+          SemanticsRequest.$_createMessage);
+  static SemanticsRequest? _defaultInstance;
+
+  /// Named back by the SemanticsTree that answers.
+  @$pb.TagNumber(1)
+  $core.int get requestId => $_getIZ(0);
+  @$pb.TagNumber(1)
+  set requestId($core.int value) => $_setUnsignedInt32(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasRequestId() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearRequestId() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.int get keepOnMillis => $_getIZ(1);
+  @$pb.TagNumber(2)
+  set keepOnMillis($core.int value) => $_setUnsignedInt32(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasKeepOnMillis() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearKeepOnMillis() => $_clearField(2);
+}
+
+/// Performs an action on a node of the client's view's tree, as an
+/// accessibility service does: tap, long press, scroll, focus, set text.
+class SemanticsAction extends $pb.GeneratedMessage {
+  factory SemanticsAction({
+    $core.int? nodeId,
+    $fixnum.Int64? action,
+    $core.String? text,
+  }) {
+    final result = SemanticsAction._();
+    if (nodeId != null) result.nodeId = nodeId;
+    if (action != null) result.action = action;
+    if (text != null) result.text = text;
+    return result;
+  }
+
+  SemanticsAction._();
+
+  factory SemanticsAction.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SemanticsAction()..mergeFromBuffer(data, registry);
+  factory SemanticsAction.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SemanticsAction()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SemanticsAction',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
+      createEmptyInstance: SemanticsAction.$_createMessage)
+    ..aI(1, _omitFieldNames ? '' : 'nodeId')
+    ..a<$fixnum.Int64>(2, _omitFieldNames ? '' : 'action', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aOS(3, _omitFieldNames ? '' : 'text')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SemanticsAction clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SemanticsAction copyWith(void Function(SemanticsAction) updates) =>
+      super.copyWith((message) => updates(message as SemanticsAction))
+          as SemanticsAction;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SemanticsAction() / SemanticsAction.new instead')
+  static SemanticsAction create() => SemanticsAction._();
+  static $pb.GeneratedMessage $_createMessage() => SemanticsAction._();
+  @$core.override
+  SemanticsAction createEmptyInstance() => SemanticsAction._();
+  @$core.pragma('dart2js:noInline')
+  static SemanticsAction getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SemanticsAction>(
+          SemanticsAction.$_createMessage);
+  static SemanticsAction? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.int get nodeId => $_getIZ(0);
+  @$pb.TagNumber(1)
+  set nodeId($core.int value) => $_setSignedInt32(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasNodeId() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearNodeId() => $_clearField(1);
+
+  /// One of Flutter's SemanticsAction values, a single bit: tap 1 << 0, long
+  /// press 1 << 1, scroll left, right, up and down 1 << 2 to 1 << 5, set
+  /// text 1 << 21, focus 1 << 22. The node's actions say which it takes.
+  @$pb.TagNumber(2)
+  $fixnum.Int64 get action => $_getI64(1);
+  @$pb.TagNumber(2)
+  set action($fixnum.Int64 value) => $_setInt64(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasAction() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearAction() => $_clearField(2);
+
+  /// Set text only: the field's whole new text. A text field takes it only
+  /// while it has the focus.
+  @$pb.TagNumber(3)
+  $core.String get text => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set text($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasText() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearText() => $_clearField(3);
 }
 
 /// The client's input method produced a value for the active text field:
@@ -1369,6 +1574,7 @@ class RunnerHello extends $pb.GeneratedMessage {
     $core.int? pid,
     $core.bool? views,
     $fixnum.Int64? viewId,
+    $core.bool? semantics,
   }) {
     final result = RunnerHello._();
     if (protocolVersion != null) result.protocolVersion = protocolVersion;
@@ -1376,6 +1582,7 @@ class RunnerHello extends $pb.GeneratedMessage {
     if (pid != null) result.pid = pid;
     if (views != null) result.views = views;
     if (viewId != null) result.viewId = viewId;
+    if (semantics != null) result.semantics = semantics;
     return result;
   }
 
@@ -1398,6 +1605,7 @@ class RunnerHello extends $pb.GeneratedMessage {
     ..aI(3, _omitFieldNames ? '' : 'pid', fieldType: $pb.PbFieldType.OU3)
     ..aOB(4, _omitFieldNames ? '' : 'views')
     ..aInt64(5, _omitFieldNames ? '' : 'viewId')
+    ..aOB(6, _omitFieldNames ? '' : 'semantics')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1473,6 +1681,16 @@ class RunnerHello extends $pb.GeneratedMessage {
   $core.bool hasViewId() => $_has(4);
   @$pb.TagNumber(5)
   void clearViewId() => $_clearField(5);
+
+  /// The runner answers SemanticsRequest and takes SemanticsAction.
+  @$pb.TagNumber(6)
+  $core.bool get semantics => $_getBF(5);
+  @$pb.TagNumber(6)
+  set semantics($core.bool value) => $_setBool(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasSemantics() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearSemantics() => $_clearField(6);
 }
 
 /// A frame carries its pixels inline, or names the shared buffer that holds
@@ -2532,6 +2750,7 @@ enum RunnerMessage_Message {
   textField,
   gpuBuffers,
   plugins,
+  semanticsTree,
   notSet
 }
 
@@ -2548,6 +2767,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
     TextField? textField,
     GpuBuffers? gpuBuffers,
     Plugins? plugins,
+    SemanticsTree? semanticsTree,
   }) {
     final result = RunnerMessage._();
     if (hello != null) result.hello = hello;
@@ -2561,6 +2781,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
     if (textField != null) result.textField = textField;
     if (gpuBuffers != null) result.gpuBuffers = gpuBuffers;
     if (plugins != null) result.plugins = plugins;
+    if (semanticsTree != null) result.semanticsTree = semanticsTree;
     return result;
   }
 
@@ -2586,13 +2807,14 @@ class RunnerMessage extends $pb.GeneratedMessage {
     9: RunnerMessage_Message.textField,
     10: RunnerMessage_Message.gpuBuffers,
     11: RunnerMessage_Message.plugins,
+    12: RunnerMessage_Message.semanticsTree,
     0: RunnerMessage_Message.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'RunnerMessage',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
       createEmptyInstance: RunnerMessage.$_createMessage)
-    ..oo(0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+    ..oo(0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
     ..aOM<RunnerHello>(1, _omitFieldNames ? '' : 'hello',
         subBuilder: RunnerHello.$_createMessage)
     ..aOM<Frame>(2, _omitFieldNames ? '' : 'frame',
@@ -2615,6 +2837,8 @@ class RunnerMessage extends $pb.GeneratedMessage {
         subBuilder: GpuBuffers.$_createMessage)
     ..aOM<Plugins>(11, _omitFieldNames ? '' : 'plugins',
         subBuilder: Plugins.$_createMessage)
+    ..aOM<SemanticsTree>(12, _omitFieldNames ? '' : 'semanticsTree',
+        subBuilder: SemanticsTree.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2650,6 +2874,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(9)
   @$pb.TagNumber(10)
   @$pb.TagNumber(11)
+  @$pb.TagNumber(12)
   RunnerMessage_Message whichMessage() =>
       _RunnerMessage_MessageByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(1)
@@ -2663,6 +2888,7 @@ class RunnerMessage extends $pb.GeneratedMessage {
   @$pb.TagNumber(9)
   @$pb.TagNumber(10)
   @$pb.TagNumber(11)
+  @$pb.TagNumber(12)
   void clearMessage() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -2785,6 +3011,285 @@ class RunnerMessage extends $pb.GeneratedMessage {
   void clearPlugins() => $_clearField(11);
   @$pb.TagNumber(11)
   Plugins ensurePlugins() => $_ensure(10);
+
+  @$pb.TagNumber(12)
+  SemanticsTree get semanticsTree => $_getN(11);
+  @$pb.TagNumber(12)
+  set semanticsTree(SemanticsTree value) => $_setField(12, value);
+  @$pb.TagNumber(12)
+  $core.bool hasSemanticsTree() => $_has(11);
+  @$pb.TagNumber(12)
+  void clearSemanticsTree() => $_clearField(12);
+  @$pb.TagNumber(12)
+  SemanticsTree ensureSemanticsTree() => $_ensure(11);
+}
+
+/// The app's semantics tree for a SemanticsRequest: its nodes in traversal
+/// order, the root first; none while the app has sent no tree.
+class SemanticsTree extends $pb.GeneratedMessage {
+  factory SemanticsTree({
+    $core.int? requestId,
+    $core.Iterable<SemanticsNode>? nodes,
+  }) {
+    final result = SemanticsTree._();
+    if (requestId != null) result.requestId = requestId;
+    if (nodes != null) result.nodes.addAll(nodes);
+    return result;
+  }
+
+  SemanticsTree._();
+
+  factory SemanticsTree.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SemanticsTree()..mergeFromBuffer(data, registry);
+  factory SemanticsTree.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SemanticsTree()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SemanticsTree',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
+      createEmptyInstance: SemanticsTree.$_createMessage)
+    ..aI(1, _omitFieldNames ? '' : 'requestId', fieldType: $pb.PbFieldType.OU3)
+    ..pPM<SemanticsNode>(2, _omitFieldNames ? '' : 'nodes',
+        subBuilder: SemanticsNode.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SemanticsTree clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SemanticsTree copyWith(void Function(SemanticsTree) updates) =>
+      super.copyWith((message) => updates(message as SemanticsTree))
+          as SemanticsTree;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SemanticsTree() / SemanticsTree.new instead')
+  static SemanticsTree create() => SemanticsTree._();
+  static $pb.GeneratedMessage $_createMessage() => SemanticsTree._();
+  @$core.override
+  SemanticsTree createEmptyInstance() => SemanticsTree._();
+  @$core.pragma('dart2js:noInline')
+  static SemanticsTree getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SemanticsTree>(
+          SemanticsTree.$_createMessage);
+  static SemanticsTree? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.int get requestId => $_getIZ(0);
+  @$pb.TagNumber(1)
+  set requestId($core.int value) => $_setUnsignedInt32(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasRequestId() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearRequestId() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $pb.PbList<SemanticsNode> get nodes => $_getList(1);
+}
+
+class SemanticsNode extends $pb.GeneratedMessage {
+  factory SemanticsNode({
+    $core.int? id,
+    $core.String? label,
+    $core.String? value,
+    $core.String? hint,
+    $core.String? tooltip,
+    $core.String? identifier,
+    $fixnum.Int64? flags,
+    $fixnum.Int64? actions,
+    $core.double? left,
+    $core.double? top,
+    $core.double? right,
+    $core.double? bottom,
+    $core.Iterable<$core.int>? children,
+  }) {
+    final result = SemanticsNode._();
+    if (id != null) result.id = id;
+    if (label != null) result.label = label;
+    if (value != null) result.value = value;
+    if (hint != null) result.hint = hint;
+    if (tooltip != null) result.tooltip = tooltip;
+    if (identifier != null) result.identifier = identifier;
+    if (flags != null) result.flags = flags;
+    if (actions != null) result.actions = actions;
+    if (left != null) result.left = left;
+    if (top != null) result.top = top;
+    if (right != null) result.right = right;
+    if (bottom != null) result.bottom = bottom;
+    if (children != null) result.children.addAll(children);
+    return result;
+  }
+
+  SemanticsNode._();
+
+  factory SemanticsNode.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SemanticsNode()..mergeFromBuffer(data, registry);
+  factory SemanticsNode.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SemanticsNode()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SemanticsNode',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'raccoon.v1'),
+      createEmptyInstance: SemanticsNode.$_createMessage)
+    ..aI(1, _omitFieldNames ? '' : 'id')
+    ..aOS(2, _omitFieldNames ? '' : 'label')
+    ..aOS(3, _omitFieldNames ? '' : 'value')
+    ..aOS(4, _omitFieldNames ? '' : 'hint')
+    ..aOS(5, _omitFieldNames ? '' : 'tooltip')
+    ..aOS(6, _omitFieldNames ? '' : 'identifier')
+    ..a<$fixnum.Int64>(7, _omitFieldNames ? '' : 'flags', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..a<$fixnum.Int64>(8, _omitFieldNames ? '' : 'actions', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aD(9, _omitFieldNames ? '' : 'left')
+    ..aD(10, _omitFieldNames ? '' : 'top')
+    ..aD(11, _omitFieldNames ? '' : 'right')
+    ..aD(12, _omitFieldNames ? '' : 'bottom')
+    ..p<$core.int>(13, _omitFieldNames ? '' : 'children', $pb.PbFieldType.K3)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SemanticsNode clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SemanticsNode copyWith(void Function(SemanticsNode) updates) =>
+      super.copyWith((message) => updates(message as SemanticsNode))
+          as SemanticsNode;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SemanticsNode() / SemanticsNode.new instead')
+  static SemanticsNode create() => SemanticsNode._();
+  static $pb.GeneratedMessage $_createMessage() => SemanticsNode._();
+  @$core.override
+  SemanticsNode createEmptyInstance() => SemanticsNode._();
+  @$core.pragma('dart2js:noInline')
+  static SemanticsNode getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SemanticsNode>(
+          SemanticsNode.$_createMessage);
+  static SemanticsNode? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.int get id => $_getIZ(0);
+  @$pb.TagNumber(1)
+  set id($core.int value) => $_setSignedInt32(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasId() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearId() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.String get label => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set label($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasLabel() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearLabel() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.String get value => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set value($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasValue() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearValue() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.String get hint => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set hint($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasHint() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearHint() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $core.String get tooltip => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set tooltip($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasTooltip() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearTooltip() => $_clearField(5);
+
+  /// What the app named the node for tests: Semantics(identifier:).
+  @$pb.TagNumber(6)
+  $core.String get identifier => $_getSZ(5);
+  @$pb.TagNumber(6)
+  set identifier($core.String value) => $_setString(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasIdentifier() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearIdentifier() => $_clearField(6);
+
+  /// Flutter's SemanticsFlag bits (button 1 << 3, text field 1 << 4, ...)
+  /// and SemanticsAction bits.
+  @$pb.TagNumber(7)
+  $fixnum.Int64 get flags => $_getI64(6);
+  @$pb.TagNumber(7)
+  set flags($fixnum.Int64 value) => $_setInt64(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasFlags() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearFlags() => $_clearField(7);
+
+  @$pb.TagNumber(8)
+  $fixnum.Int64 get actions => $_getI64(7);
+  @$pb.TagNumber(8)
+  set actions($fixnum.Int64 value) => $_setInt64(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasActions() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearActions() => $_clearField(8);
+
+  /// The node's bounds in the view, in the pixels the client sized it in
+  /// (Resize), as pointer events take them: every transform above it applied.
+  @$pb.TagNumber(9)
+  $core.double get left => $_getN(8);
+  @$pb.TagNumber(9)
+  set left($core.double value) => $_setDouble(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasLeft() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearLeft() => $_clearField(9);
+
+  @$pb.TagNumber(10)
+  $core.double get top => $_getN(9);
+  @$pb.TagNumber(10)
+  set top($core.double value) => $_setDouble(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasTop() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearTop() => $_clearField(10);
+
+  @$pb.TagNumber(11)
+  $core.double get right => $_getN(10);
+  @$pb.TagNumber(11)
+  set right($core.double value) => $_setDouble(10, value);
+  @$pb.TagNumber(11)
+  $core.bool hasRight() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearRight() => $_clearField(11);
+
+  @$pb.TagNumber(12)
+  $core.double get bottom => $_getN(11);
+  @$pb.TagNumber(12)
+  set bottom($core.double value) => $_setDouble(11, value);
+  @$pb.TagNumber(12)
+  $core.bool hasBottom() => $_has(11);
+  @$pb.TagNumber(12)
+  void clearBottom() => $_clearField(12);
+
+  @$pb.TagNumber(13)
+  $pb.PbList<$core.int> get children => $_getList(12);
 }
 
 const $core.bool _omitFieldNames =

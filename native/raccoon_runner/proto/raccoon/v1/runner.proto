@@ -170,7 +170,35 @@ message ClientMessage {
     TextEditing text_editing = 8;
     Settings settings = 9;
     AppMessage app_message = 10;
+    SemanticsRequest semantics_request = 11;
+    SemanticsAction semantics_action = 12;
   }
+}
+
+// Asks for the semantics tree of the client's view, as an accessibility
+// service reads it: what each node says, does and covers. The first ask turns
+// the app's semantics on, which costs each frame, and the runner answers once
+// the app sent its tree, or after 3 s with what it has; later asks are
+// answered at once. Semantics go off again when no ask or action came for
+// keep_on_millis (30 s when 0). A runner that predates it never answers;
+// RunnerHello.semantics says whether one does.
+message SemanticsRequest {
+  // Named back by the SemanticsTree that answers.
+  uint32 request_id = 1;
+  uint32 keep_on_millis = 2;
+}
+
+// Performs an action on a node of the client's view's tree, as an
+// accessibility service does: tap, long press, scroll, focus, set text.
+message SemanticsAction {
+  int32 node_id = 1;
+  // One of Flutter's SemanticsAction values, a single bit: tap 1 << 0, long
+  // press 1 << 1, scroll left, right, up and down 1 << 2 to 1 << 5, set
+  // text 1 << 21, focus 1 << 22. The node's actions say which it takes.
+  uint64 action = 2;
+  // Set text only: the field's whole new text. A text field takes it only
+  // while it has the focus.
+  string text = 3;
 }
 
 // The client's input method produced a value for the active text field:
@@ -199,6 +227,8 @@ message RunnerHello {
   // On the views socket, the view this connection shows; 0 on the runner's
   // own socket, which shows the app's first view.
   int64 view_id = 5;
+  // The runner answers SemanticsRequest and takes SemanticsAction.
+  bool semantics = 6;
 }
 
 enum PixelFormat {
@@ -353,5 +383,34 @@ message RunnerMessage {
     TextField text_field = 9;
     GpuBuffers gpu_buffers = 10;
     Plugins plugins = 11;
+    SemanticsTree semantics_tree = 12;
   }
+}
+
+// The app's semantics tree for a SemanticsRequest: its nodes in traversal
+// order, the root first; none while the app has sent no tree.
+message SemanticsTree {
+  uint32 request_id = 1;
+  repeated SemanticsNode nodes = 2;
+}
+
+message SemanticsNode {
+  int32 id = 1;
+  string label = 2;
+  string value = 3;
+  string hint = 4;
+  string tooltip = 5;
+  // What the app named the node for tests: Semantics(identifier:).
+  string identifier = 6;
+  // Flutter's SemanticsFlag bits (button 1 << 3, text field 1 << 4, ...)
+  // and SemanticsAction bits.
+  uint64 flags = 7;
+  uint64 actions = 8;
+  // The node's bounds in the view, in the pixels the client sized it in
+  // (Resize), as pointer events take them: every transform above it applied.
+  double left = 9;
+  double top = 10;
+  double right = 11;
+  double bottom = 12;
+  repeated int32 children = 13;
 }

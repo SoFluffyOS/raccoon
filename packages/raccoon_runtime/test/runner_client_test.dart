@@ -12,7 +12,7 @@ import 'package:test/test.dart';
 /// A runner stand-in on a Unix socket: one client, messages framed both
 /// ways, and what the client sent kept.
 final class _Runner {
-  _Runner._(this._server) {
+  _Runner._(this._server, {bool semantics = false}) {
     _server.listen((socket) {
       _client = socket;
       _reading = socket.listen((bytes) {
@@ -20,17 +20,23 @@ final class _Runner {
           _received.add(ClientMessage.fromBuffer(payload));
         }
       });
-      send(RunnerMessage(hello: RunnerHello(protocolVersion: 1, pid: 7)));
+      send(
+        RunnerMessage(
+          hello: RunnerHello(protocolVersion: 1, pid: 7, semantics: semantics),
+        ),
+      );
       _connected.complete();
     });
   }
 
-  static Future<_Runner> start(String path) async => _Runner._(
-    await ServerSocket.bind(
-      InternetAddress(path, type: InternetAddressType.unix),
-      0,
-    ),
-  );
+  static Future<_Runner> start(String path, {bool semantics = false}) async =>
+      _Runner._(
+        await ServerSocket.bind(
+          InternetAddress(path, type: InternetAddressType.unix),
+          0,
+        ),
+        semantics: semantics,
+      );
 
   final ServerSocket _server;
   final _unframer = MessageUnframer();
@@ -510,5 +516,108 @@ void main() {
         .timeout(const Duration(seconds: 5));
     final again = await client.frames.first.timeout(const Duration(seconds: 1));
     expect(again.inGpuBuffer, isFalse);
+  });
+
+  group('semantics', () {
+    late _Runner semanticRunner;
+    late RunnerClient semanticClient;
+
+    setUp(() async {
+      final path = p.join(temp.path, 'semantics.sock');
+      semanticRunner = await _Runner.start(path, semantics: true);
+      semanticClient = await RunnerClient.connect(UnixSocketEndpoint(path));
+      await semanticRunner.connected;
+      await semanticClient.hello;
+    });
+
+    tearDown(() async {
+      await semanticClient.close();
+      await semanticRunner.stop();
+    });
+
+    test('a runner that predates semantics is not asked', () async {
+      expect(client.takesSemantics, isFalse);
+      await expectLater(client.semantics(), throwsUnsupportedError);
+    });
+
+    test('each ask gets the tree that names it back', () async {
+      expect(semanticClient.takesSemantics, isTrue);
+      final asks = <SemanticsRequest>[];
+      semanticRunner.received
+          .where((message) => message.hasSemanticsRequest())
+          .listen((message) {
+            final ask = message.semanticsRequest;
+            asks.add(ask);
+            semanticRunner.send(
+              RunnerMessage(
+                semanticsTree: SemanticsTree(
+                  requestId: ask.requestId,
+                  nodes: [
+                    SemanticsNode(
+                      id: ask.requestId,
+                      label: 'Save',
+                      flags: SemanticsNodeFlag.isButton.value,
+                      actions:
+                          SemanticsNodeAction.tap.value |
+                          SemanticsNodeAction.longPress.value,
+                    ),
+                  ],
+                ),
+              ),
+            );
+          });
+
+      final (first, second) =
+          await (
+            semanticClient.semantics(keepOn: const Duration(minutes: 2)),
+            semanticClient.semantics(),
+          ).wait;
+
+      expect(asks.map((ask) => ask.keepOnMillis), [120000, 0]);
+      expect(first.single.id, asks.first.requestId);
+      expect(second.single.id, asks.last.requestId);
+      expect(SemanticsNodeAction.of(first.single), [
+        SemanticsNodeAction.tap,
+        SemanticsNodeAction.longPress,
+      ]);
+      expect(SemanticsNodeFlag.of(first.single), [SemanticsNodeFlag.isButton]);
+    });
+
+    test('an ask the runner leaves unanswered times out', () async {
+      await expectLater(
+        semanticClient.semantics(timeout: const Duration(milliseconds: 50)),
+        throwsA(isA<TimeoutException>()),
+      );
+    });
+
+    test('an ask fails when the runner hangs up', () async {
+      final asked = semanticClient.semantics();
+      await semanticRunner.received.firstWhere(
+        (message) => message.hasSemanticsRequest(),
+      );
+      await semanticRunner.stop();
+      await expectLater(asked, throwsA(isA<SocketException>()));
+    });
+
+    test('an action goes with its node, its bit and its text', () async {
+      final sent = semanticRunner.received.firstWhere(
+        (message) => message.hasSemanticsAction(),
+      );
+      semanticClient.performSemanticsAction(
+        12,
+        SemanticsNodeAction.setText,
+        text: 'hello',
+      );
+      final action = (await sent).semanticsAction;
+      expect(action.nodeId, 12);
+      expect(action.action, Int64(1) << 21);
+      expect(action.text, 'hello');
+    });
+
+    test('the size it was last given is kept', () {
+      expect(semanticClient.size, isNull);
+      semanticClient.resize(720, 1560, 3);
+      expect(semanticClient.size, (width: 720, height: 1560, pixelRatio: 3.0));
+    });
   });
 }

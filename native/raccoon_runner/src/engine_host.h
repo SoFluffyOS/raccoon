@@ -27,6 +27,7 @@
 #include "metal_renderer.h"
 #endif
 #include "platform_task_runner.h"
+#include "semantics_tree.h"
 #include "software_frame.h"
 #include "host_settings.h"
 #include "text_input.h"
@@ -191,6 +192,25 @@ class EngineHost {
                       std::vector<uint32_t>* ports) const;
 #endif
 
+  // Semantics, for a client that asks (SemanticsRequest). On, the engine
+  // sends each view's tree as it changes, which costs every frame; off, the
+  // trees go. False when the engine took no change.
+  bool SetSemanticsEnabled(bool enabled);
+  bool semantics_enabled() const { return semantics_enabled_; }
+  // How many updates the engine sent since semantics went on, every view's.
+  uint64_t semantics_updates() const;
+  // Calls |read| with |view|'s nodes as SemanticsTree::Flatten places them,
+  // in the pixels its client sized it in; false, without calling it, before
+  // the view's root arrived.
+  bool ReadSemantics(
+      FlutterViewId view,
+      const std::function<void(const std::vector<SemanticsTree::Placed>&)>& read) const;
+  // Performs |action|, one of Flutter's SemanticsAction bits, on |node| of
+  // |view|, with |data| encoded by the standard message codec (the text to
+  // set). False when the engine did not take it.
+  bool SendSemanticsAction(FlutterViewId view, int32_t node, uint64_t action,
+                           const std::vector<uint8_t>& data);
+
   // Takes what views mode has to do on the loop: metrics for a view the
   // engine took since. From the loop thread, every iteration.
   void ServiceViews();
@@ -319,6 +339,13 @@ class EngineHost {
   // Which view has the focus, as the app was last told.
   FlutterViewId focused_ = 0;
   static void OnLog(const char* tag, const char* message, void* user_data);
+  static void OnSemanticsUpdate(const FlutterSemanticsUpdate2* update, void* user_data);
+  // What Resize scaled |view|'s frame by; 1 for a view not there.
+  double InputScaleOf(FlutterViewId view) const;
+  bool semantics_enabled_ = false;
+  mutable std::mutex semantics_mutex_;
+  std::map<FlutterViewId, SemanticsTree> semantics_;
+  uint64_t semantics_updates_ = 0;
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* user_data);
 

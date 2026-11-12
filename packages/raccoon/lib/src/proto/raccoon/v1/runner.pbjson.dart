@@ -425,6 +425,24 @@ const ClientMessage$json = {
       '9': 0,
       '10': 'appMessage'
     },
+    {
+      '1': 'semantics_request',
+      '3': 11,
+      '4': 1,
+      '5': 11,
+      '6': '.raccoon.v1.SemanticsRequest',
+      '9': 0,
+      '10': 'semanticsRequest'
+    },
+    {
+      '1': 'semantics_action',
+      '3': 12,
+      '4': 1,
+      '5': 11,
+      '6': '.raccoon.v1.SemanticsAction',
+      '9': 0,
+      '10': 'semanticsAction'
+    },
   ],
   '8': [
     {'1': 'message'},
@@ -443,7 +461,39 @@ final $typed_data.Uint8List clientMessageDescriptor = $convert.base64Decode(
     'INcmVsZWFzZUJ1ZmZlchI8Cgx0ZXh0X2VkaXRpbmcYCCABKAsyFy5yYWNjb29uLnYxLlRleHRF'
     'ZGl0aW5nSABSC3RleHRFZGl0aW5nEjIKCHNldHRpbmdzGAkgASgLMhQucmFjY29vbi52MS5TZX'
     'R0aW5nc0gAUghzZXR0aW5ncxI5CgthcHBfbWVzc2FnZRgKIAEoCzIWLnJhY2Nvb24udjEuQXBw'
-    'TWVzc2FnZUgAUgphcHBNZXNzYWdlQgkKB21lc3NhZ2U=');
+    'TWVzc2FnZUgAUgphcHBNZXNzYWdlEksKEXNlbWFudGljc19yZXF1ZXN0GAsgASgLMhwucmFjY2'
+    '9vbi52MS5TZW1hbnRpY3NSZXF1ZXN0SABSEHNlbWFudGljc1JlcXVlc3QSSAoQc2VtYW50aWNz'
+    'X2FjdGlvbhgMIAEoCzIbLnJhY2Nvb24udjEuU2VtYW50aWNzQWN0aW9uSABSD3NlbWFudGljc0'
+    'FjdGlvbkIJCgdtZXNzYWdl');
+
+@$core.Deprecated('Use semanticsRequestDescriptor instead')
+const SemanticsRequest$json = {
+  '1': 'SemanticsRequest',
+  '2': [
+    {'1': 'request_id', '3': 1, '4': 1, '5': 13, '10': 'requestId'},
+    {'1': 'keep_on_millis', '3': 2, '4': 1, '5': 13, '10': 'keepOnMillis'},
+  ],
+};
+
+/// Descriptor for `SemanticsRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List semanticsRequestDescriptor = $convert.base64Decode(
+    'ChBTZW1hbnRpY3NSZXF1ZXN0Eh0KCnJlcXVlc3RfaWQYASABKA1SCXJlcXVlc3RJZBIkCg5rZW'
+    'VwX29uX21pbGxpcxgCIAEoDVIMa2VlcE9uTWlsbGlz');
+
+@$core.Deprecated('Use semanticsActionDescriptor instead')
+const SemanticsAction$json = {
+  '1': 'SemanticsAction',
+  '2': [
+    {'1': 'node_id', '3': 1, '4': 1, '5': 5, '10': 'nodeId'},
+    {'1': 'action', '3': 2, '4': 1, '5': 4, '10': 'action'},
+    {'1': 'text', '3': 3, '4': 1, '5': 9, '10': 'text'},
+  ],
+};
+
+/// Descriptor for `SemanticsAction`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List semanticsActionDescriptor = $convert.base64Decode(
+    'Cg9TZW1hbnRpY3NBY3Rpb24SFwoHbm9kZV9pZBgBIAEoBVIGbm9kZUlkEhYKBmFjdGlvbhgCIA'
+    'EoBFIGYWN0aW9uEhIKBHRleHQYAyABKAlSBHRleHQ=');
 
 @$core.Deprecated('Use textEditingDescriptor instead')
 const TextEditing$json = {
@@ -473,6 +523,7 @@ const RunnerHello$json = {
     {'1': 'pid', '3': 3, '4': 1, '5': 13, '10': 'pid'},
     {'1': 'views', '3': 4, '4': 1, '5': 8, '10': 'views'},
     {'1': 'view_id', '3': 5, '4': 1, '5': 3, '10': 'viewId'},
+    {'1': 'semantics', '3': 6, '4': 1, '5': 8, '10': 'semantics'},
   ],
 };
 
@@ -480,7 +531,8 @@ const RunnerHello$json = {
 final $typed_data.Uint8List runnerHelloDescriptor = $convert.base64Decode(
     'CgtSdW5uZXJIZWxsbxIpChBwcm90b2NvbF92ZXJzaW9uGAEgASgNUg9wcm90b2NvbFZlcnNpb2'
     '4SJwoPZW5naW5lX3JldmlzaW9uGAIgASgJUg5lbmdpbmVSZXZpc2lvbhIQCgNwaWQYAyABKA1S'
-    'A3BpZBIUCgV2aWV3cxgEIAEoCFIFdmlld3MSFwoHdmlld19pZBgFIAEoA1IGdmlld0lk');
+    'A3BpZBIUCgV2aWV3cxgEIAEoCFIFdmlld3MSFwoHdmlld19pZBgFIAEoA1IGdmlld0lkEhwKCX'
+    'NlbWFudGljcxgGIAEoCFIJc2VtYW50aWNz');
 
 @$core.Deprecated('Use frameDescriptor instead')
 const Frame$json = {
@@ -790,6 +842,15 @@ const RunnerMessage$json = {
       '9': 0,
       '10': 'plugins'
     },
+    {
+      '1': 'semantics_tree',
+      '3': 12,
+      '4': 1,
+      '5': 11,
+      '6': '.raccoon.v1.SemanticsTree',
+      '9': 0,
+      '10': 'semanticsTree'
+    },
   ],
   '8': [
     {'1': 'message'},
@@ -808,4 +869,56 @@ final $typed_data.Uint8List runnerMessageDescriptor = $convert.base64Decode(
     'ZlcnMSJgoEYnVzeRgIIAEoCzIQLnJhY2Nvb24udjEuQnVzeUgAUgRidXN5EjYKCnRleHRfZmll'
     'bGQYCSABKAsyFS5yYWNjb29uLnYxLlRleHRGaWVsZEgAUgl0ZXh0RmllbGQSOQoLZ3B1X2J1Zm'
     'ZlcnMYCiABKAsyFi5yYWNjb29uLnYxLkdwdUJ1ZmZlcnNIAFIKZ3B1QnVmZmVycxIvCgdwbHVn'
-    'aW5zGAsgASgLMhMucmFjY29vbi52MS5QbHVnaW5zSABSB3BsdWdpbnNCCQoHbWVzc2FnZQ==');
+    'aW5zGAsgASgLMhMucmFjY29vbi52MS5QbHVnaW5zSABSB3BsdWdpbnMSQgoOc2VtYW50aWNzX3'
+    'RyZWUYDCABKAsyGS5yYWNjb29uLnYxLlNlbWFudGljc1RyZWVIAFINc2VtYW50aWNzVHJlZUIJ'
+    'CgdtZXNzYWdl');
+
+@$core.Deprecated('Use semanticsTreeDescriptor instead')
+const SemanticsTree$json = {
+  '1': 'SemanticsTree',
+  '2': [
+    {'1': 'request_id', '3': 1, '4': 1, '5': 13, '10': 'requestId'},
+    {
+      '1': 'nodes',
+      '3': 2,
+      '4': 3,
+      '5': 11,
+      '6': '.raccoon.v1.SemanticsNode',
+      '10': 'nodes'
+    },
+  ],
+};
+
+/// Descriptor for `SemanticsTree`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List semanticsTreeDescriptor = $convert.base64Decode(
+    'Cg1TZW1hbnRpY3NUcmVlEh0KCnJlcXVlc3RfaWQYASABKA1SCXJlcXVlc3RJZBIvCgVub2Rlcx'
+    'gCIAMoCzIZLnJhY2Nvb24udjEuU2VtYW50aWNzTm9kZVIFbm9kZXM=');
+
+@$core.Deprecated('Use semanticsNodeDescriptor instead')
+const SemanticsNode$json = {
+  '1': 'SemanticsNode',
+  '2': [
+    {'1': 'id', '3': 1, '4': 1, '5': 5, '10': 'id'},
+    {'1': 'label', '3': 2, '4': 1, '5': 9, '10': 'label'},
+    {'1': 'value', '3': 3, '4': 1, '5': 9, '10': 'value'},
+    {'1': 'hint', '3': 4, '4': 1, '5': 9, '10': 'hint'},
+    {'1': 'tooltip', '3': 5, '4': 1, '5': 9, '10': 'tooltip'},
+    {'1': 'identifier', '3': 6, '4': 1, '5': 9, '10': 'identifier'},
+    {'1': 'flags', '3': 7, '4': 1, '5': 4, '10': 'flags'},
+    {'1': 'actions', '3': 8, '4': 1, '5': 4, '10': 'actions'},
+    {'1': 'left', '3': 9, '4': 1, '5': 1, '10': 'left'},
+    {'1': 'top', '3': 10, '4': 1, '5': 1, '10': 'top'},
+    {'1': 'right', '3': 11, '4': 1, '5': 1, '10': 'right'},
+    {'1': 'bottom', '3': 12, '4': 1, '5': 1, '10': 'bottom'},
+    {'1': 'children', '3': 13, '4': 3, '5': 5, '10': 'children'},
+  ],
+};
+
+/// Descriptor for `SemanticsNode`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List semanticsNodeDescriptor = $convert.base64Decode(
+    'Cg1TZW1hbnRpY3NOb2RlEg4KAmlkGAEgASgFUgJpZBIUCgVsYWJlbBgCIAEoCVIFbGFiZWwSFA'
+    'oFdmFsdWUYAyABKAlSBXZhbHVlEhIKBGhpbnQYBCABKAlSBGhpbnQSGAoHdG9vbHRpcBgFIAEo'
+    'CVIHdG9vbHRpcBIeCgppZGVudGlmaWVyGAYgASgJUgppZGVudGlmaWVyEhQKBWZsYWdzGAcgAS'
+    'gEUgVmbGFncxIYCgdhY3Rpb25zGAggASgEUgdhY3Rpb25zEhIKBGxlZnQYCSABKAFSBGxlZnQS'
+    'EAoDdG9wGAogASgBUgN0b3ASFAoFcmlnaHQYCyABKAFSBXJpZ2h0EhYKBmJvdHRvbRgMIAEoAV'
+    'IGYm90dG9tEhoKCGNoaWxkcmVuGA0gAygFUghjaGlsZHJlbg==');

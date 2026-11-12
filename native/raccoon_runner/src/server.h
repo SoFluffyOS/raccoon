@@ -25,6 +25,8 @@ class RunnerServer {
     std::function<void(const v1::TextEditing&)> on_text_editing;
     std::function<void(const v1::Settings&)> on_settings;
     std::function<void(const v1::AppMessage&)> on_app_message;
+    std::function<void(const v1::SemanticsRequest&)> on_semantics_request;
+    std::function<void(const v1::SemanticsAction&)> on_semantics_action;
     std::function<void()> on_shutdown;
     std::function<void(const v1::PlatformResponse&)> on_platform_response;
     std::function<void()> on_client_connected;

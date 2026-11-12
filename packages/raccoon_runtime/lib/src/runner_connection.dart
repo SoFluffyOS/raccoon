@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:raccoon/raccoon.dart';
+import 'package:raccoon_runtime/src/semantics_bits.dart';
 
 /// Serves one platform channel for the hosted app, the way a desktop
 /// embedder's plugin would. Returns the reply bytes, or null for "no plugin",
@@ -83,4 +84,33 @@ abstract interface class CaptureConnection implements RunnerConnection {
   /// capture, or a second view of the connection, which the runner serves
   /// no ring of its own (#205).
   void wantPixels(bool on);
+}
+
+/// A connection that reads the app's semantics tree and acts on its nodes,
+/// as an accessibility service does: how a tool finds a widget by its label
+/// or test id and taps it, types into it or scrolls it.
+abstract interface class SemanticsConnection implements RunnerConnection {
+  /// Whether the runner answers [semantics]; false for one that predates
+  /// it, and until its hello.
+  bool get takesSemantics;
+
+  /// The app's semantics tree for this connection's view, nodes in traversal
+  /// order, the root first, each with its bounds in the pixels [resize]
+  /// gave. The first ask turns the app's semantics on, which costs it every
+  /// frame; they go off once no ask or action came for [keepOn] (the
+  /// runner's 30 s when zero). Throws an [UnsupportedError] when the runner
+  /// does not take semantics, and a [TimeoutException] past [timeout].
+  Future<List<SemanticsNode>> semantics({
+    Duration keepOn = Duration.zero,
+    Duration timeout = const Duration(seconds: 5),
+  });
+
+  /// Performs [action] on node [nodeId] of the tree [semantics] read;
+  /// [text] is the whole new text for [SemanticsNodeAction.setText], which
+  /// a field takes only while it has the focus.
+  void performSemanticsAction(
+    int nodeId,
+    SemanticsNodeAction action, {
+    String text = '',
+  });
 }

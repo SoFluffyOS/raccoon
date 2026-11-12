@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <thread>
@@ -134,6 +135,7 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   args.custom_task_runners = &runners_;
   args.platform_message_callback = OnPlatformMessage;
   args.vsync_callback = OnVsync;
+  args.update_semantics_callback2 = OnSemanticsUpdate;
   if (views_mode_) args.compositor = &compositor_;
 
   started_ = std::chrono::steady_clock::now();
@@ -986,6 +988,158 @@ void EngineHost::SendPointer(FlutterViewId view, const FlutterPointerEvent& even
   }
   loader_.procs().SendPointerEvent(engine_, &sent, 1);
 }
+
+double EngineHost::InputScaleOf(FlutterViewId view) const {
+  if (view == 0) return input_scale_;
+  const std::shared_ptr<View> found = ViewOf(view);
+  return found ? found->input_scale : 1.0;
+}
+
+bool EngineHost::SetSemanticsEnabled(bool enabled) {
+  if (engine_ == nullptr || enabled == semantics_enabled_ ||
+      loader_.procs().UpdateSemanticsEnabled == nullptr) {
+    return false;
+  }
+  if (loader_.procs().UpdateSemanticsEnabled(engine_, enabled) != kSuccess) return false;
+  semantics_enabled_ = enabled;
+  // Turned on again, the framework sends whole trees anew.
+  std::lock_guard<std::mutex> lock(semantics_mutex_);
+  semantics_.clear();
+  semantics_updates_ = 0;
+  return true;
+}
+
+uint64_t EngineHost::semantics_updates() const {
+  std::lock_guard<std::mutex> lock(semantics_mutex_);
+  return semantics_updates_;
+}
+
+bool EngineHost::ReadSemantics(
+    FlutterViewId view,
+    const std::function<void(const std::vector<SemanticsTree::Placed>&)>& read) const {
+  const double scale = InputScaleOf(view);
+  std::lock_guard<std::mutex> lock(semantics_mutex_);
+  const auto found = semantics_.find(view);
+  if (found == semantics_.end() || !found->second.has_root()) return false;
+  read(found->second.Flatten(scale));
+  return true;
+}
+
+bool EngineHost::SendSemanticsAction(FlutterViewId view, int32_t node, uint64_t action,
+                                     const std::vector<uint8_t>& data) {
+  if (engine_ == nullptr || node < 0) return false;
+  const auto& procs = loader_.procs();
+  const auto flutter_action = static_cast<FlutterSemanticsAction>(action);
+  const uint8_t* bytes = data.empty() ? nullptr : data.data();
+  if (procs.SendSemanticsAction != nullptr) {
+    FlutterSendSemanticsActionInfo info{};
+    info.struct_size = sizeof(FlutterSendSemanticsActionInfo);
+    info.view_id = view;
+    info.node_id = static_cast<uint64_t>(node);
+    info.action = flutter_action;
+    info.data = bytes;
+    info.data_length = data.size();
+    return procs.SendSemanticsAction(engine_, &info) == kSuccess;
+  }
+  // An engine before views had actions for its one view only.
+  if (view != 0 || procs.DispatchSemanticsAction == nullptr) return false;
+  return procs.DispatchSemanticsAction(engine_, static_cast<uint64_t>(node), flutter_action,
+                                       bytes, data.size()) == kSuccess;
+}
+
+namespace {
+
+// Whether |object|, a struct the engine sized, reaches past |field|: an
+// older engine's is shorter.
+#define RACCOON_HAS_FIELD(object, type, field) \
+  ((object)->struct_size >= offsetof(type, field) + sizeof((object)->field))
+
+// FlutterSemanticsFlags as Flutter's SemanticsFlag bits, which the protocol
+// carries.
+uint64_t FlagBits(const FlutterSemanticsFlags& flags) {
+  uint64_t bits = 0;
+  auto Set = [&bits](bool on, int bit) {
+    if (on) bits |= uint64_t{1} << bit;
+  };
+  auto Tristate = [&Set](FlutterTristate state, int has_bit, int is_bit) {
+    Set(state != kFlutterTristateNone, has_bit);
+    Set(state == kFlutterTristateTrue, is_bit);
+  };
+  Set(flags.is_checked != kFlutterCheckStateNone, 0);
+  Set(flags.is_checked == kFlutterCheckStateTrue, 1);
+  Set(flags.is_checked == kFlutterCheckStateMixed, 25);
+  Tristate(flags.is_selected, 28, 2);
+  Tristate(flags.is_enabled, 6, 7);
+  Tristate(flags.is_toggled, 16, 17);
+  Tristate(flags.is_expanded, 26, 27);
+  Tristate(flags.is_required, 29, 30);
+  Tristate(flags.is_focused, 21, 5);
+  Set(flags.is_button, 3);
+  Set(flags.is_text_field, 4);
+  Set(flags.is_in_mutually_exclusive_group, 8);
+  Set(flags.is_header, 9);
+  Set(flags.is_obscured, 10);
+  Set(flags.scopes_route, 11);
+  Set(flags.names_route, 12);
+  Set(flags.is_hidden, 13);
+  Set(flags.is_image, 14);
+  Set(flags.is_live_region, 15);
+  Set(flags.has_implicit_scrolling, 18);
+  Set(flags.is_multiline, 19);
+  Set(flags.is_read_only, 20);
+  Set(flags.is_link, 22);
+  Set(flags.is_slider, 23);
+  Set(flags.is_keyboard_key, 24);
+  return bits;
+}
+
+std::string Text(const char* text) { return text == nullptr ? std::string() : text; }
+
+}  // namespace
+
+void EngineHost::OnSemanticsUpdate(const FlutterSemanticsUpdate2* update, void* user_data) {
+  auto* host = static_cast<EngineHost*>(user_data);
+  if (update == nullptr || !host->semantics_enabled_) return;
+  std::vector<SemanticsTree::Node> nodes;
+  nodes.reserve(update->node_count);
+  for (size_t i = 0; i < update->node_count; ++i) {
+    const FlutterSemanticsNode2* in = update->nodes[i];
+    if (in == nullptr) continue;
+    SemanticsTree::Node node;
+    node.id = in->id;
+    node.label = Text(in->label);
+    node.value = Text(in->value);
+    node.hint = Text(in->hint);
+    if (RACCOON_HAS_FIELD(in, FlutterSemanticsNode2, tooltip)) node.tooltip = Text(in->tooltip);
+    if (RACCOON_HAS_FIELD(in, FlutterSemanticsNode2, identifier)) {
+      node.identifier = Text(in->identifier);
+    }
+    node.flags = static_cast<uint32_t>(in->flags__deprecated__);
+    if (RACCOON_HAS_FIELD(in, FlutterSemanticsNode2, flags2) && in->flags2 != nullptr &&
+        RACCOON_HAS_FIELD(in->flags2, FlutterSemanticsFlags, is_keyboard_key)) {
+      node.flags = FlagBits(*in->flags2);
+    }
+    node.actions = static_cast<uint32_t>(in->actions);
+    node.rect = {in->rect.left, in->rect.top, in->rect.right, in->rect.bottom};
+    const FlutterTransformation& t = in->transform;
+    node.transform = {t.scaleX, t.skewX, t.transX, t.skewY, t.scaleY,
+                      t.transY, t.pers0, t.pers1, t.pers2};
+    node.children.assign(in->children_in_traversal_order,
+                         in->children_in_traversal_order + in->child_count);
+    nodes.push_back(std::move(node));
+  }
+  // An engine before views names none: its one view.
+  const FlutterViewId view =
+      RACCOON_HAS_FIELD(update, FlutterSemanticsUpdate2, view_id) ? update->view_id : 0;
+  {
+    std::lock_guard<std::mutex> lock(host->semantics_mutex_);
+    host->semantics_[view].Apply(std::move(nodes));
+    ++host->semantics_updates_;
+  }
+  if (host->on_wake_) host->on_wake_();
+}
+
+#undef RACCOON_HAS_FIELD
 
 void EngineHost::FocusView(FlutterViewId view) {
   if (!views_mode_ || engine_ == nullptr || view == focused_ ||

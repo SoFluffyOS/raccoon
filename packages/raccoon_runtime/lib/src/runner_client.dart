@@ -11,6 +11,7 @@ import 'package:raccoon_runtime/src/runner_connection.dart';
 import 'package:raccoon_runtime/src/runner_endpoint.dart';
 import 'package:raccoon_runtime/src/runner_message_decoder.dart';
 import 'package:raccoon_runtime/src/runner_transport.dart';
+import 'package:raccoon_runtime/src/semantics_bits.dart';
 import 'package:raccoon_runtime/src/startup_failure.dart';
 
 /// A connection to one runner: frames, logs and platform messages in; resize,
@@ -21,7 +22,8 @@ final class RunnerClient
         ComposingConnection,
         GpuBufferConnection,
         ChannelConnection,
-        CaptureConnection {
+        CaptureConnection,
+        SemanticsConnection {
   RunnerClient._(
     this._transport, {
     required this.composes,
@@ -204,6 +206,9 @@ final class RunnerClient
   int? _pid;
   var _takesViews = false;
   var _viewId = 0;
+  var _takesSemantics = false;
+  var _nextSemanticsRequest = 1;
+  final _semanticsAsks = <int, Completer<List<SemanticsNode>>>{};
 
   /// Every message the runner sends, after the connection was made. What
   /// ends the connection badly comes here, and to [frames], once each; the
@@ -253,6 +258,51 @@ final class RunnerClient
   /// own socket.
   int get viewId => _viewId;
 
+  @override
+  bool get takesSemantics => _takesSemantics;
+
+  @override
+  Future<List<SemanticsNode>> semantics({
+    Duration keepOn = Duration.zero,
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    await hello;
+    if (!_takesSemantics) {
+      throw UnsupportedError('this runner predates semantics');
+    }
+    final requestId = _nextSemanticsRequest++;
+    final answer = Completer<List<SemanticsNode>>();
+    _semanticsAsks[requestId] = answer;
+    send(
+      ClientMessage(
+        semanticsRequest: SemanticsRequest(
+          requestId: requestId,
+          keepOnMillis: keepOn.inMilliseconds,
+        ),
+      ),
+    );
+    try {
+      return await answer.future.timeout(timeout);
+    } finally {
+      _semanticsAsks.remove(requestId);
+    }
+  }
+
+  @override
+  void performSemanticsAction(
+    int nodeId,
+    SemanticsNodeAction action, {
+    String text = '',
+  }) => send(
+    ClientMessage(
+      semanticsAction: SemanticsAction(
+        nodeId: nodeId,
+        action: action.value,
+        text: text,
+      ),
+    ),
+  );
+
   /// Frames that arrived through shared buffers rather than inline.
   int get sharedFrames => _sharedFrames;
 
@@ -260,6 +310,10 @@ final class RunnerClient
   Future<void> get closed => _closed.future;
 
   ({int width, int height, double pixelRatio})? _size;
+
+  /// The size [resize] last gave the app, in physical pixels: what pointer
+  /// events and semantics bounds are in. Null before the first.
+  ({int width, int height, double pixelRatio})? get size => _size;
   var _viewInsets = (top: 0.0, right: 0.0, bottom: 0.0, left: 0.0);
 
   @override
@@ -451,6 +505,7 @@ final class RunnerClient
         _pid = message.hello.pid;
         _takesViews = message.hello.views;
         _viewId = message.hello.viewId.toInt();
+        _takesSemantics = message.hello.semantics;
         _hello.complete(message.hello);
       }
       if (message.hasBusy() && !_hello.isCompleted) {
@@ -479,6 +534,10 @@ final class RunnerClient
       }
       if (message.hasVmService()) _vmServiceUri = message.vmService.uri;
       if (message.hasTextField()) _latestTextField = message.textField;
+      if (message.hasSemanticsTree()) {
+        final tree = message.semanticsTree;
+        _semanticsAsks.remove(tree.requestId)?.complete(tree.nodes.toList());
+      }
       if (message.hasPlugins()) {
         _latestPlugins = message.plugins;
         if (_latestFrame == null) _readStartup();
@@ -711,6 +770,12 @@ final class RunnerClient
       );
     }
     _startupTimer?.cancel();
+    for (final ask in _semanticsAsks.values) {
+      ask.completeError(
+        const SocketException('the runner hung up before its semantics'),
+      );
+    }
+    _semanticsAsks.clear();
     // The latest frame keeps its pixels past the end, as it did when every
     // frame was read.
     _readHeld();

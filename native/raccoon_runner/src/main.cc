@@ -47,6 +47,7 @@
 #include "flutter_embedder.h"
 #include "server.h"
 #include "shared_buffers.h"
+#include "standard_codec.h"
 #if RACCOON_HAS_METAL
 #include "surface_port_server.h"
 #endif
@@ -94,6 +95,14 @@ constexpr auto kFirstClientWait = std::chrono::seconds(1);
 constexpr size_t kStartupLines = 200;
 
 constexpr uint32_t kProtocolVersion = 1;
+// How long a first SemanticsRequest waits for the app's tree, and how long
+// semantics stay on without another ask or action when it names no time.
+constexpr auto kSemanticsFirstTreeWait = std::chrono::seconds(3);
+constexpr auto kSemanticsKeepOn = std::chrono::seconds(30);
+// How long an ask right after input waits for the tree that input brings:
+// a tap's new state comes with the app's next frame.
+constexpr auto kSemanticsSettle = std::chrono::milliseconds(500);
+constexpr uint64_t kSemanticsActionSetText = uint64_t{1} << 21;
 // A frame's byte order as its message says it: the software renderer's,
 // or the one a GPU renderer read it back in.
 raccoon::v1::PixelFormat FormatOf(bool bgra) {
@@ -832,6 +841,81 @@ int Serve(const Options& options) {
   Client* lifecycle_from = nullptr;
   Client* settings_from = nullptr;
 
+  // Semantics are on while clients ask for them: building the tree costs
+  // the app every frame. Asks made as they went on wait for the view's
+  // first tree.
+  struct SemanticsAsk {
+    Client* client;
+    uint32_t request_id;
+    std::chrono::steady_clock::time_point deadline;
+  };
+  std::vector<SemanticsAsk> semantics_asks;
+  auto semantics_keep_on = std::chrono::milliseconds(kSemanticsKeepOn);
+  auto semantics_off_at = std::chrono::steady_clock::time_point{};
+  auto KeepSemanticsOn = [&]() {
+    semantics_off_at = std::chrono::steady_clock::now() + semantics_keep_on;
+  };
+  // When the app was last sent input, and how many trees had come by then.
+  auto semantics_input_at = std::chrono::steady_clock::time_point{};
+  uint64_t trees_at_input = 0;
+  auto NoteInput = [&]() {
+    if (!host.semantics_enabled()) return;
+    semantics_input_at = std::chrono::steady_clock::now();
+    trees_at_input = host.semantics_updates();
+  };
+  // Whether |view| has a tree, and one that came after the latest input or
+  // as long after it as the app gets to send one.
+  auto TreeSettled = [&](FlutterViewId view, std::chrono::steady_clock::time_point now) {
+    return host.ReadSemantics(view, [](const auto&) {}) &&
+           (host.semantics_updates() != trees_at_input ||
+            now >= semantics_input_at + kSemanticsSettle);
+  };
+  auto AnswerSemantics = [&host](Client& client, uint32_t request_id) {
+    raccoon::v1::RunnerMessage message;
+    auto* tree = message.mutable_semantics_tree();
+    tree->set_request_id(request_id);
+    host.ReadSemantics(client.view, [tree](const std::vector<raccoon::SemanticsTree::Placed>& nodes) {
+      for (const raccoon::SemanticsTree::Placed& placed : nodes) {
+        const raccoon::SemanticsTree::Node& node = *placed.node;
+        auto* out = tree->add_nodes();
+        out->set_id(node.id);
+        out->set_label(ValidUtf8(node.label));
+        out->set_value(ValidUtf8(node.value));
+        out->set_hint(ValidUtf8(node.hint));
+        out->set_tooltip(ValidUtf8(node.tooltip));
+        out->set_identifier(ValidUtf8(node.identifier));
+        out->set_flags(node.flags);
+        out->set_actions(node.actions);
+        out->set_left(placed.left);
+        out->set_top(placed.top);
+        out->set_right(placed.right);
+        out->set_bottom(placed.bottom);
+        for (const int32_t child : node.children) out->add_children(child);
+      }
+    });
+    client.server->Send(message);
+  };
+  // Answers the asks whose tree came or whose wait is over, and turns
+  // semantics off after their quiet spell.
+  auto ServiceSemantics = [&]() {
+    const auto now = std::chrono::steady_clock::now();
+    for (auto ask = semantics_asks.begin(); ask != semantics_asks.end();) {
+      if (!TreeSettled(ask->client->view, now) && now < ask->deadline) {
+        ++ask;
+        continue;
+      }
+      const SemanticsAsk answered = *ask;
+      ask = semantics_asks.erase(ask);
+      AnswerSemantics(*answered.client, answered.request_id);
+    }
+    if (host.semantics_enabled() && semantics_asks.empty() && now >= semantics_off_at &&
+        host.SetSemanticsEnabled(false)) {
+      std::fprintf(stderr, "🦝 semantics off, %lld s without an ask\n",
+                   static_cast<long long>(
+                       std::chrono::duration_cast<std::chrono::seconds>(semantics_keep_on).count()));
+    }
+  };
+
   // The app's platform messages go to the first client, which serves them
   // for every view.
   auto Forward = [&](const std::string& channel, const uint8_t* data, size_t size,
@@ -1004,8 +1088,9 @@ int Serve(const Options& options) {
                   {resize.view_inset_top(), resize.view_inset_right(),
                    resize.view_inset_bottom(), resize.view_inset_left()});
     };
-    handler.on_app_message = [&host, &lifecycle_from, client](
+    handler.on_app_message = [&host, &lifecycle_from, &NoteInput, client](
                                  const raccoon::v1::AppMessage& message) {
+      NoteInput();
       if (message.channel() == "flutter/lifecycle") lifecycle_from = client;
       host.SendPlatformMessage(message.channel(),
                                reinterpret_cast<const uint8_t*>(message.data().data()),
@@ -1030,7 +1115,36 @@ int Serve(const Options& options) {
       }
       host.ApplySettings(std::move(device));
     };
-    handler.on_pointer = [&host, client, &Focus, trace](const raccoon::v1::PointerEvent& pointer) {
+    handler.on_semantics_request = [&, client](const raccoon::v1::SemanticsRequest& request) {
+      semantics_keep_on = request.keep_on_millis() == 0
+                              ? std::chrono::milliseconds(kSemanticsKeepOn)
+                              : std::chrono::milliseconds(request.keep_on_millis());
+      KeepSemanticsOn();
+      if (!host.semantics_enabled() && host.SetSemanticsEnabled(true)) {
+        std::fprintf(stderr, "🦝 semantics on\n");
+      }
+      const auto now = std::chrono::steady_clock::now();
+      if (!host.semantics_enabled() || TreeSettled(client->view, now)) {
+        AnswerSemantics(*client, request.request_id());
+        return;
+      }
+      semantics_asks.push_back({client, request.request_id(), now + kSemanticsFirstTreeWait});
+    };
+    handler.on_semantics_action = [&, client](const raccoon::v1::SemanticsAction& action) {
+      KeepSemanticsOn();
+      NoteInput();
+      std::vector<uint8_t> data;
+      if (action.action() == kSemanticsActionSetText) {
+        data = raccoon::EncodeValue(raccoon::CodecValue::String(action.text()));
+      }
+      if (trace) {
+        std::fprintf(stderr, "🦝 semantics action %llx on node %d\n",
+                     static_cast<unsigned long long>(action.action()), action.node_id());
+      }
+      host.SendSemanticsAction(client->view, action.node_id(), action.action(), data);
+    };
+    handler.on_pointer = [&host, client, &Focus, &NoteInput, trace](
+                             const raccoon::v1::PointerEvent& pointer) {
       if (trace) {
         std::fprintf(stderr, "🦝 pointer view=%lld phase=%d x=%.1f y=%.1f buttons=%lld device=%d\n",
                      static_cast<long long>(client->view), static_cast<int>(pointer.phase()),
@@ -1040,6 +1154,7 @@ int Serve(const Options& options) {
       switch (pointer.phase()) {
         case raccoon::v1::POINTER_PHASE_DOWN:
           Focus(*client);
+          NoteInput();
           client->down[pointer.pointer_id()] = pointer;
           break;
         case raccoon::v1::POINTER_PHASE_MOVE:
@@ -1050,14 +1165,17 @@ int Serve(const Options& options) {
         case raccoon::v1::POINTER_PHASE_UP:
         case raccoon::v1::POINTER_PHASE_CANCEL:
         case raccoon::v1::POINTER_PHASE_REMOVE:
+          NoteInput();
           client->down.erase(pointer.pointer_id());
           break;
         default:
+          if (pointer.scroll_delta_x() != 0 || pointer.scroll_delta_y() != 0) NoteInput();
           break;
       }
       host.SendPointer(client->view, ToFlutterPointer(pointer, host.NowMicros()));
     };
-    handler.on_key = [&host, &Focus, client, trace](const raccoon::v1::KeyEvent& key) {
+    handler.on_key = [&host, &Focus, &NoteInput, client, trace](const raccoon::v1::KeyEvent& key) {
+      NoteInput();
       // Typed in this client's view: it takes the focus a press would have
       // given it, or the keys went to whichever view was pressed last
       // (raccoon#244).
@@ -1076,7 +1194,9 @@ int Serve(const Options& options) {
       }
       host.SendKey(ToFlutterKey(key, host.NowMicros()));
     };
-    handler.on_text_editing = [&host, &Focus, client](const raccoon::v1::TextEditing& editing) {
+    handler.on_text_editing = [&host, &Focus, &NoteInput,
+                               client](const raccoon::v1::TextEditing& editing) {
+      NoteInput();
       Focus(*client);
       host.text_input().ApplyEditing(editing.text(), editing.selection_base(),
                                      editing.selection_extent(),
@@ -1136,6 +1256,7 @@ int Serve(const Options& options) {
       hello.mutable_hello()->set_pid(ThisProcessId());
       hello.mutable_hello()->set_views(host.views() && views_listening);
       hello.mutable_hello()->set_view_id(client->view);
+      hello.mutable_hello()->set_semantics(true);
       client->server->Send(hello);
       client->last_sent = 0;
       client->vm_sent = false;
@@ -1150,6 +1271,11 @@ int Serve(const Options& options) {
         host.SendPointer(client->view, ToFlutterPointer(cancel, host.NowMicros()));
       }
       client->down.clear();
+      semantics_asks.erase(std::remove_if(semantics_asks.begin(), semantics_asks.end(),
+                                          [client](const SemanticsAsk& ask) {
+                                            return ask.client == client;
+                                          }),
+                           semantics_asks.end());
       // What it showed the app as goes with it (#201), and only with it.
       if (settings_from == client) {
         host.ApplySettings({});
@@ -1491,6 +1617,7 @@ int Serve(const Options& options) {
     host.ServiceVsync();
     host.ServiceCamera();
     SendLogs();
+    ServiceSemantics();
     // A view's client that went is let go here, outside its socket's calls.
     views.erase(std::remove_if(views.begin(), views.end(),
                                [](const std::unique_ptr<Client>& client) {
@@ -1528,6 +1655,12 @@ int Serve(const Options& options) {
   };
   auto Wait = [&]() {
     int wait = NextWait(host, ExpireReplies(1000), !Held(first));
+    const auto now = std::chrono::steady_clock::now();
+    const auto settled_at = semantics_input_at + kSemanticsSettle;
+    for (const SemanticsAsk& ask : semantics_asks) {
+      const auto due = settled_at > now ? std::min(ask.deadline, settled_at) : ask.deadline;
+      wait = std::min(wait, static_cast<int>(std::max(0L, MillisBetween(now, due) + 1)));
+    }
     for (const auto& client : views) {
       if (Held(*client)) continue;
       raccoon::SoftwareFrame* frame = host.frame(client->view);

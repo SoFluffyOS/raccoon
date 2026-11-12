@@ -139,6 +139,7 @@ add_executable(raccoon_runner
   src/plugins_linux.cc
   src/platform_task_runner.cc
   src/secure_storage_options.cc
+  src/semantics_tree.cc
   src/server.cc
   src/shared_buffers.cc
   src/software_frame.cc
@@ -184,6 +185,15 @@ if(MSVC)
     NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
 else()
   target_compile_options(raccoon_channels_check PRIVATE -Wall -Wextra)
+endif()
+# The semantics tree the runner keeps for clients that ask: updates merged,
+# nodes placed in the view. Run by the runtime's integration tests too.
+add_executable(raccoon_semantics_check test/semantics_check.cc src/semantics_tree.cc)
+target_include_directories(raccoon_semantics_check PRIVATE src)
+if(MSVC)
+  target_compile_options(raccoon_semantics_check PRIVATE /W3 /utf-8)
+else()
+  target_compile_options(raccoon_semantics_check PRIVATE -Wall -Wextra)
 endif()
 if(WIN32)
   target_link_libraries(raccoon_runner PRIVATE ws2_32 winmm)

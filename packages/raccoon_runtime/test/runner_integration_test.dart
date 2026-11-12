@@ -4190,6 +4190,118 @@ class Report extends StatelessWidget {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  test(
+    'semantics find widgets by test id, with their bounds, and act on them',
+    () async {
+      // example/semantics: a counter and a text field with test ids, each
+      // change printed (COUNT n, TEXT t). At a pixel ratio of 2 the app's
+      // left padding of 100 is 200 pixels.
+      final semanticsAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'semantics',
+        'build',
+        'flutter_assets',
+      );
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: semanticsAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      runner.stderr.listen(output.add);
+      final client = await RunnerClient.connect(endpoint);
+      Future<void> printed(String line) async {
+        final deadline = DateTime.now().add(const Duration(seconds: 10));
+        while (!output.any((out) => out.contains(line)) &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        expect(output.any((out) => out.contains(line)), isTrue, reason: line);
+      }
+
+      SemanticsNode byId(List<SemanticsNode> nodes, String id) =>
+          nodes.firstWhere((node) => node.identifier == id);
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        expect(client.takesSemantics, isTrue);
+        client.resize(1000, 800, 2);
+        await client.frames.first.timeout(const Duration(seconds: 15));
+
+        var nodes = await client.semantics(
+          keepOn: const Duration(seconds: 2),
+          timeout: const Duration(seconds: 10),
+        );
+        expect(nodes.first.id, 0);
+        expect(nodes.first.right, closeTo(1000, 0.5));
+        expect(nodes.first.bottom, closeTo(800, 0.5));
+        final count = byId(nodes, 'count');
+        expect(count.label, 'Count 0');
+        expect(count.left, closeTo(200, 0.5));
+        expect(count.top, closeTo(100, 0.5));
+        // The id wraps the button, a node of its own that takes the tap.
+        final increment = byId(nodes, 'increment');
+        expect(increment.left, closeTo(200, 0.5));
+        expect(increment.right - increment.left, closeTo(400, 0.5));
+        final button = nodes.firstWhere(
+          (node) => node.id == increment.children.single,
+        );
+        expect(button.label, 'Increment');
+        expect(SemanticsNodeFlag.isButton.isOn(button), isTrue);
+        expect(SemanticsNodeAction.tap.isOn(button), isTrue);
+
+        client.performSemanticsAction(button.id, SemanticsNodeAction.tap);
+        await printed('COUNT 1');
+        nodes = await client.semantics(keepOn: const Duration(seconds: 2));
+        expect(byId(nodes, 'count').label, 'Count 1');
+
+        // A field takes text only while it has the focus.
+        final field = byId(nodes, 'name');
+        expect(SemanticsNodeFlag.isTextField.isOn(field), isTrue);
+        client.performSemanticsAction(field.id, SemanticsNodeAction.tap);
+        final deadline = DateTime.now().add(const Duration(seconds: 10));
+        while (!SemanticsNodeAction.setText.isOn(byId(nodes, 'name')) &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          nodes = await client.semantics(keepOn: const Duration(seconds: 2));
+        }
+        client.performSemanticsAction(
+          field.id,
+          SemanticsNodeAction.setText,
+          text: 'raccoon',
+        );
+        await printed('TEXT raccoon');
+
+        // Two seconds with no ask turn semantics off.
+        await printed('semantics off');
+      } finally {
+        client.shutdown();
+        await client.close();
+        await _expectExit(runner);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        ready &&
+                Directory(
+                  p.join(
+                    p.dirname(p.dirname(p.dirname(assets))),
+                    'semantics',
+                    'build',
+                    'flutter_assets',
+                  ),
+                ).existsSync()
+            ? false
+            : 'build the runner and the semantics example first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   // raccoon#298: Flutter takes no key without both codes, and a debug app
   // asserted on each one a client sent.
   test(
@@ -7694,6 +7806,31 @@ class Report extends StatelessWidget {
             ? false
             : 'build the runner\'s channels check first',
     timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  // Built beside the runner: the semantics tree it keeps for clients
+  // (test/semantics_check.cc).
+  final semanticsCheck =
+      binary == null
+          ? ''
+          : p.join(
+            p.dirname(binary),
+            Platform.isWindows
+                ? 'raccoon_semantics_check.exe'
+                : 'raccoon_semantics_check',
+          );
+  test(
+    'the semantics tree merges updates and places nodes in the view',
+    () async {
+      final check = await Process.run(semanticsCheck, const []);
+      printOnFailure('${check.stdout}${check.stderr}');
+      expect(check.exitCode, 0);
+      expect('${check.stdout}', contains('SEMANTICS ok'));
+    },
+    skip:
+        File(semanticsCheck).existsSync()
+            ? false
+            : 'build the runner\'s semantics check first',
   );
 
   // Built beside the runner on macOS: a GPU socket client that takes the
