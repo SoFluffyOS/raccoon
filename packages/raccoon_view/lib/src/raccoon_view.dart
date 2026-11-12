@@ -22,6 +22,7 @@ import 'package:raccoon_view/src/host_gpu_textures.dart';
 import 'package:raccoon_view/src/hosted_mouse_cursor.dart';
 import 'package:raccoon_view/src/hosted_text_input.dart';
 import 'package:raccoon_view/src/input_mapping.dart';
+import 'package:raccoon_view/src/ring_drain.dart';
 import 'package:raccoon_view/src/zoom_control.dart';
 
 /// Shows the app a runner hosts and sends it the view's size, pointer and key
@@ -212,7 +213,11 @@ class _RaccoonViewState extends State<RaccoonView> {
     if (connection is! GpuBufferConnection) return;
     if (!connection.gpuBuffers) return;
     final gpu = widget.gpuTextures ?? HostGpuTextures.forHost();
-    if (gpu == null) return;
+    if (gpu == null) {
+      // Nothing here can show them; held, they would fill the ring.
+      RingDrain.start(connection);
+      return;
+    }
     // The runner serves a connection's ring to one view at a time; another
     // view of it takes pixel frames meanwhile, which the first then shows
     // too (#205).
@@ -228,6 +233,7 @@ class _RaccoonViewState extends State<RaccoonView> {
       return;
     }
     _ringHolders[connection] = this;
+    RingDrain.stop(connection);
     _gpu = gpu;
     _gpuSets = connection.gpuBufferSets.listen(
       (set) => unawaited(_onGpuSet(set)),
@@ -273,6 +279,10 @@ class _RaccoonViewState extends State<RaccoonView> {
         _textureId = id;
         _hostReleases = releases;
         _creatingTexture = false;
+        // The runner took back every buffer as the socket connected, a frame
+        // named before among them, and an idle app names no other: a fresh
+        // one follows, in a buffer handed out since.
+        _redraw();
       } on Object {
         // The next set tries again.
         if (id >= 0) await _letGo(gpu, id);
@@ -344,6 +354,8 @@ class _RaccoonViewState extends State<RaccoonView> {
     _gpu = null;
     _gpuLive = false;
     if (!heldRing) return;
+    // Until a view takes the ring again, its buffers go back as named.
+    if (connection is GpuBufferConnection) RingDrain.start(connection);
     // The ring goes on once the texture let go of the runner's GPU
     // socket, which takes one connection at a time (#213).
     if (disposing == null) {
@@ -413,11 +425,9 @@ class _RaccoonViewState extends State<RaccoonView> {
 
   void _onFrame(rc.Frame frame) {
     if (frame.inGpuBuffer) {
-      // Another view holds the ring and gives its buffers back (#213).
-      if (_ringHolders[widget.connection] case final holder?
-          when !identical(holder, this)) {
-        return;
-      }
+      // Another view holds the ring and gives its buffers back (#213), or,
+      // with no view holding it, the drain does.
+      if (!identical(_ringHolders[widget.connection], this)) return;
       _lastGpuFrame = DateTime.now();
       unawaited(_showGpuFrame(frame));
       return;
@@ -521,6 +531,15 @@ class _RaccoonViewState extends State<RaccoonView> {
     if (_sentSize == size && _pixelRatio == pixelRatio) return;
     _sentSize = size;
     _pixelRatio = pixelRatio;
+    _redraw();
+  }
+
+  /// Sends the size laid out, if any, again: metrics the same or not, the
+  /// app draws a frame for them.
+  void _redraw() {
+    final size = _sentSize;
+    if (size == null) return;
+    final pixelRatio = _pixelRatio;
     widget.connection.resize(
       (size.width * pixelRatio).round(),
       (size.height * pixelRatio).round(),

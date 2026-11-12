@@ -11,6 +11,7 @@ class _GpuConnection implements RunnerConnection, GpuBufferConnection {
   final frameController = StreamController<rc.Frame>.broadcast();
   final sets = StreamController<rc.GpuBuffers>.broadcast();
   final released = <(int, int)>[];
+  final resizes = <(int, int, double)>[];
 
   @override
   bool get gpuBuffers => true;
@@ -29,7 +30,8 @@ class _GpuConnection implements RunnerConnection, GpuBufferConnection {
       released.add((generation, index));
 
   @override
-  void resize(int width, int height, double pixelRatio) {}
+  void resize(int width, int height, double pixelRatio) =>
+      resizes.add((width, height, pixelRatio));
 
   @override
   void sendPointer(rc.PointerEvent event) {}
@@ -125,6 +127,13 @@ class _CountingConnection extends _GpuConnection implements CaptureConnection {
   @override
   void wantPixels(bool on) => asked.add(on);
 }
+
+rc.Frame _gpuFrame(int sequence, int index, {int generation = 1}) => rc.Frame(
+  sequence: Int64(sequence),
+  inGpuBuffer: true,
+  bufferIndex: index,
+  gpuGeneration: generation,
+);
 
 rc.GpuBuffers _set(String socket) => rc.GpuBuffers(
   generation: 1,
@@ -743,6 +752,114 @@ void main() {
     );
     await tester.pump();
     expect(find.byType(Texture), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a view gone from a connection that stays gives back every '
+      'buffer named after it, until a view takes the ring again', (
+    tester,
+  ) async {
+    // Off a board or with its tab, a view goes and its connection stays:
+    // nothing gave the runner its buffers back, and with the ring full
+    // every view of the app slowed to readback's ten frames a second.
+    final connection = _GpuConnection();
+    final textures = _FakeTextures(releases: true);
+    await tester.pumpWidget(
+      RaccoonView(connection: connection, gpuTextures: textures),
+    );
+    connection.sets.add(_set('/run/r.gpu'));
+    await tester.pump();
+    connection.frameController.add(_gpuFrame(1, 0));
+    await tester.pump();
+    await tester.pump();
+    expect(textures.calls.last, 'show 7 1/0');
+
+    await tester.pumpWidget(const SizedBox());
+    for (final index in [1, 2, 0]) {
+      connection.frameController.add(_gpuFrame(index + 2, index));
+      await tester.pump();
+    }
+    expect(connection.released, [(1, 1), (1, 2), (1, 0)]);
+
+    await tester.pumpWidget(
+      RaccoonView(connection: connection, gpuTextures: textures),
+    );
+    connection.frameController.add(_gpuFrame(5, 1));
+    connection.sets.add(_set('/run/r.gpu'));
+    await tester.pump();
+    await tester.pump();
+    expect(textures.calls.last, 'show 7 1/1');
+    expect(connection.released, [(1, 1), (1, 2), (1, 0)]);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a view swapped to another connection leaves the old one '
+      'giving its buffers back', (tester) async {
+    final before = _GpuConnection();
+    final after = _GpuConnection();
+    final textures = _FakeTextures(releases: true);
+    await tester.pumpWidget(
+      RaccoonView(connection: before, gpuTextures: textures),
+    );
+    before.sets.add(_set('/run/a.gpu'));
+    await tester.pump();
+    await tester.pump();
+
+    await tester.pumpWidget(
+      RaccoonView(connection: after, gpuTextures: textures),
+    );
+    before.frameController.add(_gpuFrame(1, 2));
+    after.frameController.add(_gpuFrame(1, 0));
+    await tester.pump();
+    expect(before.released, [(1, 2)]);
+    expect(after.released, isEmpty);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a view whose connection ends stops giving buffers back', (
+    tester,
+  ) async {
+    final connection = _GpuConnection();
+    final textures = _FakeTextures(releases: true);
+    await tester.pumpWidget(
+      RaccoonView(connection: connection, gpuTextures: textures),
+    );
+    connection.sets.add(_set('/run/r.gpu'));
+    await tester.pump();
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox());
+    expect(connection.frameController.hasListener, isTrue);
+
+    await connection.frameController.close();
+    await tester.pump();
+    expect(connection.frameController.hasListener, isFalse);
+  });
+
+  testWidgets('a view whose texture connects asks the app for a fresh frame', (
+    tester,
+  ) async {
+    // The runner takes back every buffer as the GPU socket connects, the
+    // one of a frame named before among them, and an idle app draws no
+    // other: the view sends its size again, which draws one.
+    final connection = _GpuConnection();
+    final textures = _FakeTextures(releases: true);
+    await tester.pumpWidget(
+      Center(
+        child: SizedBox(
+          width: 200,
+          height: 100,
+          child: RaccoonView(connection: connection, gpuTextures: textures),
+        ),
+      ),
+    );
+    expect(connection.resizes, hasLength(1));
+
+    connection.sets.add(_set('/run/r.gpu'));
+    await tester.pump();
+    await tester.pump();
+    expect(textures.calls, ['create', 'connect 7 /run/r.gpu']);
+    expect(connection.resizes, hasLength(2));
+    expect(connection.resizes.last, connection.resizes.first);
     await tester.pumpWidget(const SizedBox());
   });
 }
