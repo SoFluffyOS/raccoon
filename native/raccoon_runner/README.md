@@ -48,7 +48,12 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
       first client.
     - `RunnerHello.views` says whether a runner takes views.
   - `runApp` draws into the first view only. The app needs a binding that lays
-    its root out in every view; `example/views` has one.
+    its root out in every view; `example/views` has one, and raccoon_runtime's
+    `ViewsEntrypoint` writes an entry with one around the app's own `main`.
+  - Each view builds its own instance of the app, so a global key the app
+    holds (an app-wide navigator key) can't be in two. The entry then shows
+    the views beside the first as refused, and says which on `raccoon/views`
+    to the first client (`RefusedViews`). The first view goes on.
   - `render --view WxH@DPR` adds views and writes each beside `--out` as
     `NAME.view<N>.ppm`.
 - Answers some plugins' channels itself, in both commands and with or

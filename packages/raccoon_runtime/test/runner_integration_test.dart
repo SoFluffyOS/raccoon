@@ -15,6 +15,8 @@ import 'package:test/test.dart';
 
 const _blue = (r: 0x1E, g: 0x88, b: 0xE5);
 const _red = (r: 0xE5, g: 0x39, b: 0x35);
+// What the views entry shows in a view it refused.
+const _noticeGrey = (r: 0x20, g: 0x21, b: 0x24);
 const _green = (r: 0x43, g: 0xA0, b: 0x47);
 const _purple = (r: 0x8E, g: 0x24, b: 0xAA);
 const _orange = (r: 0xFB, g: 0x8C, b: 0x00);
@@ -3639,6 +3641,130 @@ class Report extends StatelessWidget {
       } finally {
         client?.shutdown();
         await client?.close();
+        if (runner != null) await _expectExit(runner);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready && sdk != null ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
+  test(
+    'a second view of an app whose root holds a global key is refused, and '
+    'the first view goes on',
+    () async {
+      // The views entry around a main whose root widget's key is a global
+      // one, as an app-wide navigator key is.
+      final temp = Directory.systemTemp.createTempSync('raccoon_refused');
+      final app = Directory(p.join(temp.path, 'hello'))..createSync();
+      final hello = p.join(runnerDir, 'example', 'hello');
+      for (final file in [
+        'pubspec.yaml',
+        'pubspec.lock',
+        p.join('.dart_tool', 'package_config.json'),
+      ]) {
+        final copy = File(p.join(app.path, file))
+          ..parent.createSync(recursive: true);
+        File(p.join(hello, file)).copySync(copy.path);
+      }
+      File(p.join(app.path, 'lib', 'main.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('''
+import 'package:flutter/widgets.dart';
+
+final rootKey = GlobalKey();
+
+void main() => runApp(
+  ColoredBox(key: rootKey, color: const Color(0xFF1E88E5)),
+);
+''');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      RunnerProcess? runner;
+      RunnerClient? first;
+      final views = <RunnerClient>[];
+      try {
+        final entry = ViewsEntrypoint.write(app.path);
+        final build = await Process.run(
+          p.join(sdk!, 'bin', Platform.isWindows ? 'flutter.bat' : 'flutter'),
+          ['build', 'bundle', '-t', entry!],
+          workingDirectory: app.path,
+          runInShell: Platform.isWindows,
+        );
+        expect(build.exitCode, 0, reason: '${build.stdout}${build.stderr}');
+        runner = await RunnerProcess.start(
+          RunnerLaunch(
+            runnerBinary: binary!,
+            engineDir: engineDir!,
+            assets: p.join(app.path, 'build', 'flutter_assets'),
+            icuData: icu!,
+            endpoint: endpoint,
+            width: 300,
+            height: 200,
+            views: true,
+          ),
+        );
+        final output = <String>[];
+        runner.stdout.listen(output.add);
+        final client = first = await RunnerClient.connect(endpoint);
+        final refusals = StreamController<RefusedViews>();
+        client.registerChannel(ViewsEntrypoint.channel, (data) async {
+          if (RefusedViews.parse(data) case final refused?) {
+            refusals.add(refused);
+          }
+          return null;
+        });
+        final refused = StreamIterator(refusals.stream);
+        await client.hello.timeout(const Duration(seconds: 10));
+        final own = await client.frames.first.timeout(
+          const Duration(seconds: 15),
+        );
+        expect(_pixel(own, 150, 100), _blue);
+
+        final second = await RunnerClient.connect(endpoint.views);
+        views.add(second);
+        await second.hello.timeout(const Duration(seconds: 10));
+        second.resize(240, 160, 1);
+        expect(
+          await refused.moveNext().timeout(const Duration(seconds: 15)),
+          isTrue,
+        );
+        expect(refused.current.views, [second.viewId]);
+        expect(refused.current.reason, 'globalKey');
+        // The view shows the notice, not the app.
+        final notice = await second.frames
+            .firstWhere((f) => f.width == 240 && _pixel(f, 5, 5) == _noticeGrey)
+            .timeout(const Duration(seconds: 15));
+        expect(_pixel(notice, 5, 5), _noticeGrey);
+        expect(
+          output.any((line) => line.contains("can't show in more than one")),
+          isTrue,
+          reason: output.join('\n'),
+        );
+
+        // Back to one view: the first, which kept its key, draws on.
+        await second.close();
+        client.resize(320, 200, 1);
+        final after = await client.frames
+            .firstWhere((f) => f.width == 320)
+            .timeout(const Duration(seconds: 15));
+        expect(_pixel(after, 160, 100), _blue);
+
+        // A view asked for again is refused again.
+        final third = await RunnerClient.connect(endpoint.views);
+        views.add(third);
+        await third.hello.timeout(const Duration(seconds: 10));
+        third.resize(200, 100, 1);
+        expect(
+          await refused.moveNext().timeout(const Duration(seconds: 15)),
+          isTrue,
+        );
+        expect(refused.current.views, [third.viewId]);
+        await refused.cancel();
+      } finally {
+        for (final view in views) {
+          await view.close();
+        }
+        first?.shutdown();
+        await first?.close();
         if (runner != null) await _expectExit(runner);
         temp.deleteSync(recursive: true);
       }

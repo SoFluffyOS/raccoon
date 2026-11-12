@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
 import 'package:raccoon_runtime/raccoon_runtime.dart';
@@ -52,5 +54,43 @@ void main() {
     entry.setLastModifiedSync(written);
     ViewsEntrypoint.write(project.path);
     expect(entry.lastModifiedSync(), written);
+  });
+
+  test('the entry refuses views beside the first on a shared global key', () {
+    final source = ViewsEntrypoint.sourceFor('package:wonders/main.dart');
+    expect(source, contains("'${ViewsEntrypoint.channel}'"));
+    expect(source, contains("'reason': 'globalKey'"));
+  });
+
+  group('RefusedViews', () {
+    Uint8List encode(Object? message) =>
+        Uint8List.fromList(utf8.encode(jsonEncode(message)));
+
+    test('reads the views, the reason and the error', () {
+      final refused = RefusedViews.parse(
+        encode({
+          'refused': [1, 2],
+          'reason': 'globalKey',
+          'error': 'Duplicate GlobalKey detected in widget tree.',
+        }),
+      );
+      expect(refused?.views, [1, 2]);
+      expect(refused?.reason, 'globalKey');
+      expect(refused?.error, 'Duplicate GlobalKey detected in widget tree.');
+    });
+
+    test('takes no other message', () {
+      expect(RefusedViews.parse(encode({'view': 1})), isNull);
+      expect(RefusedViews.parse(Uint8List.fromList([0xFF, 0x00])), isNull);
+      expect(
+        RefusedViews.parse(
+          encode({
+            'refused': [3],
+            'reason': 'x',
+          }),
+        )?.error,
+        isNull,
+      );
+    });
   });
 }
