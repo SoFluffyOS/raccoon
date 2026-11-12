@@ -149,7 +149,9 @@ class EngineHost {
   // Microseconds on the engine's clock.
   uint64_t NowMicros() const { return loader_.procs().GetCurrentTime() / 1000; }
   // The engine asks for each frame; this answers when the frame is due, at
-  // 60 Hz, and with a GPU ring only once a buffer is free, up to a cap.
+  // 60 Hz, and with a GPU ring only once a buffer is free, up to a cap. In
+  // views mode one view with room is enough: a view whose ring is full
+  // skips the frame, read back only now and then (raccoon#229).
   // From the loop thread, every iteration.
   void ServiceVsync();
   // Milliseconds until ServiceVsync has something to do: -1 when the engine
@@ -291,6 +293,14 @@ class EngineHost {
     bool asked = false;
     std::atomic<bool> added{false};
     std::atomic<bool> metrics_owed{false};
+    // A frame that finds its ring full goes by readback only when the loop
+    // granted it one, for a view that had no frame for a hold; the raster
+    // thread takes the grant with the next frame. The others are dropped,
+    // so a client holding its ring sees the app at the pace a client alone
+    // does, and holds up no other view (#229).
+    std::atomic<bool> readback_granted{false};
+    // When the raster thread last handed a frame on, on the engine's clock.
+    std::atomic<uint64_t> last_frame_nanos{0};
   };
   // What a view is drawn into, view 0's or another's.
   struct Target {
@@ -312,8 +322,13 @@ class EngineHost {
   // Makes a target for a view beside the renderer's; false, with why, when
   // this renderer cannot.
   bool MakeTarget(View& view, std::string* error);
-  // Whether every view's ring has a buffer for the next frame.
+  // Whether the rings let the next frame go: alone, the one ring has a
+  // buffer for it; in views mode, some view has room (#229).
   bool HasFreeBuffers() const;
+  // Views mode: a readback for each view whose ring is full and that had no
+  // frame for a hold, or for every such view when the frame waited the
+  // hold for want of room (|held|). Loop thread, as a frame goes.
+  void GrantReadbacks(uint64_t now, bool held);
   // |view|'s GPU target, null on the software renderer or for a view not
   // there. Loop thread.
   GpuRenderer* GpuOf(FlutterViewId view) const;

@@ -421,6 +421,11 @@ bool GlRenderer::TakeMissedFrame() {
   return missed;
 }
 
+bool GlRenderer::FrameMissesRing() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return current_ < 0 && pool_wanted_ && !pool_.empty();
+}
+
 bool GlRenderer::HasFreeBuffer() const {
   std::lock_guard<std::mutex> lock(mutex_);
   if (!pool_wanted_ || pool_.empty()) return true;
@@ -691,6 +696,7 @@ bool GlRenderer::Present(const FrameCallback& callback) {
     }
     return true;
   }
+  if (!callback) return true;
   // The pool went off while this frame was drawn into one of its buffers
   // (Skia's GL surface takes the next frame's buffer at present): nobody
   // takes buffers now, so its pixels go as a readback frame.

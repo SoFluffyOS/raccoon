@@ -69,6 +69,10 @@ class GpuRenderer {
   // buffer was taken: a client drawing the ring never sees it. Asking
   // clears it.
   virtual bool TakeMissedFrame() { return false; }
+  // Whether the frame being drawn goes by readback because every pool
+  // buffer is taken. From the raster thread, between the frame's drawable
+  // and its present.
+  virtual bool FrameMissesRing() const { return false; }
 };
 
 }  // namespace raccoon

@@ -57,7 +57,8 @@ class GlRenderer : public GpuRenderer {
   // the host counts one per frame for it (#229).
   void CountFrame();
   // Hands the drawn frame on: to |gpu| when it is in a pool buffer, else read
-  // back through |callback|. Context current.
+  // back through |callback|; an empty |callback| drops a frame that would
+  // be read back. Context current.
   bool Present(const FrameCallback& callback);
   void* ProcAddress(const char* name) const;
 
@@ -88,6 +89,7 @@ class GlRenderer : public GpuRenderer {
   bool pool_set(GpuBufferSet* out) const override;
   bool HasFreeBuffer() const override;
   bool TakeMissedFrame() override;
+  bool FrameMissesRing() const override;
   void Release(uint32_t generation, int index, int fence_fd) override;
   void ReleaseAll() override;
 

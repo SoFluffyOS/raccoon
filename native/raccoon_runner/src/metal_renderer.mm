@@ -377,6 +377,12 @@ bool MetalRenderer::TakeMissedFrame() {
   return missed;
 }
 
+bool MetalRenderer::FrameMissesRing() const {
+  const Impl& m = *impl_;
+  std::lock_guard<std::mutex> lock(m.mutex);
+  return m.current < 0 && m.pool_wanted && !m.pool.empty();
+}
+
 bool MetalRenderer::HasFreeBuffer() const {
   const Impl& m = *impl_;
   std::lock_guard<std::mutex> lock(m.mutex);
@@ -527,6 +533,7 @@ bool MetalRenderer::Present(int64_t texture_id, const FrameCallback& callback) {
     return true;
   }
   if (m.readback_texture == nil) return false;
+  if (!callback) return true;
   // Pixels to the CPU: a blit into the shared buffer, waited for here.
   const size_t width = m.readback_width;
   const size_t height = m.readback_height;

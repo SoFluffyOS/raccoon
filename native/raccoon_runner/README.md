@@ -39,6 +39,10 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
     - A view's client speaks the same protocol. It gets frames inline, through
       shared buffers, or as GPU buffers served on `<socket>.v<N>.gpu`, and its
       pointer events go to its view.
+    - One vsync serves every view, and it waits only while no view's GPU
+      ring has room. A view whose client holds its whole ring (a frame off
+      screen) skips frames, with one read back about every 100 ms, and slows
+      no other view (#229).
     - Keys and text go to the app. The text field follows the client the user
       last pressed in. Platform messages, logs and plugins stay with the
       first client.

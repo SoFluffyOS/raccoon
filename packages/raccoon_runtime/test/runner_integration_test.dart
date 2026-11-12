@@ -5984,6 +5984,243 @@ class Report extends StatelessWidget {
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
+  test(
+    'a view whose client holds its GPU ring leaves the other views their pace',
+    () async {
+      // raccoon#229: one vsync serves every view, and it waited for every
+      // view's ring. A client that stops giving buffers back (a board frame
+      // off screen, a tab hidden) held every view to the ring hold's ten
+      // frames a second.
+      final temp = Directory.systemTemp.createTempSync('raccoon_views');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final spinAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'spin',
+        'build',
+        'flutter_assets',
+      );
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: spinAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          width: 320,
+          height: 240,
+          views: true,
+        ),
+      );
+      final clients = [await RunnerClient.connect(endpoint, gpuBuffers: true)];
+      final users = <_RingUser>[];
+      final gpuSockets = <Socket>[];
+      try {
+        final first = clients.first;
+        final firstGpu = await first.frames
+            .firstWhere((frame) => frame.inGpuBuffer)
+            .then<Frame?>((frame) => frame)
+            .timeout(const Duration(seconds: 15), onTimeout: () => null);
+        // Without a GPU (a CI machine) there is no ring to hold.
+        if (firstGpu == null) return;
+        first.releaseGpuBuffer(firstGpu.gpuGeneration, firstGpu.bufferIndex);
+        for (var i = 0; i < 2; i++) {
+          final view = await RunnerClient.connect(
+            endpoint.views,
+            gpuBuffers: true,
+          );
+          clients.add(view);
+          await view.hello.timeout(const Duration(seconds: 10));
+          view.resize(320, 240, 1);
+        }
+        for (final client in clients) {
+          users.add(_RingUser(client));
+          final set = await client.gpuBufferSets.first.timeout(
+            const Duration(seconds: 10),
+          );
+          gpuSockets.add(
+            await Socket.connect(
+              InternetAddress(set.socket, type: InternetAddressType.unix),
+              0,
+            ),
+          );
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        final before = await _framesOver(users, const Duration(seconds: 1));
+
+        // The last view stops giving its buffers back.
+        final holder = users.last;
+        holder.releasing = false;
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        final held = await _framesOver(users, const Duration(seconds: 1));
+
+        holder.resume();
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        final after = await _framesOver(users, const Duration(seconds: 1));
+
+        printOnFailure(
+          '(GPU, read back) frames a second for views 0, 1, 2: $before '
+          'before, $held with view 2 holding its ring, $after once it gave '
+          'it back; the runner last said:\n${runner.lastLines.join('\n')}',
+        );
+        for (final view in [0, 1]) {
+          expect(
+            held[view].$1,
+            greaterThanOrEqualTo(before[view].$1 * 3 ~/ 4),
+            reason: 'view $view kept its pace',
+          );
+        }
+        // The one holding its ring has nothing to draw into; what it gets is
+        // read back, no faster than the hold's ten a second, as a client
+        // alone gets it.
+        expect(held[2].$2, lessThanOrEqualTo(12));
+        // Given back, it is drawn into again.
+        expect(after[2].$1, greaterThanOrEqualTo(before[2].$1 ~/ 2));
+      } finally {
+        for (final user in users) {
+          await user.cancel();
+        }
+        for (final socket in gpuSockets) {
+          socket.destroy();
+        }
+        for (final view in clients.skip(1)) {
+          await view.close();
+        }
+        clients.first.shutdown();
+        await clients.first.close();
+        await _expectExit(runner);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
+  test(
+    'a view that comes back to a views run gets GPU frames again',
+    () async {
+      // #319 in a views run. A tab hidden: the view's GPU socket goes while
+      // its client stays, and the frames drawn meanwhile fill its ring with
+      // no one to give them back. Then the view's client goes altogether,
+      // and a new one takes a view of its own.
+      final temp = Directory.systemTemp.createTempSync('raccoon_views');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final spinAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'spin',
+        'build',
+        'flutter_assets',
+      );
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: spinAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          width: 320,
+          height: 240,
+          views: true,
+        ),
+      );
+      final first = await RunnerClient.connect(endpoint, gpuBuffers: true);
+      final users = <_RingUser>[];
+      final closing = <RunnerClient>[];
+      final sockets = <Socket>[];
+      Future<Socket> gpuSocket(RunnerClient client) async {
+        final set = await client.gpuBufferSets.first.timeout(
+          const Duration(seconds: 10),
+        );
+        final socket = await Socket.connect(
+          InternetAddress(set.socket, type: InternetAddressType.unix),
+          0,
+        );
+        sockets.add(socket);
+        return socket;
+      }
+
+      Future<_RingUser> addView() async {
+        final view = await RunnerClient.connect(
+          endpoint.views,
+          gpuBuffers: true,
+        );
+        closing.add(view);
+        await view.hello.timeout(const Duration(seconds: 10));
+        view.resize(320, 240, 1);
+        final user = _RingUser(view);
+        users.add(user);
+        await gpuSocket(view);
+        return user;
+      }
+
+      try {
+        final firstGpu = await first.frames
+            .firstWhere((frame) => frame.inGpuBuffer)
+            .then<Frame?>((frame) => frame)
+            .timeout(const Duration(seconds: 15), onTimeout: () => null);
+        // Without a GPU (a CI machine) there is no ring to fill.
+        if (firstGpu == null) return;
+        first.releaseGpuBuffer(firstGpu.gpuGeneration, firstGpu.bufferIndex);
+        final own = _RingUser(first);
+        users.add(own);
+        await gpuSocket(first);
+        final view = await addView();
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        final before = await _framesOver([
+          own,
+          view,
+        ], const Duration(seconds: 1));
+
+        // Hidden: its GPU socket goes, and nothing gives its frames back.
+        view.releasing = false;
+        sockets.last.destroy();
+        await Future<void>.delayed(const Duration(seconds: 1));
+        view.forget();
+        await gpuSocket(view.client);
+        view.resume();
+        final shown = await _framesOver([
+          own,
+          view,
+        ], const Duration(seconds: 1));
+
+        // Gone, and a new view in its place.
+        await view.cancel();
+        sockets.last.destroy();
+        await view.client.close();
+        final next = await addView();
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        final replaced = await _framesOver([
+          own,
+          next,
+        ], const Duration(seconds: 1));
+
+        printOnFailure(
+          '(GPU, read back) frames a second for view 0 and the other: '
+          '$before before, $shown back from hidden, $replaced with a new '
+          'view; the runner last said:\n${runner.lastLines.join('\n')}',
+        );
+        expect(shown[1].$1, greaterThanOrEqualTo(before[1].$1 ~/ 4));
+        expect(replaced[1].$1, greaterThanOrEqualTo(before[1].$1 ~/ 4));
+        expect(replaced[0].$1, greaterThanOrEqualTo(before[0].$1 * 3 ~/ 4));
+      } finally {
+        for (final user in users) {
+          await user.cancel();
+        }
+        for (final socket in sockets) {
+          socket.destroy();
+        }
+        for (final view in closing) {
+          await view.close();
+        }
+        first.shutdown();
+        await first.close();
+        await _expectExit(runner);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   // #144: a client let go kept its GPU socket, which refused the next
   // client's and took its buffers.
   test(
@@ -8826,4 +9063,66 @@ Future<Process> _startHelper(
         key: posix(value),
     },
   );
+}
+
+/// A host's use of a client's GPU ring, as a board frame's texture uses it:
+/// each frame shown gives the one before back, unless [releasing] is off
+/// (a frame off screen, a tab hidden), when it keeps every one it gets.
+class _RingUser {
+  _RingUser(this.client) {
+    _frames = client.frames.listen(_onFrame);
+  }
+
+  final RunnerClient client;
+  late final StreamSubscription<Frame> _frames;
+  final _held = <Frame>[];
+  var releasing = true;
+  var gpuFrames = 0;
+  var pixelFrames = 0;
+
+  void _onFrame(Frame frame) {
+    if (!frame.inGpuBuffer) {
+      pixelFrames++;
+      return;
+    }
+    gpuFrames++;
+    _held.add(frame);
+    if (releasing) _releaseAllBut(1);
+  }
+
+  void _releaseAllBut(int kept) {
+    while (_held.length > kept) {
+      final frame = _held.removeAt(0);
+      client.releaseGpuBuffer(frame.gpuGeneration, frame.bufferIndex);
+    }
+  }
+
+  /// Gives back what it held, and every frame before the newest from now.
+  void resume() {
+    releasing = true;
+    _releaseAllBut(1);
+  }
+
+  /// Forgets what it held without giving it back: its view went.
+  void forget() => _held.clear();
+
+  void reset() {
+    gpuFrames = 0;
+    pixelFrames = 0;
+  }
+
+  Future<void> cancel() => _frames.cancel();
+}
+
+/// GPU and read-back frames each of [users] gets over [span], counted from
+/// zero.
+Future<List<(int, int)>> _framesOver(
+  List<_RingUser> users,
+  Duration span,
+) async {
+  for (final user in users) {
+    user.reset();
+  }
+  await Future<void>.delayed(span);
+  return [for (final user in users) (user.gpuFrames, user.pixelFrames)];
 }

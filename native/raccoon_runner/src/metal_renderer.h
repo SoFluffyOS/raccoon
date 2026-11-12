@@ -48,7 +48,8 @@ class MetalRenderer : public GpuRenderer {
   bool NextDrawable(size_t width, size_t height, int64_t* texture_id,
                     const void** texture);
   // Hands the drawn frame on: to the GPU frame callback once the GPU is done
-  // with a pool buffer, else read back through |callback|.
+  // with a pool buffer, else read back through |callback|. An empty
+  // |callback| drops a frame that would be read back.
   bool Present(int64_t texture_id, const FrameCallback& callback);
 
   // External texture |texture_id| for the engine, on its raster thread: |bgra|, rows
@@ -77,6 +78,7 @@ class MetalRenderer : public GpuRenderer {
   bool pool_set(GpuBufferSet* out) const override;
   bool HasFreeBuffer() const override;
   bool TakeMissedFrame() override;
+  bool FrameMissesRing() const override;
   void Release(uint32_t generation, int index, int fence_fd) override;
   void ReleaseAll() override;
 

@@ -493,9 +493,13 @@ void EngineHost::ForEachGpu(const std::function<void(GpuRenderer&)>& each) const
 }
 
 bool EngineHost::HasFreeBuffers() const {
-  bool free = true;
-  ForEachGpu([&free](GpuRenderer& gpu) { free = free && gpu.HasFreeBuffer(); });
-  return free;
+  if (!views_mode_) return !gpu_ || gpu_->HasFreeBuffer();
+  // One vsync serves every view: waiting for each view's ring held them all
+  // to a client that stopped giving buffers back (#229). A view without a
+  // ring always has room.
+  bool room = false;
+  ForEachGpu([&room](GpuRenderer& gpu) { room = room || gpu.HasFreeBuffer(); });
+  return room || !gpu_;
 }
 
 bool EngineHost::MakeTarget(View& view, std::string* error) {
@@ -615,8 +619,18 @@ bool EngineHost::PresentView(const FlutterPresentViewInfo* info) {
   }
   if (store == nullptr) return true;
   SoftwareFrame* frame = target.frame;
-  const auto readback = [frame](const void* pixels, size_t row_bytes, size_t height,
-                                bool bgra) { frame->Present(pixels, row_bytes, height, bgra); };
+  GpuRenderer::FrameCallback readback = [frame](const void* pixels, size_t row_bytes,
+                                                size_t height, bool bgra) {
+    frame->Present(pixels, row_bytes, height, bgra);
+  };
+  if (const std::shared_ptr<View>& view = target.view; view && target.gpu != nullptr) {
+    // Its ring full, the view skips the frame but for a readback now and
+    // then; the renderer marks it missed, so a release asks for another.
+    const bool granted = view->readback_granted.exchange(false);
+    const bool dropped = target.gpu->FrameMissesRing() && !granted;
+    if (dropped) readback = nullptr;
+    if (!dropped) view->last_frame_nanos = host->loader_.procs().GetCurrentTime();
+  }
 #if RACCOON_HAS_GL
   if (target.gl != nullptr) {
     target.gl->EnsureCurrent();
@@ -901,6 +915,10 @@ namespace {
 constexpr uint64_t kFrameNanos = 16666667;  // 60 Hz
 // How long a frame waits for a ring buffer before going by readback.
 constexpr uint64_t kRingHoldNanos = 100000000;
+// How long a view whose ring is full goes without a frame before one is
+// read back for it in views mode: a hold, less half a frame so that frames
+// on the 60 Hz grid make it every sixth.
+constexpr uint64_t kReadbackEvery = kRingHoldNanos - kFrameNanos / 2;
 }  // namespace
 
 void EngineHost::OnVsync(void* user_data, intptr_t baton) {
@@ -917,6 +935,7 @@ void EngineHost::OnVsync(void* user_data, intptr_t baton) {
 void EngineHost::ServiceVsync() {
   intptr_t baton = 0;
   uint64_t start = 0;
+  bool held = false;
   {
     std::lock_guard<std::mutex> lock(vsync_mutex_);
     if (!vsync_pending_ || engine_ == nullptr) return;
@@ -925,6 +944,7 @@ void EngineHost::ServiceVsync() {
     const bool free = HasFreeBuffers();
     if (!free && now - vsync_asked_nanos_ < kRingHoldNanos) return;
     if (!free) gpu_frame_owed_ = true;
+    held = !free;
     vsync_pending_ = false;
     baton = vsync_baton_;
     start = now;
@@ -935,7 +955,25 @@ void EngineHost::ServiceVsync() {
     const uint64_t due = now - next_frame_nanos_ > kFrameNanos ? now : next_frame_nanos_;
     next_frame_nanos_ = due + kFrameNanos;
   }
+  GrantReadbacks(start, held);
   loader_.procs().OnVsync(engine_, baton, start, start + kFrameNanos);
+}
+
+void EngineHost::GrantReadbacks(uint64_t now, bool held) {
+  if (!views_mode_) return;
+  std::vector<std::shared_ptr<View>> views;
+  {
+    std::lock_guard<std::mutex> lock(views_mutex_);
+    for (const auto& [id, view] : views_) views.push_back(view);
+  }
+  for (const auto& view : views) {
+    if (!view->gpu || view->gpu->HasFreeBuffer()) continue;
+    // A client still taking frames, only slower, gets the next frame its
+    // ring has room for, not pixels through its socket as well.
+    // (A frame handed on since |now| was read counts as recent.)
+    if (!held && view->last_frame_nanos.load() + kReadbackEvery > now) continue;
+    view->readback_granted = true;
+  }
 }
 
 int EngineHost::MillisUntilVsync() const {
@@ -961,9 +999,12 @@ int EngineHost::MillisUntilCamera() const {
 }
 
 void EngineHost::RedrawIfMissed() {
-  if (engine_ == nullptr || !HasFreeBuffers()) return;
+  if (engine_ == nullptr) return;
+  // Each view's own ring: one still full leaves the others' redraws be.
   bool missed = false;
-  ForEachGpu([&missed](GpuRenderer& gpu) { missed = gpu.TakeMissedFrame() || missed; });
+  ForEachGpu([&missed](GpuRenderer& gpu) {
+    if (gpu.HasFreeBuffer() && gpu.TakeMissedFrame()) missed = true;
+  });
   if (missed) loader_.procs().ScheduleFrame(engine_);
 }
 
