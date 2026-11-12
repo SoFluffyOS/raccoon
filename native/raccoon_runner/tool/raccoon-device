@@ -2260,6 +2260,44 @@ clear_assembled_linux() {
   rm -rf "$linux"
 }
 
+# Where the build put a code asset the manifest names by path, under
+# |root| (its native_assets folder). Older SDKs name it relative to that
+# folder (native_add.framework/native_add, libnative_add.so); newer ones on
+# macOS by its install name, @rpath/native_add.framework/native_add, which
+# an app's executable finds in its Contents/Frameworks and the runner never
+# would. None for one by absolute path, or a system or process lookup.
+NATIVE_ASSET_PY='
+import os
+
+def located_asset(path, root):
+    if len(path) != 2 or path[0] != "absolute":
+        return None
+    name = path[1]
+    for token in ("@rpath/", "@executable_path/", "@loader_path/"):
+        if name.startswith(token):
+            name = name[len(token):]
+            break
+    else:
+        if os.path.isabs(name):
+            return None
+    parts = [part for part in name.replace("\\", "/").split("/") if part not in ("", ".", "..")]
+    if parts[:1] == ["Frameworks"]:
+        parts = parts[1:]
+    if not parts:
+        return None
+    joined = os.path.join(root, *parts)
+    if os.path.exists(joined):
+        return joined
+    # Elsewhere in the folder: by its framework and binary, or its file name.
+    tail = parts[-2:] if len(parts) > 1 and parts[-2].endswith(".framework") else parts[-1:]
+    for directory, folders, files in os.walk(root):
+        for found in folders + files:
+            candidate = os.path.join(directory, found)
+            if os.path.relpath(candidate, root).split(os.sep)[-len(tail):] == tail:
+                return candidate
+    return joined
+'
+
 # Code assets of packages with build hooks (native assets: objective_c
 # under path_provider_foundation, sqlite3 3.x), built for this host. The
 # tool builds the bundle for the Linux device it believes Raccoon to be (#1)
@@ -2309,7 +2347,7 @@ build_native_assets() {
   # so an edit, a new file or one gone builds again (#111). A last build
   # whose libraries went missing never matches.
   local inputs scan=0
-  inputs="$(python3 - "$config" "$project" "$(sdk_root)" "${target[*]}" "$manifest" "$built" <<'PY'
+  inputs="$({ echo "$NATIVE_ASSET_PY"; cat <<'PY'
 import hashlib, json, os, sys
 from urllib.parse import unquote, urlparse
 config, project, sdk, target, manifest, built = sys.argv[1:7]
@@ -2400,14 +2438,14 @@ for name in sorted(scanned):
 try:
     for assets in json.load(open(manifest)).get('native-assets', {}).values():
         for path in assets.values():
-            if len(path) == 2 and path[0] == 'absolute' and not os.path.isabs(path[1]) \
-                    and not os.path.exists(os.path.join(built, path[1])):
+            library = located_asset(path, built)
+            if library is not None and not os.path.exists(library):
                 digest.update(b'missing')
-except (OSError, ValueError):
+except (OSError, ValueError, TypeError, AttributeError):
     pass
 print(digest.hexdigest(), ' '.join(sorted(hooked)))
 PY
-)" || scan=$?
+} | python3 - "$config" "$project" "$(sdk_root)" "${target[*]}" "$manifest" "$built")" || scan=$?
   # 3: no package has a hook. Any other failure: build, and keep no stamp.
   [ "$scan" -eq 3 ] && return 0
   # The hash, then the hook packages, by name.
@@ -2461,7 +2499,7 @@ PY
     fi
     [ -n "$inputs" ] && echo "$inputs" > "$stamp"
   fi
-  python3 - "$manifest" "$built" "$app" "$started" "$unchanged" <<'PY'
+  { echo "$NATIVE_ASSET_PY"; cat <<'PY'
 import json, os, shutil, sys, time
 manifest_path, built, app, started, unchanged = sys.argv[1:6]
 
@@ -2504,13 +2542,17 @@ for assets in manifest.get('native-assets', {}).values():
     for asset, path in assets.items():
         # A framework or library the build installed: by absolute path from
         # where it now is. System and process lookups stay as they are.
-        if len(path) == 2 and path[0] == 'absolute' and not os.path.isabs(path[1]):
-            assets[asset] = ['absolute', os.path.join(installed, path[1])]
+        library = located_asset(path, installed)
+        if library is not None:
+            if not os.path.exists(library):
+                print('🦝 native asset %s: %s is not in the build' % (asset, path[1]), file=sys.stderr)
+            assets[asset] = ['absolute', library]
         count += 1
 json.dump(manifest, open(os.path.join(app, 'flutter_assets', 'NativeAssetsManifest.json'), 'w'))
 print('🦝 native assets ready in %.1f s, %d for this host%s' % (
     time.time() - float(started), count, ', unchanged since the last build' if unchanged else ''), file=sys.stderr)
 PY
+} | python3 - "$manifest" "$built" "$app" "$started" "$unchanged"
 }
 
 case "$verb" in
@@ -2672,6 +2714,17 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
       # A vendored library the app opens by name (isar's libisar.dylib), as
       # an app's bundle would have it (#93).
       export DYLD_LIBRARY_PATH="$APPS/$key/plugins/frameworks${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+    fi
+    # Code assets load by absolute path; one that links another loads it by
+    # its install name, @rpath/<name>.framework/<name> on macOS, which an
+    # app's executable finds in its Contents/Frameworks, or on Linux by its
+    # file name, which an app finds in its lib/.
+    if [ -d "$APPS/$key/native_assets" ]; then
+      if [ "$UNAME_S" = Darwin ]; then
+        export DYLD_FRAMEWORK_PATH="$APPS/$key/native_assets${DYLD_FRAMEWORK_PATH:+:$DYLD_FRAMEWORK_PATH}"
+      elif [ -z "$WINDOWS" ]; then
+        export LD_LIBRARY_PATH="$APPS/$key/native_assets${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+      fi
     fi
     binary="$RUNNER"
     if [ "$UNAME_S" = Darwin ] && { [ -n "$manifest" ] || [ -d "$APPS/$key/native_assets" ]; }; then

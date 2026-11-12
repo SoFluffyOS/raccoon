@@ -334,7 +334,11 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   macOS bundle target for this machine (`flutter assemble ...
   debug_macos_bundle_flutter_assets`, no `macos/` directory needed), puts
   the code assets beside the app and names them by absolute path in the
-  installed `NativeAssetsManifest.json`, under the host's key. Only for
+  installed `NativeAssetsManifest.json`, under the host's key, whether the
+  SDK named them relative to its build or by install name
+  (`@rpath/native_add.framework/native_add` on macOS, as newer SDKs do). They link
+  each other as in an app's bundle: their folder is on the runner's
+  `DYLD_FRAMEWORK_PATH` (`LD_LIBRARY_PATH` on Linux). Only for
   projects with hook packages: on an M1 Pro, 9 s the first time for a new
   project, about 1.7 s after any change. While nothing changes, the next
   install reuses that build: the inputs are the package config, the
