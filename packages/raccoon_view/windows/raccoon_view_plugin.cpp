@@ -138,18 +138,18 @@ class GpuTexture {
   // On the raster thread: the latest frame's texture.
   const FlutterDesktopGpuSurfaceDescriptor* Surface() {
     std::lock_guard<std::mutex> lock(mutex_);
-    // A new ring waits until a frame of it is named: until then the frame
-    // shown is of the set at hand, and the new ring's buffers may be being
-    // drawn or never drawn.
-    if (pending_ && (!current_ || pending_->generation == shown_generation_)) {
+    // A ring waits until a frame of it is named, the first one too: until
+    // then the frame shown is of the set at hand, if any, and the new
+    // ring's buffers may be being drawn or never drawn (#157).
+    if (pending_ && shown_index_ >= 0 && pending_->generation == shown_generation_) {
       current_ = std::move(pending_);
     }
     if (!current_ || current_->handles.empty()) return nullptr;
     const BufferSet& set = *current_;
-    // The frame named is not of this set: the buffer bound last stays, or,
-    // with nothing of this set bound yet, the first, and not one to give
-    // back.
-    int index = 0;
+    // The frame named is not of this set: the buffer bound last stays, and
+    // with nothing of this set bound, nothing shows: any other buffer of it
+    // may be the one being drawn (#157).
+    int index = -1;
     if (bound_generation_ == set.generation && bound_index_ >= 0 &&
         static_cast<size_t>(bound_index_) < set.handles.size()) {
       index = bound_index_;
@@ -165,6 +165,7 @@ class GpuTexture {
       bound_generation_ = set.generation;
       bound_index_ = shown_index_;
     }
+    if (index < 0) return nullptr;
     descriptor_ = {};
     descriptor_.struct_size = sizeof(descriptor_);
     descriptor_.handle = set.handles[index];

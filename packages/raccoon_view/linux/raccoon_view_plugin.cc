@@ -331,11 +331,11 @@ static gboolean import_pending(RaccoonGpuTexture* self, GError** error) {
   std::unique_ptr<BufferSet> set;
   {
     std::lock_guard<std::mutex> lock(*self->mutex);
-    // A new ring waits until a frame of it is named: until then the frame
-    // shown is of the set at hand, and the new ring's buffers may be being
-    // drawn or never drawn.
-    if (self->pending &&
-        (!self->imported || self->pending->generation == self->shown_generation)) {
+    // A ring waits until a frame of it is named, the first one too: until
+    // then the frame shown is of the set at hand, if any, and the new
+    // ring's buffers may be being drawn or never drawn (#157).
+    if (self->pending && self->shown_index >= 0 &&
+        self->pending->generation == self->shown_generation) {
       set = std::move(self->pending);
     }
   }
@@ -409,7 +409,7 @@ static gboolean raccoon_gpu_texture_populate(FlTextureGL* texture,
   if (!import_pending(self, error)) {
     // Flutter logs the error's message, and a missing one crashes it.
     if (error != nullptr && *error == nullptr) {
-      g_set_error(error, G_IO_ERROR, G_IO_ERROR_PENDING, "no GPU buffers yet");
+      g_set_error(error, G_IO_ERROR, G_IO_ERROR_PENDING, "no frame of a ring named yet");
     }
     return FALSE;
   }
@@ -418,9 +418,10 @@ static gboolean raccoon_gpu_texture_populate(FlTextureGL* texture,
     g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "no GPU buffer imported");
     return FALSE;
   }
-  // The frame named is not of this set: the buffer bound last stays, or,
-  // with nothing of this set bound yet, the first, and not one to give back.
-  int index = 0;
+  // The frame named is not of this set: the buffer bound last stays, and
+  // with nothing of this set bound, nothing shows: any other buffer of it
+  // may be the one being drawn (#157).
+  int index = -1;
   int fence_fd = -1;
   bool rebound = false;
   uint32_t before_generation = 0;
@@ -448,6 +449,10 @@ static gboolean raccoon_gpu_texture_populate(FlTextureGL* texture,
       self->bound_generation = generation;
       self->bound_index = shown;
     }
+  }
+  if (index < 0) {
+    g_set_error(error, G_IO_ERROR, G_IO_ERROR_PENDING, "no frame of this ring named yet");
+    return FALSE;
   }
   // The runner's draw may still be running: sample after it.
   if (fence_fd >= 0) wait_fence(self, fence_fd);
