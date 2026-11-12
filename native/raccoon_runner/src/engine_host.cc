@@ -345,6 +345,10 @@ void EngineHost::RemoveView(FlutterViewId view) {
   std::shared_ptr<View> found = ViewOf(view);
   if (!found || found->removing) return;
   found->removing = true;
+  {
+    std::lock_guard<std::mutex> lock(semantics_mutex_);
+    semantics_.erase(view);
+  }
   if (focused_ == view) focused_ = 0;
   if (found->asked && engine_ != nullptr) {
     FlutterRemoveViewInfo info{};
@@ -1099,7 +1103,7 @@ std::string Text(const char* text) { return text == nullptr ? std::string() : te
 
 void EngineHost::OnSemanticsUpdate(const FlutterSemanticsUpdate2* update, void* user_data) {
   auto* host = static_cast<EngineHost*>(user_data);
-  if (update == nullptr || !host->semantics_enabled_) return;
+  if (update == nullptr || !host->semantics_enabled_.load()) return;
   std::vector<SemanticsTree::Node> nodes;
   nodes.reserve(update->node_count);
   for (size_t i = 0; i < update->node_count; ++i) {

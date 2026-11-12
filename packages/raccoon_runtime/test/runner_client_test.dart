@@ -599,6 +599,17 @@ void main() {
       await expectLater(asked, throwsA(isA<SocketException>()));
     });
 
+    test('an ask after the runner hung up fails at once', () async {
+      await semanticClient.hello;
+      await semanticRunner.stop();
+      await semanticClient.closed;
+
+      await expectLater(
+        semanticClient.semantics(timeout: const Duration(minutes: 1)),
+        throwsA(isA<SocketException>()),
+      );
+    });
+
     test('an action goes with its node, its bit and its text', () async {
       final sent = semanticRunner.received.firstWhere(
         (message) => message.hasSemanticsAction(),

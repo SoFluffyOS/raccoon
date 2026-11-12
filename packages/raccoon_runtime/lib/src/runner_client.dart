@@ -270,6 +270,10 @@ final class RunnerClient
     if (!_takesSemantics) {
       throw UnsupportedError('this runner predates semantics');
     }
+    if (_closed.isCompleted) {
+      throw const SocketException('the runner hung up');
+    }
+
     final requestId = _nextSemanticsRequest++;
     final answer = Completer<List<SemanticsNode>>();
     _semanticsAsks[requestId] = answer;

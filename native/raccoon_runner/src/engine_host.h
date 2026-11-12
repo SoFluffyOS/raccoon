@@ -196,7 +196,7 @@ class EngineHost {
   // sends each view's tree as it changes, which costs every frame; off, the
   // trees go. False when the engine took no change.
   bool SetSemanticsEnabled(bool enabled);
-  bool semantics_enabled() const { return semantics_enabled_; }
+  bool semantics_enabled() const { return semantics_enabled_.load(); }
   // How many updates the engine sent since semantics went on, every view's.
   uint64_t semantics_updates() const;
   // Calls |read| with |view|'s nodes as SemanticsTree::Flatten places them,
@@ -342,7 +342,8 @@ class EngineHost {
   static void OnSemanticsUpdate(const FlutterSemanticsUpdate2* update, void* user_data);
   // What Resize scaled |view|'s frame by; 1 for a view not there.
   double InputScaleOf(FlutterViewId view) const;
-  bool semantics_enabled_ = false;
+  // Read on the engine's thread as its updates come, set on the main one.
+  std::atomic<bool> semantics_enabled_{false};
   mutable std::mutex semantics_mutex_;
   std::map<FlutterViewId, SemanticsTree> semantics_;
   uint64_t semantics_updates_ = 0;

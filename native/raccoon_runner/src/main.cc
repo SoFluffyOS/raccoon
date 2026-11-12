@@ -99,6 +99,8 @@ constexpr uint32_t kProtocolVersion = 1;
 // semantics stay on without another ask or action when it names no time.
 constexpr auto kSemanticsFirstTreeWait = std::chrono::seconds(3);
 constexpr auto kSemanticsKeepOn = std::chrono::seconds(30);
+// The longest a client may keep them on without asking again.
+constexpr auto kSemanticsKeepOnMost = std::chrono::minutes(10);
 // How long an ask right after input waits for the tree that input brings:
 // a tap's new state comes with the app's next frame.
 constexpr auto kSemanticsSettle = std::chrono::milliseconds(500);
@@ -1118,7 +1120,8 @@ int Serve(const Options& options) {
     handler.on_semantics_request = [&, client](const raccoon::v1::SemanticsRequest& request) {
       semantics_keep_on = request.keep_on_millis() == 0
                               ? std::chrono::milliseconds(kSemanticsKeepOn)
-                              : std::chrono::milliseconds(request.keep_on_millis());
+                              : std::min(std::chrono::milliseconds(request.keep_on_millis()),
+                                         std::chrono::milliseconds(kSemanticsKeepOnMost));
       KeepSemanticsOn();
       if (!host.semantics_enabled() && host.SetSemanticsEnabled(true)) {
         std::fprintf(stderr, "🦝 semantics on\n");
