@@ -91,6 +91,9 @@ if ! installed; then
   # does: an interrupted download, or two at once, never leaves half an
   # engine that counts as there (#136).
   mkdir -p "$CACHE"
+  # Timed for the log, by perl as the helper times: bash 3.2 has no clock
+  # finer than a second.
+  STARTED="$(perl -MTime::HiRes=time -e 'printf "%.6f", time' 2>/dev/null || true)"
   STAGE="$(mktemp -d "$DIR.partial.XXXXXX")"
   trap 'rm -rf "$STAGE"' EXIT
   mkdir -p "$STAGE/dir${UNZIP_INTO#"$DIR"}"
@@ -107,6 +110,10 @@ if ! installed; then
   if ! installed; then
     rm -rf "$DIR"
     [ -e "$DIR" ] || mv "$STAGE/dir" "$DIR"
+  fi
+  if [ -n "$STARTED" ]; then
+    perl -MTime::HiRes=time -e 'printf STDERR "🦝 Flutter engine %s downloaded in %.1f s\n", $ARGV[0], time - $ARGV[1]' \
+      "$REV" "$STARTED" || true
   fi
 fi
 if command -v cygpath >/dev/null; then cygpath -m "$DIR"; else echo "$DIR"; fi

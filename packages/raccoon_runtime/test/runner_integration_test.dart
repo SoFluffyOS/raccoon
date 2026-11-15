@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
 import 'package:fixnum/fixnum.dart';
 import 'package:path/path.dart' as p;
 import 'package:raccoon/raccoon.dart';
@@ -347,6 +348,105 @@ void main() {
     skip: switch (ready) {
       false => 'build the runner and example first',
       true => false,
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  // #352: the engine was downloaded at run, after the install had built
+  // the plugins; install downloads it now, and run still does when install
+  // was skipped.
+  test(
+    'install downloads the engine, and a run without one still gets it',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_engine');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      // A mirror of the bucket (FLUTTER_STORAGE_BASE_URL), with an engine
+      // that is only its library's name: the run below is a stub's.
+      final library = p.basename(
+        RuntimeStore.engineLibraryOf(RuntimeStore.hostPlatform),
+      );
+      final zip = ZipEncoder().encodeBytes(
+        Archive()..addFile(ArchiveFile.bytes(library, [1, 2, 3])),
+      );
+      var downloads = 0;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((request) async {
+        downloads++;
+        request.response.add(zip);
+        await request.response.close();
+      });
+      addTearDown(server.close);
+      // Says the engine it was given, and exits.
+      final stub = File(p.join(temp.path, 'raccoon_runner'))
+        ..writeAsStringSync('#!/bin/sh\necho "engine \$3"\n');
+      await Process.run('chmod', ['755', stub.path]);
+      final environment = {
+        if (sdk != null) 'FLUTTER_ROOT': sdk,
+        'XDG_DATA_HOME': p.join(temp.path, 'data'),
+        'XDG_RUNTIME_DIR': temp.path,
+        'TMPDIR': '${temp.path}/',
+        'RACCOON_PLUGINS': 'off',
+        'FLUTTER_STORAGE_BASE_URL': 'http://127.0.0.1:${server.port}',
+      };
+      String engineOf(String cache) =>
+          RuntimeStore(cacheDirectory: cache).installed(revision!)!.directory;
+
+      final engines = p.join(temp.path, 'engines');
+      final install = await _runHelper(
+        runnerDir,
+        ['install', assets, 'app'],
+        {
+          ...environment,
+          'RACCOON_RUNNER': binary!,
+          'RACCOON_ENGINE_CACHE': engines,
+        },
+      );
+      expect(install.exitCode, 0, reason: '${install.stderr}');
+      expect(downloads, 1);
+      expect(
+        '${install.stderr}',
+        contains('Flutter engine $revision downloaded'),
+      );
+      expect(File(p.join(engineOf(engines), library)).readAsBytesSync(), [
+        1,
+        2,
+        3,
+      ]);
+
+      // The run takes it as it is.
+      final run = await _runHelper(
+        runnerDir,
+        ['run', 'app'],
+        {
+          ...environment,
+          'RACCOON_RUNNER': stub.path,
+          'RACCOON_ENGINE_CACHE': engines,
+        },
+      );
+      expect(run.exitCode, 0, reason: '${run.stderr}');
+      expect(downloads, 1);
+      expect('${run.stdout}', contains('engine ${engineOf(engines)}'));
+
+      // An app installed before the engine went, as flutter run finds one
+      // it need not install again: the run downloads it.
+      final other = p.join(temp.path, 'other_engines');
+      final skipped = await _runHelper(
+        runnerDir,
+        ['run', 'app'],
+        {
+          ...environment,
+          'RACCOON_RUNNER': stub.path,
+          'RACCOON_ENGINE_CACHE': other,
+        },
+      );
+      expect(skipped.exitCode, 0, reason: '${skipped.stderr}');
+      expect(downloads, 2);
+      expect('${skipped.stdout}', contains('engine ${engineOf(other)}'));
+    },
+    skip: switch ((ready && revision != null, Platform.isWindows)) {
+      (false, _) => 'build the runner and example first',
+      (_, true) => 'the stub runner is a shell script',
+      _ => false,
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );

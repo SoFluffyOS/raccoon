@@ -7,9 +7,12 @@
 #   raccoon-device run [--instance KEY] [--size WxH@R] <appName> [engine switches]
 #
 # install copies the app bundle the tool built (build/flutter_assets) into the
-# runtime's app store; run starts raccoon_runner serve on it and leaves the
-# engine's log lines on stdout, where the tool reads the VM service URI, and
-# keeps a timestamped copy of the run's output in the app's data directory.
+# runtime's app store, builds its native plugins and assets, and downloads
+# the SDK's engine meanwhile when it isn't there yet; run starts
+# raccoon_runner serve on it (downloading the engine itself when install
+# didn't) and leaves the engine's log lines on stdout, where the tool reads
+# the VM service URI, and keeps a timestamped copy of the run's output in
+# the app's data directory.
 # A runner that ends badly is said so on stderr: its exit code, or the
 # signal it died of.
 #
@@ -2677,6 +2680,12 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
       echo "🦝 no app bundle at $local_path: flutter run builds it there first" >&2
       exit 1
     fi
+    # The engine run needs, for the SDK in use, downloaded once per engine
+    # revision beside the plugin builds rather than after them at run
+    # (#352). One that can't be had is said; run tries again, and says why
+    # it can't start (#119).
+    UNAME_S="$UNAME_S" UNAME_M="$UNAME_M" "$ROOT/tool/engine_dir.sh" > /dev/null &
+    engine_job=$!
     # The app's own setting (raccoon_runtime's AppPlugins, as a host saves
     # it), shared by its instances, else the host's default, where the
     # environment says none (#214).
@@ -2725,6 +2734,7 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
     config="$(package_config "$project")" || config=""
     build_plugins "$project" "$APPS/$key/plugins" "$config"
     build_native_assets "$project" "$APPS/$key" "$config"
+    wait "$engine_job" || true
     ;;
   uninstall)
     key="$(app_key "$1")"

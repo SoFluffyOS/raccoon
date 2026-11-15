@@ -10,7 +10,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
 - Loads the prebuilt debug embedder for the active SDK's engine revision at
   run time (`tool/engine_dir.sh` downloads it: `libflutter_engine.so` on
   Linux, `FlutterEmbedder.framework` on macOS, `flutter_engine.dll` on
-  Windows), so one runner binary serves several runtimes.
+  Windows), so one runner binary serves several runtimes. `tool/raccoon-device
+  install` downloads it while the plugins build, once per engine revision,
+  and `run` when install didn't (#352).
 - Runs an app bundle (`build/flutter_assets`, no native build needed) with a
   GPU renderer where the host has one, else the software renderer, on a
   pumped platform task runner.
@@ -407,7 +409,8 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   runner that ends badly is said so in the run's output: `🦝 raccoon_runner
   exited with code N`, or `🦝 raccoon_runner died of signal SEGV (11)`. So is
   a run that can't start: an app not installed, no runner binary, or an
-  engine that can't be downloaded (#119). Each run's socket is
+  engine that can't be downloaded (#119); an install that couldn't
+  download it says so too, and goes on. Each run's socket is
   `<socket dir>/<app>.sock`; a key too long for a socket path (104 bytes
   on macOS) gets as much of it as fits, in whole characters, and
   `~<checksum>`, with the key in a `.name` file beside the socket, which
