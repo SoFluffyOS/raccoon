@@ -591,12 +591,18 @@ void main() {
     });
 
     test('an ask fails when the runner hangs up', () async {
-      final asked = semanticClient.semantics();
+      // Expected before the runner stops: the ask can fail while stop()
+      // is still being awaited, and an error with no listener yet fails
+      // the test however it was meant to end.
+      final asked = expectLater(
+        semanticClient.semantics(),
+        throwsA(isA<SocketException>()),
+      );
       await semanticRunner.received.firstWhere(
         (message) => message.hasSemanticsRequest(),
       );
       await semanticRunner.stop();
-      await expectLater(asked, throwsA(isA<SocketException>()));
+      await asked;
     });
 
     test('an ask after the runner hung up fails at once', () async {
