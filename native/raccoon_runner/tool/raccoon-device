@@ -10,7 +10,8 @@
 # runtime's app store, builds its native plugins and assets, and downloads
 # the SDK's engine meanwhile when it isn't there yet; run starts
 # raccoon_runner serve on it (downloading the engine itself when install
-# didn't) and leaves the engine's log lines on stdout, where the tool reads
+# didn't), on Linux as an executable of the app's own (#358), and leaves
+# the engine's log lines on stdout, where the tool reads
 # the VM service URI, and keeps a timestamped copy of the run's output in
 # the app's data directory.
 # A runner that ends badly is said so on stderr: its exit code, or the
@@ -284,6 +285,71 @@ pubspec_version() {
           ;;
       esac
     done; } 2>/dev/null < "$1/pubspec.yaml" || true
+}
+
+# Sets the variable [$1] to the pubspec's name in project [$2], kept to the
+# characters a package name has. Nothing when there is none.
+pubspec_name() {
+  local line value=""
+  { while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        name:*)
+          value="${line#name:}"
+          value="${value%%#*}"
+          value="${value//[!A-Za-z0-9_]/}"
+          break
+          ;;
+      esac
+    done; } 2>/dev/null < "$2/pubspec.yaml" || true
+  printf -v "$1" '%s' "$value"
+}
+
+# version.json in the app's flutter_assets, as Flutter's Linux bundle has
+# it: package_info_plus reads it beside the executable (#358). The keys and
+# values the tool gives: the pubspec's name twice, its version up to the +
+# and the build number after it, each left out when there is none, and a
+# version that isn't one too. One the tool wrote stays.
+write_version_json() {
+  local project="$1" assets="$2" version="$3" name json
+  [ ! -f "$assets/version.json" ] || return 0
+  pubspec_name name "$project"
+  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]] || version=""
+  json="{\"app_name\":\"$name\""
+  [ -z "$version" ] || json+=",\"version\":\"${version%%+*}\""
+  case "$version" in *+*) json+=",\"build_number\":\"${version#*+}\"" ;; esac
+  json+=",\"package_name\":\"$name\"}"
+  printf '%s' "$json" > "$assets/version.json"
+}
+
+# On Linux an app runs as $APPS/<key>/bin/<app>, the runner under the app's
+# name (#358): package_info_plus reads data/flutter_assets/version.json
+# beside /proc/self/exe, links resolved, so a symlink would lead it back to
+# the runner's folder; path_provider names the app's directories after it.
+# A hard link, the runner itself at no cost, else a copy with its time (two
+# file systems, or a link refused); remade when the runner is another file
+# or a copy's time differs. Beside it, what the runner finds by $ORIGIN, and
+# data/flutter_assets, the installed bundle. Sets APP_EXECUTABLE. While all
+# is in place, as on every run after install, it takes no process.
+linux_app_executable() {
+  local key="$1" runner="$RUNNER" name dir exe lib
+  case "$runner" in /*) ;; *) runner="$PWD/$runner" ;; esac
+  name="${key%%@*}"
+  case "$name" in ''|.|..) name=raccoon_runner ;; esac
+  dir="$APPS/$key/bin"
+  exe="$dir/$name"
+  if ! [ "$exe" -ef "$runner" ] &&
+    { ! [ -f "$exe" ] || [ "$exe" -nt "$runner" ] || [ "$exe" -ot "$runner" ]; }; then
+    [ -d "$dir/data" ] || mkdir -p "$dir/data" || return 1
+    rm -f "$exe.$$"
+    { ln "$runner" "$exe.$$" || cp -p "$runner" "$exe.$$"; } 2>/dev/null &&
+      mv -f "$exe.$$" "$exe" || { rm -f "$exe.$$"; return 1; }
+  fi
+  lib="${runner%/*}/libflutter_linux_gtk.so"
+  if [ -f "$lib" ] && ! [ "$dir/libflutter_linux_gtk.so" -ef "$lib" ]; then
+    ln -sfn "$lib" "$dir/libflutter_linux_gtk.so" || return 1
+  fi
+  [ -e "$dir/data/flutter_assets" ] || ln -sfn ../../flutter_assets "$dir/data/flutter_assets" || return 1
+  APP_EXECUTABLE="$exe"
 }
 
 # Sets the variable [$1] to the word in file [$2] (a version, a stamp, a
@@ -2789,6 +2855,13 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
     mkdir -p "$APPS/$key"
     clone_tree "$local_path" "$APPS/$key/flutter_assets"
     pubspec_version "$project" > "$APPS/$key/version"
+    # Linux: the app's version.json, and its executable made here rather
+    # than on the first run (#358).
+    if [ "$UNAME_S" = Linux ]; then
+      read_word version "$APPS/$key/version"
+      write_version_json "$project" "$APPS/$key/flutter_assets" "$version"
+      linux_app_executable "$key" || true
+    fi
     # The project's Firebase config for Apple hosts, where its Runner keeps
     # it: the macOS one, else the iOS one. The app's bundle carries it.
     if [ "$UNAME_S" = Darwin ]; then
@@ -2901,6 +2974,20 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
     binary="$RUNNER"
     if [ "$UNAME_S" = Darwin ] && { [ -n "$manifest" ] || [ -d "$APPS/$key/native_assets" ]; }; then
       binary="$(app_bundle "$key")"
+    elif [ "$UNAME_S" = Linux ] && [ -x "$RUNNER" ]; then
+      if linux_app_executable "$key"; then
+        binary="$APP_EXECUTABLE"
+        # What path_provider kept under the runner's name before #358 moves
+        # to the app's, once: its shared preferences among it.
+        name="${binary##*/}"
+        for xdg in "$DATA/$key/xdg/data" "$DATA/$key/xdg/cache"; do
+          if [ -d "$xdg/raccoon_runner" ] && [ "$name" != raccoon_runner ] && [ ! -e "$xdg/$name" ]; then
+            mv "$xdg/raccoon_runner" "$xdg/$name" || true
+          fi
+        done
+      else
+        echo "🦝 no executable of the app's own in $APPS/$key/bin: the runner runs as itself, and package_info_plus answers empty" >&2
+      fi
     fi
     # The runner is this script's child rather than its replacement, so a
     # runner that dies (a native crash in a plugin, say) says how in the

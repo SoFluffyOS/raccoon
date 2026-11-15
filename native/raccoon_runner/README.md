@@ -73,6 +73,15 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   `shared_preferences_linux`, which name their directories after the
   executable: with `--data-dir` the runner points `XDG_DATA_HOME` and
   `XDG_CACHE_HOME` into it, so apps do not share one.
+  `tool/raccoon-device` runs each app on Linux as an executable of its
+  own, `$APPS/<app>/bin/<app>`: a hard link to the runner (a copy across
+  file systems, remade when the runner changes), with the runner's
+  `libflutter_linux_gtk.so` beside it for `$ORIGIN` and
+  `data/flutter_assets` leading to the installed bundle, whose
+  `version.json` install writes from the pubspec as `flutter build linux`
+  does. `package_info_plus` reads it there, beside `/proc/self/exe`, and
+  `path_provider` names the app's directories after the app; what it kept
+  under `raccoon_runner` before moves once (#358).
   `example/channels` checks the answers.
 - Answers the `camera` plugin from a test pattern: `camera` ships no desktop
   implementation, so the app falls back to its method channel one. There are
@@ -211,13 +220,13 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   is a plugin as the template makes one; `example/plugins_app` calls it.
   What a Linux user can expect, measured on #16 (2026-11-16, Flutter
   3.50.0, one call per plugin): of 33 of pub.dev's most used plugins that
-  declare Linux, 25 load and answer, Dart only, built here or from the
+  declare Linux, 26 load and answer, Dart only, built here or from the
   release's archive. Others need what a desktop build of the app needs
   too: libsecret's development files for flutter_secure_storage (the next
   release's archive carries it), `pactl` for record, a JDK for jni,
   libcurl's development files for sentry_flutter's native half.
-  package_info_plus answers empty, as it reads beside the executable
-  (#358), and window_manager 0.7 and screen_retriever 0.4 go through FFI,
+  package_info_plus answers the pubspec's name, version and build number
+  since #358. window_manager 0.7 and screen_retriever 0.4 go through FFI,
   which the runner doesn't answer (#361); 0.5 and 0.2 work. A plugin with
   no Linux implementation (Firebase, permission_handler, webview_flutter,
   video_player, ...) is reported as such and its calls fail within a

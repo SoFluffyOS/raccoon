@@ -1009,6 +1009,156 @@ void main() {
     },
   );
 
+  // #358: package_info_plus reads data/flutter_assets/version.json beside
+  // /proc/self/exe, links resolved, and found nothing beside the runner.
+  test(
+    'on Linux an app runs as its own executable, with its version.json beside it',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_own_exe');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final app = Directory(p.join(temp.path, 'app'));
+      final bundle = Directory(p.join(app.path, 'build', 'flutter_assets'))
+        ..createSync(recursive: true);
+      final pubspec = File(p.join(app.path, 'pubspec.yaml'))
+        ..writeAsStringSync('name: app\nversion: "1.2.3+45" # the release\n');
+      final data = p.join(temp.path, 'data');
+      final apps = p.join(data, 'raccoon', 'apps');
+      // Says what it was started as, and what is beside it.
+      final runners = Directory(p.join(temp.path, 'runner'))..createSync();
+      File writeStub(String word) {
+        final stub = File(p.join(runners.path, 'raccoon_runner'));
+        if (stub.existsSync()) stub.deleteSync();
+        stub.writeAsStringSync(
+          '#!/bin/sh\necho "$word \$0"\n'
+          'cat "\${0%/*}/data/flutter_assets/version.json"\n',
+        );
+        Process.runSync('chmod', ['755', stub.path]);
+        return stub;
+      }
+
+      var stub = writeStub('first');
+      final library = File(p.join(runners.path, 'libflutter_linux_gtk.so'))
+        ..writeAsStringSync('');
+      final environment = {
+        if (sdk != null) 'FLUTTER_ROOT': sdk,
+        'XDG_DATA_HOME': data,
+        'XDG_RUNTIME_DIR': temp.path,
+        'TMPDIR': '${temp.path}/',
+        'RACCOON_PLUGINS': 'off',
+        'RACCOON_RUNNER': stub.path,
+      };
+      Future<ProcessResult> install(List<String> arguments) async {
+        final result = await _runHelper(runnerDir, [
+          'install',
+          ...arguments,
+        ], environment);
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        return result;
+      }
+
+      Future<String> run(List<String> arguments) async {
+        final result = await _runHelper(runnerDir, [
+          'run',
+          ...arguments,
+        ], environment);
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        return '${result.stdout}';
+      }
+
+      await install([bundle.path, 'app']);
+      final versionJson = File(
+        p.join(apps, 'app', 'flutter_assets', 'version.json'),
+      );
+      // What `flutter build linux` writes, byte for byte.
+      expect(
+        versionJson.readAsStringSync(),
+        '{"app_name":"app","version":"1.2.3","build_number":"45",'
+        '"package_name":"app"}',
+      );
+      // What path_provider kept under the runner's name moves to the app's.
+      final legacy =
+          File(
+              p.join(
+                data,
+                'raccoon',
+                'data',
+                'app',
+                'xdg',
+                'data',
+                'raccoon_runner',
+                'shared_preferences.json',
+              ),
+            )
+            ..createSync(recursive: true)
+            ..writeAsStringSync('{"flutter.n":42}');
+
+      final executable = p.join(apps, 'app', 'bin', 'app');
+      expect(
+        await run(['app']),
+        allOf(contains('first $executable\n'), contains('"version":"1.2.3"')),
+      );
+      // The runner itself, not a link the plugin would resolve back to it.
+      expect(FileSystemEntity.isLinkSync(executable), isFalse);
+      expect(_sameFile(executable, stub.path), isTrue);
+      expect(
+        _sameFile(
+          p.join(apps, 'app', 'bin', 'libflutter_linux_gtk.so'),
+          library.path,
+        ),
+        isTrue,
+      );
+      expect(legacy.existsSync(), isFalse);
+      expect(
+        File(
+          p.join(
+            data,
+            'raccoon',
+            'data',
+            'app',
+            'xdg',
+            'data',
+            'app',
+            'shared_preferences.json',
+          ),
+        ).readAsStringSync(),
+        '{"flutter.n":42}',
+      );
+
+      // A runner built again is another file: the next run takes it.
+      stub = writeStub('second');
+      expect(await run(['app']), contains('second $executable\n'));
+      expect(_sameFile(executable, stub.path), isTrue);
+
+      // An instance runs under the app's name, from its own folder; no
+      // version, none in the file, and none without a build number either.
+      pubspec.writeAsStringSync('name: app\n');
+      await install(['--instance', 'phone', bundle.path, 'app']);
+      expect(
+        File(
+          p.join(apps, 'app@phone', 'flutter_assets', 'version.json'),
+        ).readAsStringSync(),
+        '{"app_name":"app","package_name":"app"}',
+      );
+      expect(
+        await run(['--instance', 'phone', 'app']),
+        contains('second ${p.join(apps, 'app@phone', 'bin', 'app')}\n'),
+      );
+      pubspec.writeAsStringSync('name: app\nversion: 2.0.0\n');
+      await install(['--instance', 'tablet', bundle.path, 'app']);
+      expect(
+        File(
+          p.join(apps, 'app@tablet', 'flutter_assets', 'version.json'),
+        ).readAsStringSync(),
+        '{"app_name":"app","version":"2.0.0","package_name":"app"}',
+      );
+    },
+    skip: switch ((ready && revision != null, Platform.isLinux)) {
+      (false, _) => 'build the runner and example first',
+      (_, false) => 'the executable of an app\'s own is made on Linux',
+      _ => false,
+    },
+  );
+
   // #341: two installs of one app at once emptied and filled its folder
   // over each other, and left it without its kernel or nested in itself.
   test(
@@ -1030,7 +1180,11 @@ void main() {
         for (final entity in Directory(root).listSync(recursive: true))
           p.relative(entity.path, from: root),
       ]..sort();
-      final expected = listing(bundle);
+      // On Linux install adds the app's version.json (#358).
+      final expected = [
+        ...listing(bundle),
+        if (Platform.isLinux) 'version.json',
+      ]..sort();
       final installed = p.join(
         temp.path,
         'data',
@@ -9766,6 +9920,14 @@ String? _sdkRoot(Map<String, String> environment) {
     return root;
   }
   return RuntimeStore.sdkRootOnPath();
+}
+
+/// Whether [a] and [b] are one file, by device and inode, links followed:
+/// a hard link to [b] is.
+bool _sameFile(String a, String b) {
+  String id(String path) =>
+      '${Process.runSync('stat', ['-L', '-c', '%d:%i', path]).stdout}';
+  return id(a) == id(b);
 }
 
 /// Runs the device helper with [arguments]: on Windows through Git Bash, as
