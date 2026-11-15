@@ -348,7 +348,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   each other as in an app's bundle: their folder is on the runner's
   `DYLD_FRAMEWORK_PATH` (`LD_LIBRARY_PATH` on Linux). Only for
   projects with hook packages: on an M1 Pro, 9 s the first time for a new
-  project, about 1.7 s after any change. While nothing changes, the next
+  project, about 1.7 s after any change; it runs beside the native plugins'
+  build, since it compiles the app's kernel again (6.5 s for the
+  `tool/plugins` set on a Ryzen 9, #352). While nothing changes, the next
   install reuses that build: the inputs are the package config, the
   pubspecs, the SDK's engine, the target, and the files of each hook
   package and of the local packages it depends on, so a hook or a header

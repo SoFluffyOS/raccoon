@@ -766,19 +766,12 @@ def config_packages():
     except (OSError, ValueError, AttributeError, TypeError):
         sys.exit('🦝 %s is not a package config: flutter pub get writes it anew' % config)
 packages = []
-hooks = False
 for package in config_packages():
     uri = package.get('rootUri', '')
     root = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, unquote(uri)))
-    hooks = hooks or os.path.isfile(os.path.join(root, 'hook', 'build.dart'))
     pubspec_path = os.path.join(root, 'pubspec.yaml')
     if os.path.isfile(pubspec_path):
         packages.append((package['name'], root, open(pubspec_path).read()))
-# No package has a build hook: the native assets pass needn't start a
-# Python of its own to find that out again (#314).
-if not hooks:
-    os.makedirs(out, exist_ok=True)
-    open(os.path.join(out, '.no_hooks'), 'w').close()
 # Implementation packages of federated plugins: named as a default_package
 # by their app-facing package, or saying what they implement. Not the ones
 # to blame for a missing host.
@@ -1787,19 +1780,12 @@ def config_packages():
     except (OSError, ValueError, AttributeError, TypeError):
         sys.exit('🦝 %s is not a package config: flutter pub get writes it anew' % config)
 packages = []
-hooks = False
 for package in config_packages():
     uri = package.get('rootUri', '')
     root = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, unquote(uri)))
-    hooks = hooks or os.path.isfile(os.path.join(root, 'hook', 'build.dart'))
     pubspec_path = os.path.join(root, 'pubspec.yaml')
     if os.path.isfile(pubspec_path):
         packages.append((package['name'], root, open(pubspec_path).read()))
-# No package has a build hook: the native assets pass needn't start a
-# Python of its own to find that out again (#314).
-if not hooks:
-    os.makedirs(out, exist_ok=True)
-    open(os.path.join(out, '.no_hooks'), 'w').close()
 # Implementation packages of federated plugins, not the ones to blame for
 # a missing host (as on Linux).
 implementations = set()
@@ -2398,9 +2384,6 @@ build_native_assets() {
     echo "🦝 native assets off (RACCOON_PLUGINS=off)" >&2
     return 0
   fi
-  # The plugin pass, just run on the same config, found no build hook: as
-  # the scan below would, at the cost of a Python start (#314).
-  [ -f "$app/plugins/.no_hooks" ] && return 0
   out="$project/build/raccoon/native_assets"
   case "$UNAME_S" in
     Darwin)
@@ -2459,7 +2442,8 @@ def config_packages():
         return [e for e in entries if isinstance(e, dict) and isinstance(e.get('name'), str)
                 and isinstance(e.get('rootUri', ''), str)]
     except (OSError, ValueError, AttributeError, TypeError):
-        sys.exit('🦝 %s is not a package config: flutter pub get writes it anew' % config)
+        # Said by the plugin pass beside this one, which fails the install.
+        sys.exit(4)
 roots = {}
 for package in config_packages():
     uri = package.get('rootUri', '')
@@ -2526,8 +2510,9 @@ except (OSError, ValueError, TypeError, AttributeError):
 print(digest.hexdigest(), ' '.join(sorted(hooked)))
 PY
 } | python3 - "$config" "$project" "$(sdk_root)" "${target[*]}" "$manifest" "$built")" || scan=$?
-  # 3: no package has a hook. Any other failure: build, and keep no stamp.
-  [ "$scan" -eq 3 ] && return 0
+  # 3: no package has a hook; 4: no package config. Any other failure:
+  # build, and keep no stamp.
+  [ "$scan" -eq 3 ] || [ "$scan" -eq 4 ] && return 0
   # The hash, then the hook packages, by name.
   local hooked="${inputs#* }"
   inputs="${inputs%% *}"
@@ -2548,23 +2533,11 @@ PY
   elif [ "${RACCOON_PLUGINS:-}" = cached ]; then
     # Nothing compiles: no build, or one whose inputs changed, is left out
     # rather than taken stale. Each hook package is reported as a skipped
-    # plugin is, in the plugins manifest the runner tells clients from.
+    # plugin is, in the plugins manifest the runner tells clients from,
+    # once the plugin pass beside this has written it.
     [ -n "$hooked" ] || return 0
     echo "🦝 native assets not built (RACCOON_PLUGINS=cached): $hooked" >&2
-    python3 - "$app/plugins/manifest.json" $hooked <<'PY'
-import json, os, sys
-path, names = sys.argv[1], sys.argv[2:]
-try:
-    manifest = json.load(open(path))
-except (OSError, ValueError):
-    manifest = {'plugins': []}
-manifest.setdefault('status', []).extend(
-    {'name': name, 'state': 'skipped',
-     'detail': 'not built: native assets are cached only (RACCOON_PLUGINS=cached)'}
-    for name in names)
-os.makedirs(os.path.dirname(path), exist_ok=True)
-json.dump(manifest, open(path, 'w'), indent=1)
-PY
+    NATIVE_ASSETS_SKIPPED="$hooked"
     return 0
   else
     rm -f "$stamp"
@@ -2633,6 +2606,27 @@ print('🦝 native assets ready in %.1f s, %d for this host%s' % (
     time.time() - float(started), count, ', unchanged since the last build' if unchanged else ''), file=sys.stderr)
 PY
 } | python3 - "$manifest" "$built" "$app" "$started" "$unchanged"
+}
+
+# The hook packages a cached-only install built no native assets for
+# (NATIVE_ASSETS_SKIPPED), added to |app|'s plugins manifest as skipped.
+report_skipped_native_assets() {
+  [ -n "${NATIVE_ASSETS_SKIPPED:-}" ] || return 0
+  # shellcheck disable=SC2086
+  python3 - "$1/plugins/manifest.json" $NATIVE_ASSETS_SKIPPED <<'PY'
+import json, os, sys
+path, names = sys.argv[1], sys.argv[2:]
+try:
+    manifest = json.load(open(path))
+except (OSError, ValueError):
+    manifest = {'plugins': []}
+manifest.setdefault('status', []).extend(
+    {'name': name, 'state': 'skipped',
+     'detail': 'not built: native assets are cached only (RACCOON_PLUGINS=cached)'}
+    for name in names)
+os.makedirs(os.path.dirname(path), exist_ok=True)
+json.dump(manifest, open(path, 'w'), indent=1)
+PY
 }
 
 case "$verb" in
@@ -2732,8 +2726,23 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
     fi
     # Worked out once: for a pub workspace member it runs package_scope.
     config="$(package_config "$project")" || config=""
-    build_plugins "$project" "$APPS/$key/plugins" "$config"
-    build_native_assets "$project" "$APPS/$key" "$config"
+    if [ -n "$WINDOWS" ]; then
+      # The Flutter tool builds native assets there: nothing to run beside
+      # the plugins, and a subshell is a process Git Bash pays for.
+      build_plugins "$project" "$APPS/$key/plugins" "$config"
+      build_native_assets "$project" "$APPS/$key" "$config"
+    else
+      # The plugins and the native assets at once: the tool's build of the
+      # assets compiles the app's kernel again, often for longer than the
+      # plugins take (#352). A plugin pass that fails fails the install.
+      build_plugins "$project" "$APPS/$key/plugins" "$config" &
+      plugins_job=$!
+      build_native_assets "$project" "$APPS/$key" "$config"
+      plugins_status=0
+      wait "$plugins_job" || plugins_status=$?
+      [ "$plugins_status" -eq 0 ] || exit "$plugins_status"
+      report_skipped_native_assets "$APPS/$key"
+    fi
     wait "$engine_job" || true
     ;;
   uninstall)

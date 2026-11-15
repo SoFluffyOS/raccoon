@@ -734,75 +734,97 @@ void main() {
     skip: ready ? false : 'build the runner and example first',
   );
 
-  // #314: the native assets pass started a Python of its own to find what
-  // the plugin pass had just seen, that no package has a build hook.
+  // #352: native assets were built after the plugins, and the tool's build
+  // of them compiles the app's kernel again. The SDK here is a stand-in
+  // whose flutter starts the native assets build and says so; the plugin's
+  // configure waits for that, which an install building the two one after
+  // the other never gets to.
   test(
-    'the plugin pass says when no package has a build hook',
+    'on Linux native assets build beside the plugins',
     () async {
-      final temp = Directory.systemTemp.createTempSync('raccoon_hooks');
+      final temp = Directory.systemTemp.createTempSync('raccoon_beside');
       addTearDown(() => temp.deleteSync(recursive: true));
-      final app = Directory(p.join(temp.path, 'app'));
-      final bundle = Directory(p.join(app.path, 'build', 'assets'))
-        ..createSync(recursive: true);
-      File(p.join(app.path, 'pubspec.yaml')).writeAsStringSync('name: app\n');
-      final dep = Directory(p.join(temp.path, 'dep'))..createSync();
-      File(p.join(dep.path, 'pubspec.yaml')).writeAsStringSync('name: dep\n');
-      File(p.join(app.path, '.dart_tool', 'package_config.json'))
-        ..createSync(recursive: true)
-        ..writeAsStringSync(
-          jsonEncode({
-            'configVersion': 2,
-            'packages': [
-              {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
-              {
-                'name': 'dep',
-                'rootUri': Uri.directory(dep.path).toString(),
-                'packageUri': 'lib/',
-              },
-            ],
-          }),
-        );
-      final hint = File(
-        p.join(
-          temp.path,
-          'data',
-          'raccoon',
-          'apps',
-          'app',
-          'plugins',
-          '.no_hooks',
-        ),
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      final started = p.join(temp.path, 'native_assets_started');
+      final stand = p.join(temp.path, 'sdk');
+      write(
+        'sdk/bin/cache/engine.stamp',
+        File(p.join(sdk!, 'bin', 'cache', 'engine.stamp')).readAsStringSync(),
       );
-      Future<void> install() async {
-        final result = await Process.run(
-          p.join(runnerDir, 'tool', 'raccoon-device'),
-          ['install', bundle.path, 'app'],
-          environment: {
-            'RACCOON_RUNNER': binary!,
-            if (sdk != null) 'FLUTTER_ROOT': sdk,
-            'XDG_DATA_HOME': p.join(temp.path, 'data'),
-            'RACCOON_PLUGIN_CACHE': p.join(temp.path, 'cache'),
-            'RACCOON_NO_PREBUILT': '1',
-          },
-        );
-        expect(result.exitCode, 0, reason: '${result.stderr}');
-      }
-
-      await install();
-      expect(hint.existsSync(), isTrue);
-
-      // A package with a hook: no hint, and the native assets pass looks.
-      File(p.join(dep.path, 'hook', 'build.dart'))
-        ..createSync(recursive: true)
-        ..writeAsStringSync('void main(List<String> args) {}\n');
-      await install();
-      expect(hint.existsSync(), isFalse);
+      // flutter assemble ... --output=DIR: a manifest with nothing for this
+      // host, as for objective_c on Linux.
+      write(
+        'sdk/bin/flutter',
+        '#!/bin/sh\n: > "$started"\n'
+            'for arg; do case "\$arg" in --output=*) out="\${arg#--output=}" ;; esac; done\n'
+            'mkdir -p "\$out/flutter_assets"\n'
+            'echo \'{"format-version":[1,0,0],"native-assets":{}}\' '
+            '> "\$out/flutter_assets/NativeAssetsManifest.json"\n',
+      );
+      await Process.run('chmod', ['755', p.join(stand, 'bin', 'flutter')]);
+      write(
+        'plugin_w/pubspec.yaml',
+        'name: plugin_w\nversion: 1.0.0\nflutter:\n  plugin:\n    platforms:\n'
+            '      linux:\n        ffiPlugin: true\n',
+      );
+      write(
+        'plugin_w/linux/CMakeLists.txt',
+        'cmake_minimum_required(VERSION 3.14)\n'
+            'foreach(i RANGE 200)\n'
+            '  if(EXISTS "$started")\n    break()\n  endif()\n'
+            '  execute_process(COMMAND sleep 0.1)\n'
+            'endforeach()\n'
+            'if(NOT EXISTS "$started")\n'
+            '  message(FATAL_ERROR "no native assets build beside")\n'
+            'endif()\n'
+            'add_library(plugin_w SHARED plugin_w.cc)\n',
+      );
+      write(
+        'plugin_w/linux/plugin_w.cc',
+        'int plugin_w_value() { return 1; }\n',
+      );
+      write('hooked/pubspec.yaml', 'name: hooked\n');
+      write('hooked/hook/build.dart', 'void main(List<String> args) {}\n');
+      write('app/pubspec.yaml', 'name: app\n');
+      write('app/lib/main.dart', 'void main() {}\n');
+      write(
+        'app/.dart_tool/package_config.json',
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+            for (final name in ['plugin_w', 'hooked'])
+              {'name': name, 'rootUri': '../../$name', 'packageUri': 'lib/'},
+          ],
+        }),
+      );
+      final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+        ..createSync(recursive: true);
+      final result = await Process.run(
+        p.join(runnerDir, 'tool', 'raccoon-device'),
+        ['install', bundle.path, 'app'],
+        environment: {
+          'RACCOON_RUNNER': binary!,
+          'FLUTTER_ROOT': stand,
+          'XDG_DATA_HOME': p.join(temp.path, 'data'),
+          'RACCOON_PLUGIN_CACHE': p.join(temp.path, 'cache'),
+          'RACCOON_NO_PREBUILT': '1',
+          'RACCOON_PLUGINS': 'build',
+        },
+      );
+      expect(result.exitCode, 0, reason: '${result.stderr}');
+      expect('${result.stderr}', contains('1 built: plugin_w'));
+      expect('${result.stderr}', contains('native assets ready'));
     },
-    skip: switch ((binary != null && sdk != null, Platform.isWindows)) {
+    skip: switch ((binary != null && sdk != null, Platform.isLinux)) {
       (false, _) => 'build the runner first, with a Flutter SDK on PATH',
-      (_, true) => 'the hint is for native assets, built on macOS and Linux',
+      (_, false) => 'the Linux half of the helper',
       _ => false,
     },
+    timeout: const Timeout(Duration(minutes: 2)),
   );
 
   test(
