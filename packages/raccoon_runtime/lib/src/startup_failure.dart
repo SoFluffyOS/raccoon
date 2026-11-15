@@ -108,12 +108,17 @@ final class StartupFailure {
   /// plugin matches when a segment of the channel, split at `.`, `/` and
   /// `:`, is its name, or its name and one of the federated packages'
   /// suffixes ([federatedSuffixes]). The longest name that matches wins.
+  /// Failing that, a segment that is its [stemOf], as
+  /// permission_handler's `flutter.baseflow.com/permissions/methods` and
+  /// google_maps_flutter's `plugins.flutter.io/google_maps_1` are named.
   static PluginReport? pluginOf(
     String channel,
     Iterable<PluginReport> reports,
   ) {
     final segments = channel.split(RegExp('[./:]'));
     PluginReport? best;
+    PluginReport? byStem;
+    var stemLength = 0;
     for (final report in reports) {
       if (!_cannotWork(report)) continue;
       final name = report.name;
@@ -123,10 +128,45 @@ final class StartupFailure {
             segment == name ||
             federatedSuffixes.any((suffix) => segment == '$name$suffix'),
       );
-      if (!matches) continue;
-      if (best == null || name.length > best.name.length) best = report;
+      if (matches) {
+        if (best == null || name.length > best.name.length) best = report;
+        continue;
+      }
+      final stem = stemOf(name);
+      if (stem == null || stem.length <= stemLength) continue;
+      final byItsStem = segments.any((segment) {
+        final bare = segment.replaceFirst(RegExp(r'_\d+$'), '');
+        return bare == stem || bare == '${stem}s';
+      });
+      if (byItsStem) {
+        byStem = report;
+        stemLength = stem.length;
+      }
     }
-    return best;
+    return best ?? byStem;
+  }
+
+  /// [name] without the words plugin names put around what they do:
+  /// `flutter_` before it, `_plus`, `_flutter`, `_handler` or `_plugin`
+  /// after it. flutter_stripe's channel is `flutter.stripe/payments`,
+  /// sensors_plus's `dev.fluttercommunity.plus/sensors/method`. Null when
+  /// nothing comes off, or what is left is under four letters.
+  static String? stemOf(String name) {
+    var stem = name;
+    for (var changed = true; changed;) {
+      changed = false;
+      if (stem.startsWith('flutter_')) {
+        stem = stem.substring('flutter_'.length);
+        changed = true;
+      }
+      for (final suffix in const ['_plus', '_flutter', '_handler', '_plugin']) {
+        if (stem.endsWith(suffix)) {
+          stem = stem.substring(0, stem.length - suffix.length);
+          changed = true;
+        }
+      }
+    }
+    return stem == name || stem.length < 4 ? null : stem;
   }
 
   /// What a federated plugin's packages add to its name: the interface and

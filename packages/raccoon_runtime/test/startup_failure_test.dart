@@ -181,6 +181,48 @@ void main() {
     );
   });
 
+  // raccoon#16: four of the most used plugins with no Linux implementation
+  // name their channels after what they do, not the package.
+  test('maps a channel named after what the plugin does', () {
+    final reports =
+        _report([
+          ('permission_handler', PluginState.PLUGIN_STATE_NO_HOST, ''),
+          ('google_maps_flutter', PluginState.PLUGIN_STATE_NO_HOST, ''),
+          ('flutter_stripe', PluginState.PLUGIN_STATE_NO_HOST, ''),
+          ('sensors_plus', PluginState.PLUGIN_STATE_NO_HOST, ''),
+          ('firebase_core', PluginState.PLUGIN_STATE_NO_HOST, ''),
+        ]).plugins;
+    String? of(String channel) =>
+        StartupFailure.pluginOf(channel, reports)?.name;
+
+    expect(
+      of('flutter.baseflow.com/permissions/methods'),
+      'permission_handler',
+    );
+    expect(of('plugins.flutter.io/google_maps_1'), 'google_maps_flutter');
+    expect(of('flutter.stripe/payments'), 'flutter_stripe');
+    expect(of('dev.fluttercommunity.plus/sensors/method'), 'sensors_plus');
+    expect(of('plugins.flutter.io/firebase_core'), 'firebase_core');
+    expect(of('plugins.flutter.io/permission'), 'permission_handler');
+    expect(of('plugins.flutter.io/maps'), isNull);
+  });
+
+  test('a whole name beats a stem', () {
+    final reports =
+        _report([
+          ('sensors_plus', PluginState.PLUGIN_STATE_NO_HOST, ''),
+          ('sensors', PluginState.PLUGIN_STATE_FAILED, ''),
+        ]).plugins;
+
+    expect(
+      StartupFailure.pluginOf('plugins.flutter.io/sensors', reports)?.name,
+      'sensors',
+    );
+    expect(StartupFailure.stemOf('sensors_plus'), 'sensors');
+    expect(StartupFailure.stemOf('flutter_tts'), isNull, reason: 'too short');
+    expect(StartupFailure.stemOf('camera'), isNull, reason: 'nothing off');
+  });
+
   test('says what became of a plugin in a line', () {
     String hint(PluginState state, String detail) => StartupFailure.hintFor(
       PluginReport(name: 'camera', state: state, detail: detail),
