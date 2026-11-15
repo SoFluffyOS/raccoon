@@ -190,7 +190,10 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   release's archive of the common plugins (`tool/plugins`, built by CI)
   drops into that cache on the first install, whatever the Flutter
   version, so those cost nothing and a machine without a toolchain still
-  gets them. Without a toolchain for the rest, or when a
+  gets them. It is fetched on a thread from the first plugin it may hold
+  (a hosted one at a version `tool/plugins`' lock names), and only those
+  wait for it: the rest build meanwhile, and an app with none of them
+  fetches nothing (#352). Without a toolchain for the rest, or when a
   plugin fails to build, it says so and the app sees no plugin. A
   loaded plugin's channels are answered before a client sees them, GLib's
   main context is pumped from the runner's loop, and a plugin's textures
@@ -446,7 +449,7 @@ Every tag `runner-v<VERSION>` publishes
 Git Bash) on the [releases
 page](https://github.com/SoFluffyOS/raccoon/releases), packed by
 `tool/package.sh`: the binary, `tool/raccoon-device` with `engine_dir.sh`,
-`package_scope.dart` and `plugins_windows.dart`, `VERSION` and `LICENSE`,
+`package_scope.dart`, `plugins_windows.dart` and `plugins/pubspec.lock`, `VERSION` and `LICENSE`,
 with the plugin library and its headers on Linux and `flutter_windows.dll`
 on Windows. The common plugins are assets of their own:
 `plugins-linux-<arch>.tar.gz`, and `plugins-<engine>-macos-<arch>.tar.gz`

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Packs the built runner for a release: the binary, the custom device helper,
-# the engine fetcher, VERSION and LICENSE, flat in
+# the engine fetcher, the plugin set's lock, VERSION and LICENSE, flat in
 # raccoon_runner-<version>-<platform>.tar.gz, where the platform is linux-x64,
 # linux-arm64, macos-arm64, macos-x64 or windows-x64 (raccoon_runner.exe
 # there; Windows' own tar unpacks it). Unpacked into a folder, tool/
@@ -45,6 +45,10 @@ cp "$BINARY" "$STAGE/raccoon_runner$EXE"
 cp "$ROOT/tool/raccoon-device" "$ROOT/tool/engine_dir.sh" "$ROOT/tool/package_scope.dart" \
   "$ROOT/tool/plugins_windows.dart" "$ROOT/tool/no_packages.json" "$STAGE/tool/"
 cp "$ROOT/VERSION" "$ROOT/LICENSE" "$STAGE/"
+# What the release's plugin archive is built from: an install fetches it
+# while the plugins it can't hold build (#352).
+mkdir -p "$STAGE/tool/plugins"
+cp "$ROOT/tool/plugins/pubspec.lock" "$STAGE/tool/plugins/"
 chmod 755 "$STAGE/raccoon_runner$EXE" "$STAGE/tool/"*
 # No AppleDouble (._*) entries from macOS's tar.
 CONTENTS="raccoon_runner$EXE tool VERSION LICENSE"

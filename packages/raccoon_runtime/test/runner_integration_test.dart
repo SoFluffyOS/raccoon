@@ -2376,6 +2376,203 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
     },
     timeout: const Timeout(Duration(minutes: 4)),
   );
+  // #352: the release's archive was fetched before any build, alone, even
+  // for an app with none of its plugins.
+  test(
+    'on Linux the prebuilt archive is fetched beside the builds that need '
+    'nothing from it',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_beside');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      void plugin(String root, String name, {required bool compiles}) {
+        write(
+          '$root/pubspec.yaml',
+          'name: $name\nversion: 1.0.0\nflutter:\n  plugin:\n    platforms:\n'
+              '      linux:\n        ffiPlugin: true\n',
+        );
+        write(
+          '$root/linux/CMakeLists.txt',
+          'cmake_minimum_required(VERSION 3.14)\n'
+              'add_library($name SHARED $name.cc)\n',
+        );
+        write(
+          '$root/linux/$name.cc',
+          compiles ? 'int ${name}_value() { return 1; }\n' : 'not code;\n',
+        );
+      }
+
+      // A path plugin, which no archive holds, and a hosted one, which only
+      // the archive has: its own sources don't compile.
+      plugin('plugin_p', 'plugin_p', compiles: true);
+      const hosted = 'pub/.pub-cache/hosted/pub.dev/plugin_h-1.0.0';
+      plugin(hosted, 'plugin_h', compiles: false);
+      void app(String name, List<(String, String)> packages) {
+        write('$name/pubspec.yaml', 'name: $name\n');
+        write(
+          '$name/.dart_tool/package_config.json',
+          jsonEncode({
+            'configVersion': 2,
+            'packages': [
+              {'name': name, 'rootUri': '../', 'packageUri': 'lib/'},
+              for (final (package, root) in packages)
+                {
+                  'name': package,
+                  'rootUri': Uri.directory(p.join(temp.path, root)).toString(),
+                  'packageUri': 'lib/',
+                },
+            ],
+          }),
+        );
+        Directory(
+          p.join(temp.path, name, 'build', 'assets'),
+        ).createSync(recursive: true);
+      }
+
+      app('both', [('plugin_p', 'plugin_p'), ('plugin_h', hosted)]);
+      app('path_only', [('plugin_p', 'plugin_p')]);
+
+      // The release's archive: plugin_h's library, by the key an install
+      // looks for.
+      final version =
+          File(p.join(runnerDir, 'VERSION')).readAsStringSync().trim();
+      final arch = '${Process.runSync('uname', ['-m']).stdout}'.trim();
+      final entry = 'plugin_h-1.0.0-$version-$arch';
+      write('archive/$entry/libplugin_h.so', 'prebuilt');
+      final archive = p.join(temp.path, 'prebuilt.tar.gz');
+      final tar = await Process.run('tar', [
+        '-czf',
+        archive,
+        '-C',
+        p.join(temp.path, 'archive'),
+        entry,
+      ]);
+      expect(tar.exitCode, 0, reason: '${tar.stderr}');
+
+      // The archive is answered only once plugin_p is built and cached: an
+      // install that built nothing until the fetch was done would wait
+      // here for a minute, and get nothing.
+      var asked = 0;
+      var builtFirst = false;
+      String? cacheFor;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((request) async {
+        asked++;
+        final deadline = DateTime.now().add(const Duration(seconds: 60));
+        bool cached() {
+          final cache = Directory(cacheFor!);
+          return cache.existsSync() &&
+              cache.listSync().any((entity) {
+                final name = p.basename(entity.path);
+                return name.startsWith('plugin_p-path-') &&
+                    !name.contains('.partial-');
+              });
+        }
+
+        while (!(builtFirst = cached()) && DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        if (builtFirst) {
+          request.response.add(File(archive).readAsBytesSync());
+        } else {
+          request.response.statusCode = HttpStatus.serviceUnavailable;
+        }
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      // Each plugin's state and detail, and what the install said.
+      Future<(Map<String, String>, String)> install(
+        String name,
+        String cache,
+        String prebuilt,
+      ) async {
+        cacheFor = cache;
+        final result = await Process.run(
+          p.join(runnerDir, 'tool', 'raccoon-device'),
+          ['install', p.join(temp.path, name, 'build', 'assets'), name],
+          environment: {
+            'RACCOON_RUNNER': binary!,
+            if (sdk != null) 'FLUTTER_ROOT': sdk,
+            'XDG_DATA_HOME': p.join(temp.path, 'data'),
+            'RACCOON_PLUGIN_CACHE': cache,
+            'RACCOON_PREBUILT_PLUGINS': prebuilt,
+            'RACCOON_PLUGINS': 'build',
+          },
+        );
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        final manifest =
+            jsonDecode(
+                  File(
+                    p.join(
+                      temp.path,
+                      'data',
+                      'raccoon',
+                      'apps',
+                      name,
+                      'plugins',
+                      'manifest.json',
+                    ),
+                  ).readAsStringSync(),
+                )
+                as Map;
+        return (
+          {
+            for (final entry in (manifest['status'] as List).cast<Map>())
+              '${entry['name']}': '${entry['state']}: ${entry['detail']}',
+          },
+          '${result.stderr}',
+        );
+      }
+
+      Iterable<String> names(String cache) =>
+          Directory(cache).listSync().map((e) => p.basename(e.path));
+      final url = 'http://127.0.0.1:${server.port}/plugins.tar.gz';
+
+      // An app whose plugins no archive holds asks for none.
+      final pathOnly = p.join(temp.path, 'cache_path_only');
+      final (_, saidPathOnly) = await install('path_only', pathOnly, url);
+      expect(saidPathOnly, contains('1 built: plugin_p'));
+      expect(asked, 0);
+      expect(names(pathOnly).where((n) => n.endsWith('.done')), isEmpty);
+
+      // The path plugin builds while the archive comes; the hosted one
+      // waits for it and comes from it.
+      final both = p.join(temp.path, 'cache_both');
+      final (states, said) = await install('both', both, url);
+      expect(asked, 1);
+      expect(builtFirst, isTrue, reason: said);
+      expect(said, contains('1 built: plugin_p'));
+      expect(said, contains('1 from the cache: plugin_h'));
+      expect(states, isEmpty);
+      expect(names(both).where((n) => n.endsWith('.done')), hasLength(1));
+
+      // A fetch that fails fails no build that needs nothing from it, and
+      // is asked again next time.
+      final refused = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      refused.listen((socket) => socket.destroy());
+      addTearDown(refused.close);
+      final failing = p.join(temp.path, 'cache_failing');
+      final (failedStates, saidFailing) = await install(
+        'both',
+        failing,
+        'http://127.0.0.1:${refused.port}/plugins.tar.gz',
+      );
+      expect(saidFailing, contains('1 built: plugin_p'));
+      expect(failedStates['plugin_h'], startsWith('failed: did not build'));
+      expect(names(failing).where((n) => n.endsWith('.done')), isEmpty);
+      expect(names(failing).where((n) => n.startsWith('.prebuilt-')), isEmpty);
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isLinux)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'the Linux half of the helper',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 4)),
+  );
   test(
     'on Windows a plugin is cached whole, and rebuilt when its sources change',
     () async {

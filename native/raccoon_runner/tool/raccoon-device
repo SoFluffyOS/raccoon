@@ -452,9 +452,10 @@ build_plugins_windows() {
 # whose pubspec names a Linux pluginClass (registered) or ffiPlugin (its
 # libraries only), as the Flutter tool finds them. What built before is in a
 # cache by plugin version and runner version; what the release prebuilt
-# comes from its archive, fetched once; the rest builds here, each plugin
-# in its own CMake project with what the desktop template gives a plugin,
-# so one that fails sinks nothing else. Every library lands flat in
+# comes from its archive, fetched once, on a thread beside the builds of
+# what it can't hold (tool/plugins' lock says what it was built from); the
+# rest builds here, each plugin in its own CMake project with what the
+# desktop template gives a plugin, so one that fails sinks nothing else. Every library lands flat in
 # |out|/lib, which run puts on the runner's library path for the FFI ones. A
 # machine without a toolchain still gets the cached and prebuilt ones.
 # Not by engine: a Linux plugin builds against the runner's own library and
@@ -471,7 +472,8 @@ build_plugins_linux() {
   cache="${RACCOON_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/linux}"
   python3 - "$config" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS" \
     "$cache" "$version" "$UNAME_M" \
-    "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-linux-$UNAME_M.tar.gz}" <<'PY'
+    "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-linux-$UNAME_M.tar.gz}" \
+    "$ROOT/tool/plugins/pubspec.lock" <<'PY'
 # What only a build or a fetch needs is imported there: tarfile, tempfile
 # and concurrent.futures cost a cached install ~6 ms (#315).
 import glob, hashlib, importlib, json, os, re, sys, time
@@ -523,7 +525,7 @@ def clone(source, target):
     else:
         shutil.copy2(source, target)
 
-config, out, lib, headers, virtual, cache, runner_version, arch, prebuilt_url = sys.argv[1:10]
+config, out, lib, headers, virtual, cache, runner_version, arch, prebuilt_url, prebuilt_lock = sys.argv[1:11]
 # What an install that may only take the cache says of the rest (#214).
 SKIPPED = 'not built: native plugins are cached only (RACCOON_PLUGINS=cached)'
 virtual = set(virtual.split())
@@ -657,20 +659,14 @@ def sweep_staging():
                 pass
 
 
-prebuilt_tried = False
+prebuilt_marker = os.path.join(cache, 'prebuilt-%s.done' % runner_version)
 
 
 def fetch_prebuilt():
     """The release's prebuilt plugins into the cache, once per runner
-    version; a marker remembers a miss so it is not asked again."""
-    global prebuilt_tried
-    if os.environ.get('RACCOON_NO_PREBUILT') or prebuilt_tried:
-        return
-    # Once an install: a network that fails fails for every plugin alike.
-    prebuilt_tried = True
-    marker = os.path.join(cache, 'prebuilt-%s.%s' % (runner_version, 'done'))
-    if os.path.exists(marker):
-        return
+    version; a marker remembers a miss so it is not asked again. On a
+    thread of its own, beside the builds that need nothing from it (#352)."""
+    fetch_started = time.time()
     os.makedirs(cache, exist_ok=True)
     # Unpacked aside, then moved in entry by entry: an interrupted fetch
     # leaves no half entry that would count as cached (#122).
@@ -709,15 +705,42 @@ def fetch_prebuilt():
             source = os.path.join(staging, entry)
             if (os.path.isdir(source) and not os.path.islink(source)
                     and not os.path.exists(os.path.join(cache, entry))):
-                os.replace(source, os.path.join(cache, entry))
-        print('🦝 prebuilt plugins fetched for runner %s' % runner_version, file=sys.stderr)
+                try:
+                    os.replace(source, os.path.join(cache, entry))
+                except OSError:
+                    # A build beside the fetch, or another install, put
+                    # its entry there first: as good.
+                    pass
+        print('🦝 prebuilt plugins fetched for runner %s in %.1f s' % (
+            runner_version, time.time() - fetch_started), file=sys.stderr)
         remember = True
     except Exception:
         pass
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     if remember:
-        open(marker, 'w').close()
+        open(prebuilt_marker, 'w').close()
+
+
+def release_plugins():
+    """The packages the release's archive was built from, name-version as
+    a hosted plugin's key starts, from tool/plugins' lock; None without
+    it, or for an archive of another's (RACCOON_PREBUILT_PLUGINS), when any
+    hosted plugin may be in the archive."""
+    if os.environ.get('RACCOON_PREBUILT_PLUGINS'):
+        return None
+    try:
+        with open(prebuilt_lock) as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return None
+    found, name = set(), None
+    for line in lines:
+        if (entry := re.match(r'  (\w+):\s*$', line)) is not None:
+            name = entry.group(1)
+        elif name and (version := re.match(r'    version: "?([^"\s]+)"?\s*$', line)) is not None:
+            found.add('%s-%s' % (name, version.group(1)))
+    return found
 
 
 def can_build():
@@ -788,8 +811,11 @@ for name, root, pubspec in packages:
     symbol = None
     if cls is not None:
         symbol = re.sub(r'(?<!^)(?=[A-Z])', '_', cls.group(1)).lower() + '_register_with_registrar'
-    wanted.append({'name': name, 'root': root, 'symbol': symbol,
-                   'key': '%s-%s-%s' % (version_key(name, root), lib_stamp, arch)})
+    version = version_key(name, root)
+    # A hosted package's key is its folder's name, name-version.
+    hosted = version == os.path.basename(os.path.realpath(root).rstrip(os.sep))
+    wanted.append({'name': name, 'root': root, 'symbol': symbol, 'hosted': hosted,
+                   'version': version, 'key': '%s-%s-%s' % (version, lib_stamp, arch)})
 
 if not wanted and not status:
     sys.exit(0)
@@ -947,37 +973,88 @@ toolchain = None  # looked up when a build is needed
 cached_only = os.environ.get('RACCOON_PLUGINS') == 'cached'
 # Each plugin's state, why and libraries; the ones to build wait for them.
 outcome = {}
-misses = []
+# What the cache misses builds at once, unless the release's archive may
+# hold it: a hosted plugin at a version tool/plugins' lock names, or any
+# hosted one without the lock. The archive is fetched on a thread from the
+# first of those on, once per runner version, and they wait for it; the
+# rest (a path or git plugin, another version) need nothing from it and
+# build meanwhile (#352).
+now, later = [], []
+fetcher = None
+release = False  # tool/plugins' lock, read when a fetch may be wanted
+
+
+def may_fetch():
+    return not os.environ.get('RACCOON_NO_PREBUILT') and not os.path.exists(prebuilt_marker)
+
+
 for plugin in wanted:
-    name = plugin['name']
-    cached = os.path.join(cache, plugin['key'])
-    libs = libraries(cached)
-    if not libs:
-        sweep_staging()
-        fetch_prebuilt()
-        libs = libraries(cached)
+    libs = libraries(os.path.join(cache, plugin['key']))
     if libs:
-        outcome[name] = ('cached', None, libs)
+        outcome[plugin['name']] = ('cached', None, libs)
         continue
+    if plugin['hosted'] and (fetcher is not None or may_fetch()):
+        if release is False:
+            release = release_plugins()
+        archived = release is None or plugin['version'] in release
+    else:
+        archived = False
+    if archived:
+        if fetcher is None:
+            sweep_staging()
+            import threading
+            fetcher = threading.Thread(target=fetch_prebuilt)
+            fetcher.start()
+        later.append(plugin)
+    else:
+        now.append(plugin)
+
+
+def to_build(plugin):
+    """None when [plugin] is to be built, else its outcome: the cache's
+    (the archive's, once in) or why it isn't built."""
+    global toolchain
+    libs = libraries(os.path.join(cache, plugin['key']))
+    if libs:
+        return 'cached', None, libs
     if cached_only:
-        outcome[name] = ('skipped', SKIPPED, [])
-        continue
+        return 'skipped', SKIPPED, []
     if toolchain is None:
         toolchain = can_build() or 'ok'
     if toolchain != 'ok':
-        outcome[name] = ('failed', toolchain + '; native plugins need the desktop toolchain', [])
-        continue
+        return 'failed', toolchain + '; native plugins need the desktop toolchain', []
     if (kept := kept_failure(plugin)) is not None:
-        outcome[name] = kept + ([],)
-        continue
-    misses.append(plugin)
+        return kept + ([],)
+    return None
+
+
 # A few at once, each in its own folder (WORKERS).
-if misses:
-    toolchain_identity()  # read once, before the threads keep failures
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor(WORKERS) as pool:
-        for plugin, result in zip(misses, pool.map(build, misses)):
+pool, running = None, {}
+for group in (now, later):
+    if group is later and fetcher is not None:
+        fetcher.join()
+    for plugin in group:
+        if (result := to_build(plugin)) is not None:
             outcome[plugin['name']] = result
+            continue
+        if pool is None:
+            toolchain_identity()  # read once, before the threads keep failures
+            import concurrent.futures
+            pool = concurrent.futures.ThreadPoolExecutor(WORKERS)
+        running[plugin['name']] = pool.submit(build, plugin)
+for name, future in running.items():
+    outcome[name] = future.result()
+if pool is not None:
+    pool.shutdown()
+# A hosted plugin that got no library may still be in the archive: in a
+# checkout the lock can be a release ahead of it.
+unmet = [p for p in wanted if p['hosted'] and outcome[p['name']][0] not in ('cached', 'built')]
+if unmet and fetcher is None and may_fetch():
+    sweep_staging()
+    fetch_prebuilt()
+    for plugin in unmet:
+        if libs := libraries(os.path.join(cache, plugin['key'])):
+            outcome[plugin['name']] = ('cached', None, libs)
 for plugin in wanted:
     name = plugin['name']
     state, why, libs = outcome[name]
