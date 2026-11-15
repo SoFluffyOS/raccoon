@@ -778,7 +778,45 @@ for package in config_packages():
 implementations = set()
 for _, _, pubspec in packages:
     implementations.update(re.findall(r'default_package:\s*(\w+)', pubspec))
+
+
+def reached():
+    """The packages the app reaches other than through another host's
+    implementation of a federated plugin, from pub's package graph; None
+    without one. path_provider_android brings jni and jni_flutter: none of
+    their code runs here, so neither is built nor blamed for a missing
+    host."""
+    try:
+        graph = json.load(open(os.path.join(dart_tool, 'package_graph.json')))
+        edges = {node['name']: list(node.get('dependencies', [])) + list(node.get('devDependencies', []))
+                 for node in graph['packages']}
+        roots = list(graph['roots'])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+    # One a pub without it left behind lacks what was resolved since.
+    if any(name not in edges for name, _, _ in packages):
+        return None
+    elsewhere = set()
+    for name, _, pubspec in packages:
+        found = re.search(r'^\s+plugin:\s*$', pubspec, re.M)
+        if found is None or linux_block(pubspec[found.end():]):
+            continue
+        if name in implementations or re.search(r'^\s+implements:', pubspec, re.M):
+            elsewhere.add(name)
+    seen, todo = set(), [r for r in roots if isinstance(r, str)]
+    while todo:
+        name = todo.pop()
+        if name in seen or name in elsewhere:
+            continue
+        seen.add(name)
+        todo.extend(d for d in edges.get(name, []) if isinstance(d, str))
+    return seen
+
+
+ours = reached()
 for name, root, pubspec in packages:
+    if ours is not None and name not in ours:
+        continue
     if name in virtual:
         status.append({'name': name, 'state': 'built_in', 'detail': 'the runner answers it'})
         continue

@@ -3185,6 +3185,85 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
     timeout: const Timeout(Duration(minutes: 2)),
   );
   test(
+    'on Linux what only another host\'s implementation brings is not the app\'s',
+    () async {
+      // path_provider_android brings jni and jni_flutter, Android only: the
+      // app reaches neither on Linux, so neither is blamed for a missing
+      // host. One the app depends on itself still is (raccoon#16).
+      final temp = Directory.systemTemp.createTempSync('raccoon_reached');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      const android =
+          '    platforms:\n      android:\n'
+          '        package: dev.raccoon.x\n        pluginClass: X\n';
+      final graph = jsonEncode({
+        'roots': ['app'],
+        'packages': [
+          {
+            'name': 'app',
+            'dependencies': ['direct_mobile', 'mobile_impl'],
+            'devDependencies': <String>[],
+          },
+          {'name': 'direct_mobile', 'dependencies': <String>[]},
+          {
+            'name': 'mobile_impl',
+            'dependencies': ['mobile_helper'],
+          },
+          {'name': 'mobile_helper', 'dependencies': <String>[]},
+        ],
+        'configVersion': 1,
+      });
+      final files = {
+        'direct_mobile/pubspec.yaml':
+            'name: direct_mobile\nversion: 1.0.0\n'
+            'flutter:\n  plugin:\n$android',
+        'mobile_impl/pubspec.yaml':
+            'name: mobile_impl\nversion: 1.0.0\n'
+            'flutter:\n  plugin:\n    implements: thing\n$android',
+        'mobile_helper/pubspec.yaml':
+            'name: mobile_helper\nversion: 1.0.0\n'
+            'flutter:\n  plugin:\n$android',
+      };
+      const plugins = ['direct_mobile', 'mobile_impl', 'mobile_helper'];
+      List<(Object?, Object?)> states(Map<String, Object?> manifest) => [
+        for (final entry in manifest['status'] as List)
+          ((entry as Map)['name'], entry['state']),
+      ];
+      expect(
+        states(
+          await installFake(temp, {
+            ...files,
+            'app/.dart_tool/package_graph.json': graph,
+          }, plugins),
+        ),
+        [('direct_mobile', 'no_host')],
+      );
+      // Without pub's graph, or with one older than the resolution, every
+      // plugin counts, as before.
+      for (final stale in [null, graph.replaceAll('mobile_helper', 'gone')]) {
+        final again = Directory(p.join(temp.path, stale == null ? 'a' : 'b'))
+          ..createSync();
+        expect(
+          states(
+            await installFake(again, {
+              ...files,
+              if (stale != null) 'app/.dart_tool/package_graph.json': stale,
+            }, plugins),
+          ),
+          unorderedEquals([
+            ('direct_mobile', 'no_host'),
+            ('mobile_helper', 'no_host'),
+          ]),
+        );
+      }
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isLinux)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'the package graph is read by the Linux half',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+  test(
     'on macOS a plugin with a top-level platforms: list is built',
     () async {
       final temp = Directory.systemTemp.createTempSync('raccoon_platforms');
