@@ -186,7 +186,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   what the desktop template gives a plugin, a few at once, and `run`
   passes it. What a plugin bundles (`<name>_bundled_libraries`) goes
   beside its library, as the template installs it. Needs cmake, ninja,
-  pkg-config and the GTK development files, as the desktop target does;
+  pkg-config and the GTK development files, as the desktop target does,
+  and builds with clang as Flutter's Linux build does (`$CC` and `$CXX`
+  when set; without clang, the system's compiler);
   what built is cached by plugin version and runner version (not by
   engine: a plugin builds against the runner's own library), and a
   release's archive of the common plugins (`tool/plugins`, built by CI)
@@ -207,6 +209,20 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   `screen_retriever` and its `_macos`, `_linux` and `_windows` halves)
   stay the runner's own, above. `example/plugins/echo`
   is a plugin as the template makes one; `example/plugins_app` calls it.
+  What a Linux user can expect, measured on #16 (2026-11-16, Flutter
+  3.50.0, one call per plugin): of 33 of pub.dev's most used plugins that
+  declare Linux, 25 load and answer, Dart only, built here or from the
+  release's archive. Others need what a desktop build of the app needs
+  too: libsecret's development files for flutter_secure_storage (the next
+  release's archive carries it), `pactl` for record, a JDK for jni,
+  libcurl's development files for sentry_flutter's native half.
+  package_info_plus answers empty, as it reads beside the executable
+  (#358), and window_manager 0.7 and screen_retriever 0.4 go through FFI,
+  which the runner doesn't answer (#361); 0.5 and 0.2 work. A plugin with
+  no Linux implementation (Firebase, permission_handler, webview_flutter,
+  video_player, ...) is reported as such and its calls fail within a
+  second, as under `flutter run -d linux`; an app that awaits one before
+  `runApp` stops with the exception and the plugin named.
 - Loads the project's native plugins on macOS too. A plugin framework links
   against `FlutterMacOS.framework` and uses its channel and codec classes;
   the runner opens the Flutter SDK's copy at run time, before the plugins,
