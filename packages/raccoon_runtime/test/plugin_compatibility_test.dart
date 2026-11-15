@@ -14,11 +14,14 @@ const _sample = '''
     "linux": [
       {"name": "path_provider_linux", "native_build": false},
       {"name": "url_launcher_linux", "native_build": true},
-      {"name": "file_selector_linux", "native_build": true}
+      {"name": "file_selector_linux", "native_build": true},
+      {"name": "window_manager", "native_build": true}
     ],
     "macos": [
       {"name": "path_provider_foundation", "native_build": true},
-      {"name": "url_launcher_macos", "native_build": true}
+      {"name": "shared_preferences_foundation", "native_build": true},
+      {"name": "url_launcher_macos", "native_build": true},
+      {"name": "window_manager", "native_build": true}
     ],
     "windows": [
       {"name": "url_launcher_windows", "native_build": true}
@@ -30,7 +33,7 @@ const _sample = '''
 void main() {
   test('classifies plugins by their implementation for the host', () {
     final compatibility = PluginCompatibility(
-      servedByRaccoon: {'url_launcher_linux'},
+      servedByRaccoon: {'file_selector_linux'},
       platform: 'linux',
     );
 
@@ -41,14 +44,32 @@ void main() {
 
     expect(report, {
       'camera_android': PluginSupport.notForThisPlatform,
-      'file_selector_linux': PluginSupport.unavailable,
+      'file_selector_linux': PluginSupport.servedByRaccoon,
       'path_provider_android': PluginSupport.notForThisPlatform,
       'path_provider_foundation': PluginSupport.notForThisPlatform,
       'path_provider_linux': PluginSupport.works,
-      'url_launcher_linux': PluginSupport.servedByRaccoon,
+      'shared_preferences_foundation': PluginSupport.notForThisPlatform,
+      'url_launcher_linux': PluginSupport.native,
       'url_launcher_macos': PluginSupport.notForThisPlatform,
       'url_launcher_windows': PluginSupport.notForThisPlatform,
+      'window_manager': PluginSupport.native,
     });
+  });
+
+  // Native plugins are built and loaded on every host; the window plugins
+  // are the runner's own (raccoon#16).
+  test('loads native plugins and serves the window plugins on Linux', () {
+    final report = {
+      for (final status in PluginCompatibility(
+        platform: 'linux',
+      ).parse(_sample))
+        status.name: status.support,
+    };
+
+    expect(report['url_launcher_linux'], PluginSupport.native);
+    expect(report['file_selector_linux'], PluginSupport.native);
+    expect(report['window_manager'], PluginSupport.servedByRaccoon);
+    expect(report['path_provider_linux'], PluginSupport.works);
   });
 
   test('reads the macOS list on a Mac', () {
@@ -59,23 +80,29 @@ void main() {
         status.name: status.support,
     };
 
-    expect(report['url_launcher_macos'], PluginSupport.servedByRaccoon);
-    expect(report['path_provider_foundation'], PluginSupport.unavailable);
+    expect(report['url_launcher_macos'], PluginSupport.native);
+    expect(report['path_provider_foundation'], PluginSupport.native);
+    expect(
+      report['shared_preferences_foundation'],
+      PluginSupport.servedByRaccoon,
+    );
+    expect(report['window_manager'], PluginSupport.servedByRaccoon);
     expect(report['url_launcher_linux'], PluginSupport.notForThisPlatform);
   });
 
-  test('serves url_launcher by default on every desktop', () {
-    for (final (platform, plugin) in [
-      ('linux', 'url_launcher_linux'),
-      ('macos', 'url_launcher_macos'),
-      ('windows', 'url_launcher_windows'),
-    ]) {
-      final report = PluginCompatibility(platform: platform).parse(_sample);
-      expect(
-        report.singleWhere((s) => s.name == plugin).support,
-        PluginSupport.servedByRaccoon,
-      );
-    }
+  test('serves shared_preferences_foundation only on a Mac', () {
+    expect(
+      PluginCompatibility.servedOn('macos'),
+      contains('shared_preferences_foundation'),
+    );
+    expect(
+      PluginCompatibility.servedOn('linux'),
+      isNot(contains('shared_preferences_foundation')),
+    );
+    expect(
+      PluginCompatibility.servedOn('windows'),
+      PluginCompatibility.defaultServedByRaccoon,
+    );
   });
 
   test('names the host the way the tool does', () {

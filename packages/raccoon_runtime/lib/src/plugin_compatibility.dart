@@ -8,15 +8,18 @@ enum PluginSupport {
   /// Its implementation for this host is Dart, so it works unchanged.
   works,
 
-  /// Its implementation for this host is native and Raccoon provides one.
+  /// Its implementation for this host is native: the device helper builds
+  /// it for the host and the runner loads it, as the app's own desktop build
+  /// would. One that does not build is named when the app runs, and its
+  /// calls fail as on a desktop without it.
+  native,
+
+  /// Its implementation for this host is native and the runner answers its
+  /// channels itself instead: the window plugins, whose window is the pane.
   servedByRaccoon,
 
-  /// Its implementation for this host is native and nothing serves it yet;
-  /// calls throw `MissingPluginException`, as on an unsupported desktop today.
-  unavailable,
-
   /// The plugin has no implementation for this host at all (mobile or web
-  /// only).
+  /// only); its calls fail as they would in the app's own desktop build.
   notForThisPlatform,
 }
 
@@ -37,17 +40,27 @@ final class PluginStatus {
 /// Reads the Flutter tool's `.flutter-plugins-dependencies` and says, per
 /// plugin, what the runtime can do with it.
 final class PluginCompatibility {
-  PluginCompatibility({
-    this.servedByRaccoon = defaultServedByRaccoon,
-    String? platform,
-  }) : platform = platform ?? hostPlatform;
+  PluginCompatibility({Set<String>? servedByRaccoon, String? platform})
+    : platform = platform ?? hostPlatform,
+      servedByRaccoon = servedByRaccoon ?? servedOn(platform ?? hostPlatform);
 
-  /// Native plugin packages the IDE serves over platform channels today (see
-  /// `IdePlatformChannels` and `IdeUrlLauncherChannels` in raccoon_view).
+  /// Native plugin packages the runner answers itself on every host, as the
+  /// device helper lists them: their window is the pane.
   static const Set<String> defaultServedByRaccoon = {
-    'url_launcher_linux',
-    'url_launcher_macos',
-    'url_launcher_windows',
+    'desktop_window',
+    'window_manager',
+    'window_size',
+    'screen_retriever',
+    'screen_retriever_linux',
+    'screen_retriever_macos',
+    'screen_retriever_windows',
+  };
+
+  /// What the runner answers itself on [platform]: on a Mac also
+  /// `shared_preferences_foundation`, which the app's Dart VM picks there.
+  static Set<String> servedOn(String platform) => {
+    ...defaultServedByRaccoon,
+    if (platform == 'macos') 'shared_preferences_foundation',
   };
 
   /// The tool's name for the host this process runs on.
@@ -60,7 +73,7 @@ final class PluginCompatibility {
         _ => throw UnsupportedError('no desktop plugins on $operatingSystem'),
       };
 
-  /// Names of native plugin packages Raccoon implements in Dart.
+  /// Names of native plugin packages the runner answers itself.
   final Set<String> servedByRaccoon;
 
   /// The platform whose plugin list the report reads.
@@ -115,7 +128,7 @@ final class PluginCompatibility {
         false => PluginSupport.works,
         true when servedByRaccoon.contains(name) =>
           PluginSupport.servedByRaccoon,
-        true => PluginSupport.unavailable,
+        true => PluginSupport.native,
       };
       report.add(PluginStatus(name: name, support: support));
     }
