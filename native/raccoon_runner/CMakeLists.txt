@@ -445,6 +445,9 @@ else()
       # only a plugin that uses it loads it (#223), whatever the toolchain's
       # default.
       target_link_options(raccoon_runner PRIVATE -Wl,--as-needed)
+      # The runner's g_main_loop_run stands in for GLib's, so a stop can end
+      # the loop a plugin's dialog runs (glib_pump.cc, #337).
+      target_link_options(raccoon_runner PRIVATE -Wl,--export-dynamic-symbol=g_main_loop_run)
       # The runner uses the library's private headers, as the embedding's own
       # engine would.
       target_compile_definitions(raccoon_runner PRIVATE RACCOON_HAS_PLUGINS=1 FLUTTER_LINUX_COMPILATION)

@@ -1,6 +1,33 @@
 #if RACCOON_HAS_PLUGINS && !defined(__APPLE__) && !defined(_WIN32)
 #include "glib_pump.h"
 
+#include <dlfcn.h>
+
+#include <cstdio>
+#include <cstdlib>
+
+namespace {
+
+// The GLib loops running on this thread, innermost last.
+thread_local std::vector<GMainLoop*> running_loops;
+
+}  // namespace
+
+// The runner's g_main_loop_run comes before GLib's, for plugins and the
+// libraries they call (gtk_dialog_run and gtk_native_dialog_run run one):
+// GLib gives no other way to the loop a dialog runs, which a stop must end.
+extern "C" void g_main_loop_run(GMainLoop* loop) {
+  using Run = void (*)(GMainLoop*);
+  static const Run run = reinterpret_cast<Run>(dlsym(RTLD_NEXT, "g_main_loop_run"));
+  if (run == nullptr) {
+    std::fprintf(stderr, "🦝 GLib's g_main_loop_run not found: %s\n", dlerror());
+    std::abort();
+  }
+  running_loops.push_back(loop);
+  run(loop);
+  running_loops.pop_back();
+}
+
 namespace raccoon {
 
 namespace {
@@ -69,6 +96,12 @@ GlibPump::~GlibPump() {
   g_source_destroy(modal_);
   g_source_unref(modal_);
   g_main_context_release(context_);
+}
+
+void GlibPump::EndNestedLoops() {
+  for (auto loop = running_loops.rbegin(); loop != running_loops.rend(); ++loop) {
+    if (g_main_loop_get_context(*loop) == context_) g_main_loop_quit(*loop);
+  }
 }
 
 void GlibPump::Prepare(std::vector<pollfd>& fds, int& timeout_ms) {

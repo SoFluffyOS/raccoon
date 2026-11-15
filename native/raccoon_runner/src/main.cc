@@ -1681,6 +1681,9 @@ int Serve(const Options& options) {
     // dialog's loop is asked to end, as at a session's end, and each loop
     // under it passes WM_QUIT on to the next until the runner's own.
     if (stop || g_stop != 0) PostQuitMessage(0);
+#elif !defined(__APPLE__)
+    // On Linux the dialogs' GLib loops are ended, each of them.
+    if (stop || g_stop != 0) plugins->EndNestedLoops();
 #endif
   });
 #endif

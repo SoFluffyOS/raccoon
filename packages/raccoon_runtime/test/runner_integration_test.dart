@@ -7446,12 +7446,13 @@ void main() => runApp(
   );
 
   test(
-    'on Windows a stop while a plugin\'s dialog is open ends the runner',
+    'a stop while a plugin\'s dialog is open ends the runner',
     () async {
       // The client's Shutdown, a tool gone or a later run taking the socket
       // all come in a turn the dialog's loop takes; the runner's own loop,
-      // which would act on them, waits under the dialog. The dialog is
-      // asked to end instead.
+      // which would act on them, waits under the dialog. The dialog's loop
+      // is asked to end instead: by WM_QUIT on Windows, g_main_loop_quit
+      // on Linux.
       final temp = Directory.systemTemp.createTempSync('raccoon_test');
       final manifest = File(p.join(temp.path, 'plugins.json'))
         ..writeAsStringSync(
@@ -7495,8 +7496,8 @@ void main() => runApp(
       }
     },
     skip:
-        !Platform.isWindows
-            ? 'the dialog is ended by a message to its loop on Windows'
+        Platform.isMacOS
+            ? 'a stop waits for the dialog on macOS still (#337)'
             : ready &&
                 File(pluginLibrary).existsSync() &&
                 Directory(pluginsModalAssets).existsSync()

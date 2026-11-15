@@ -30,6 +30,12 @@ class GlibPump {
   // its work, then a look at the descriptors without waiting.
   void SetModalTurn(std::function<void()> turn) { turn_ = std::move(turn); }
 
+  // Told to stop while nested loops hold the runner's: each loop of the
+  // context running on this thread is asked to end, innermost first, and
+  // the runner's own loop acts on the stop once they have. A loop the
+  // plugin turns by hand (g_main_context_iteration) isn't one of them.
+  void EndNestedLoops();
+
  private:
   struct ModalSource;
   static gboolean ModalPrepare(GSource* source, gint* timeout);
