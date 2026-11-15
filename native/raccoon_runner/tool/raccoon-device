@@ -918,6 +918,22 @@ WORKERS = max(1, min(4, (os.cpu_count() or 2) // 2))
 JOBS = (os.cpu_count() or 2) // WORKERS + 2
 
 
+def missing_packages(log):
+    """What a CMake configure that stopped in [log] did not find, as
+    pkg-config (Package 'libsecret-1' not found) or a CMake find module
+    (Could NOT find CURL) names it: the -dev package to install."""
+    try:
+        text = open(log, errors='replace').read()
+    except OSError:
+        return []
+    found = []
+    for match in re.finditer(r"Package '([^']+)'[^\n]*? not found|Could NOT find (\w+)", text):
+        name = match.group(1) or match.group(2)
+        if name not in found:
+            found.append(name)
+    return found
+
+
 def build(plugin):
     """Configures and builds [plugin] in a CMake project of its own, and
     caches what it made: its state ('built', 'failed' or
@@ -948,6 +964,8 @@ def build(plugin):
         # (a -dev one), which the next install should find once it is in.
         if configured:
             keep_failure(plugin, why, log)
+        elif needs := missing_packages(log):
+            why = 'did not build: needs the development files of %s; see %s' % (', '.join(needs), log)
         return 'failed', why, []
     # What its targets built, and what it bundles; a name once.
     libs = {}
