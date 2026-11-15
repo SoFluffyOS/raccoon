@@ -407,11 +407,10 @@ void main() {
         '${install.stderr}',
         contains('Flutter engine $revision downloaded'),
       );
-      expect(File(p.join(engineOf(engines), library)).readAsBytesSync(), [
-        1,
-        2,
-        3,
-      ]);
+      // The framework's binary on macOS, the library itself elsewhere.
+      final installed =
+          RuntimeStore(cacheDirectory: engines).installed(revision!)!;
+      expect(File(installed.engineLibrary).readAsBytesSync(), [1, 2, 3]);
 
       // The run takes it as it is.
       final run = await _runHelper(
