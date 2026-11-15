@@ -194,7 +194,10 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   plugin fails to build, it says so and the app sees no plugin. A
   loaded plugin's channels are answered before a client sees them, GLib's
   main context is pumped from the runner's loop, and a plugin's textures
-  draw through the GL renderer. The registrar hands out no view: the
+  draw through the GL renderer. While a dialog's nested GLib loop runs, a
+  source of the pump's takes the runner's turns, a dialog opened over it
+  too; a stop then quits those loops, which the runner knows because its
+  own `g_main_loop_run`, exported, stands in for GLib's (#337). The registrar hands out no view: the
   window plugins (`desktop_window`, `window_manager`, `window_size`,
   `screen_retriever` and its `_macos`, `_linux` and `_windows` halves)
   stay the runner's own, above. `example/plugins/echo`
