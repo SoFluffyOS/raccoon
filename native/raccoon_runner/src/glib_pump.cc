@@ -33,15 +33,18 @@ gboolean GlibPump::ModalCheck(GSource* source) {
   return !modal->pump->own_ && modal->pump->turn_ && g_source_get_time(source) >= modal->due;
 }
 
+// A turn's own look at the descriptors leaves the context alone, so the
+// source runs inside a turn only from a nested loop the turn started: a
+// second dialog, opened by a call the first one's loop took, holds that
+// turn as the first held the runner's loop, and takes turns of its own
+// meanwhile.
 gboolean GlibPump::ModalDispatch(GSource* source, GSourceFunc, gpointer) {
   auto* modal = reinterpret_cast<ModalSource*>(source);
   GlibPump* pump = modal->pump;
   modal->due = g_source_get_time(source) + kModalTurnMicros;
-  if (!pump->turning_) {
-    pump->turning_ = true;
-    pump->turn_();
-    pump->turning_ = false;
-  }
+  ++pump->turning_;
+  pump->turn_();
+  --pump->turning_;
   return G_SOURCE_CONTINUE;
 }
 
@@ -52,6 +55,9 @@ GlibPump::GlibPump(EventLoop& loop) : loop_(loop), context_(g_main_context_defau
   modal_ = g_source_new(&funcs, sizeof(ModalSource));
   reinterpret_cast<ModalSource*>(modal_)->pump = this;
   reinterpret_cast<ModalSource*>(modal_)->due = 0;
+  // GLib holds back a source while it is dispatched; this one must run in
+  // a loop started inside its own turn.
+  g_source_set_can_recurse(modal_, TRUE);
   g_source_attach(modal_, context_);
   loop_.SetExternal(
       [this](std::vector<pollfd>& fds, int& timeout_ms) { Prepare(fds, timeout_ms); },
@@ -68,7 +74,7 @@ GlibPump::~GlibPump() {
 void GlibPump::Prepare(std::vector<pollfd>& fds, int& timeout_ms) {
   // A turn from the modal source: the descriptors only, the context is the
   // nested loop's.
-  if (turning_) return;
+  if (turning_ > 0) return;
   own_ = true;
   g_main_context_prepare(context_, &priority_);
   gint glib_timeout = -1;
@@ -91,7 +97,7 @@ void GlibPump::Prepare(std::vector<pollfd>& fds, int& timeout_ms) {
 }
 
 void GlibPump::Dispatch(const pollfd* fds, size_t count) {
-  if (turning_) return;
+  if (turning_ > 0) return;
   for (size_t i = 0; i < count && i < fds_.size(); ++i) {
     fds_[i].revents = static_cast<gushort>(fds[i].revents);
   }

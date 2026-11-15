@@ -7426,8 +7426,8 @@ void main() => runApp(
         expect(during, greaterThan(4));
         // A dialog opened from a turn the first one's loop took has a loop
         // of its own, which takes turns too: a second of it is 60 frames.
-        // Linux and macOS still hold the runner there: 1 frame (#337).
-        if (Platform.isWindows) expect(duringInner, greaterThan(2));
+        // macOS still holds the runner there: 1 frame (#337).
+        if (!Platform.isMacOS) expect(duringInner, greaterThan(2));
       } finally {
         await frames.cancel();
         client.shutdown();

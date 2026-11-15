@@ -48,9 +48,10 @@ class GlibPump {
   // In the pump's own prepare or check: an iteration of the runner's loop,
   // not a nested one.
   bool own_ = false;
-  // Inside a turn taken from the modal source: the loop's look at its
-  // descriptors leaves the context to the nested loop.
-  bool turning_ = false;
+  // How many turns taken from the modal source are under way, one inside
+  // another when a dialog opens over a dialog: the loop's look at its
+  // descriptors then leaves the context to the nested loop.
+  int turning_ = 0;
 };
 
 }  // namespace raccoon
