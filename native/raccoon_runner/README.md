@@ -193,8 +193,17 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   (`.dart_tool/package_config.json`, every package with a Linux
   `pluginClass` or `ffiPlugin`), each in a CMake project of its own with
   what the desktop template gives a plugin, a few at once, and `run`
-  passes it. What a plugin bundles (`<name>_bundled_libraries`) goes
-  beside its library, as the template installs it. Needs cmake, ninja,
+  passes it. What a plugin's build gives the app goes beside its library,
+  as the template installs it: what its targets made (`.so.N` too), what
+  `<name>_bundled_libraries` names, every name of a link's chain
+  (`libonnxruntime.so`, `.so.1`, `.so.1.28.3`), a library's SONAME, and
+  what those need from elsewhere in the build tree (a FetchContent
+  library), which a desktop build finds through the build tree's RUNPATH.
+  Plugins are opened globally, as an app's executable links them, so
+  sqlite3 finds `sqlite3_flutter_libs`' build in the process. The app gets
+  a `lib/` beside its executable, as Flutter's bundle has, with links to
+  the plugins' libraries and the native assets': some plugins open a
+  library there by its full path (#363). Needs cmake, ninja,
   pkg-config and the GTK development files, as the desktop target does,
   and builds with clang as Flutter's Linux build does (`$CC` and `$CXX`
   when set; without clang, the system's compiler);
@@ -232,6 +241,15 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   video_player, ...) is reported as such and its calls fail within a
   second, as under `flutter run -d linux`; an app that awaits one before
   `runApp` stops with the exception and the plugin named.
+  Of 13 plugins that bundle or open a library of their own (#363,
+  2026-11-16), these answer, built here: sqlite3_flutter_libs,
+  isar_community_flutter_libs, objectbox_flutter_libs,
+  flutter_libserialport, flutter_onnxruntime, fvp, and pdfrx and
+  sqlite3 through their build hooks. realm and rive_native don't build
+  yet: their CMake expects the app's own `linux/` folder. As on desktop,
+  sqlcipher_flutter_libs needs OpenSSL's development files, media_kit
+  libmpv's, and tflite_flutter its library under `blobs/` beside the
+  executable.
 - Loads the project's native plugins on macOS too. A plugin framework links
   against `FlutterMacOS.framework` and uses its channel and codec classes;
   the runner opens the Flutter SDK's copy at run time, before the plugins,

@@ -70,7 +70,11 @@ bool PluginHost::Load(const PluginEntry& entry, std::string* error) {
     *error = "no library or symbol";
     return false;
   }
-  void* handle = dlopen(entry.library.c_str(), RTLD_NOW | RTLD_LOCAL);
+  // Global, as a desktop app's executable links its plugins: their symbols
+  // are the process's. sqlite3 looks for sqlite3_flutter_libs' build there
+  // (DynamicLibrary.executable()), and with RTLD_LOCAL fell back to a
+  // libsqlite3.so the system may not have (#363).
+  void* handle = dlopen(entry.library.c_str(), RTLD_NOW | RTLD_GLOBAL);
   if (handle == nullptr) {
     *error = dlerror();
     return false;

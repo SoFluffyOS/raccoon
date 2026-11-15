@@ -352,6 +352,27 @@ linux_app_executable() {
   APP_EXECUTABLE="$exe"
 }
 
+# The app's lib/ beside its executable, as Flutter's Linux bundle has it:
+# a link to each of the plugins' libraries, what they bundle among them,
+# and to each native asset's library. Plugins that open a library there by
+# its full path find it: flutter_libserialport's libserialport.so and
+# pdfium's libpdfium.so (pdfrx). A plugin's library comes before a
+# native asset of the same name. No process for an app with neither (#363).
+linux_app_lib() {
+  local key="$1" f name names=" " links=()
+  for f in "$APPS/$key/plugins/lib/"* "$APPS/$key/native_assets/"*; do
+    [ -e "$f" ] || continue
+    name="${f##*/}"
+    case "$names" in *" $name "*) continue ;; esac
+    names+="$name "
+    f="${f#"$APPS/$key/"}"
+    links+=("../../$f")
+  done
+  [ ${#links[@]} -gt 0 ] && [ -d "$APPS/$key/bin" ] || return 0
+  rm -rf "$APPS/$key/bin/lib"
+  mkdir "$APPS/$key/bin/lib" && ln -s "${links[@]}" "$APPS/$key/bin/lib/"
+}
+
 # Sets the variable [$1] to the word in file [$2] (a version, a stamp, a
 # saved size): its first line, with no space in it. In the shell, as tr
 # would take a fork.
@@ -548,7 +569,7 @@ build_plugins_linux() {
     "$ROOT/tool/plugins/pubspec.lock" <<'PY'
 # What only a build or a fetch needs is imported there: tarfile, tempfile
 # and concurrent.futures cost a cached install ~6 ms (#315).
-import glob, hashlib, importlib, json, os, re, sys, time
+import hashlib, importlib, json, os, re, sys, time
 
 
 class LazyModule:
@@ -625,6 +646,150 @@ set(FLUTTER_TARGET_PLATFORM %s)
 # A library is a .so, versioned or not: what a plugin bundles is often
 # libfoo.so.1.
 LIBRARY = re.compile(r'\.so(\.\d+)*$')
+
+
+def elf_dynamic(path):
+    """[path]'s SONAME and the libraries it needs (DT_NEEDED), read from
+    its dynamic section: (None, []) for what is no ELF library."""
+    import mmap, struct
+    try:
+        with open(path, 'rb') as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as data:
+            if data[:4] != b'\x7fELF' or data[4] not in (1, 2) or data[5] not in (1, 2):
+                return None, []
+            wide = data[4] == 2
+            end = '<' if data[5] == 1 else '>'
+            if wide:
+                phoff, = struct.unpack_from(end + 'Q', data, 0x20)
+                phentsize, phnum = struct.unpack_from(end + 'HH', data, 0x36)
+            else:
+                phoff, = struct.unpack_from(end + 'I', data, 0x1C)
+                phentsize, phnum = struct.unpack_from(end + 'HH', data, 0x2A)
+            loads, dynamic = [], None
+            for i in range(phnum):
+                at = phoff + i * phentsize
+                if wide:
+                    kind, _, offset, vaddr, _, filesz = struct.unpack_from(end + 'IIQQQQ', data, at)
+                else:
+                    kind, offset, vaddr, _, filesz = struct.unpack_from(end + 'IIIII', data, at)
+                if kind == 1:
+                    loads.append((vaddr, offset, filesz))
+                elif kind == 2:
+                    dynamic = (offset, filesz)
+            if dynamic is None:
+                return None, []
+            entry = end + ('qQ' if wide else 'iI')
+            size = struct.calcsize(entry)
+            strtab, names, soname = None, [], None
+            for at in range(dynamic[0], dynamic[0] + dynamic[1] - size + 1, size):
+                tag, value = struct.unpack_from(entry, data, at)
+                if tag == 0:
+                    break
+                if tag == 5:
+                    strtab = value
+                elif tag in (1, 14):
+                    names.append((tag, value))
+            base = next((offset + strtab - vaddr for vaddr, offset, filesz in loads
+                         if strtab is not None and vaddr <= strtab < vaddr + filesz), None)
+            if base is None:
+                return None, []
+            needed = []
+            for tag, value in names:
+                start = base + value
+                name = data[start:data.find(b'\0', start)].decode('utf-8', 'replace')
+                if tag == 14:
+                    soname = name
+                else:
+                    needed.append(name)
+            return soname, needed
+    except (OSError, ValueError, struct.error):
+        return None, []
+
+
+def shared_libraries(folder):
+    """The libraries under [folder], links among them, by file name: the
+    first found of a name. Not CMake's own scratch."""
+    found = {}
+    for dirpath, dirs, files in os.walk(folder):
+        dirs[:] = sorted(d for d in dirs if d != 'CMakeFiles')
+        for f in sorted(files):
+            if LIBRARY.search(f):
+                found.setdefault(f, os.path.join(dirpath, f))
+    return found
+
+
+def gather(project):
+    """What a plugin's build gives the app, by the name each is loaded by:
+    the libraries its own targets made (libfoo.so.1 too), what its
+    <name>_bundled_libraries names, every name of a link's chain
+    (libonnxruntime.so, .so.1, .so.1.28.3), and what those need that the
+    build left elsewhere in its tree, as a FetchContent library. A desktop
+    build finds the last through its build tree's RUNPATH, which the cache
+    has not (#363)."""
+    tree = os.path.join(project, 'out')
+    everywhere = shared_libraries(tree)
+    libs = {}
+
+    def take(path):
+        name = os.path.basename(path)
+        if name in libs or not os.path.exists(path):
+            return
+        libs[name] = path
+        if os.path.islink(path):
+            take(os.path.join(os.path.dirname(path), os.readlink(path)))
+            return
+        for need in elf_dynamic(path)[1]:
+            if need in everywhere:
+                take(everywhere[need])
+
+    for path in sorted(shared_libraries(os.path.join(tree, 'plugin')).values()) + bundled(project):
+        take(path)
+    return libs
+
+
+def stage_libraries(libs, staging):
+    """[libs] into [staging], flat: each library once under its own name,
+    the other names it goes by as links to it (a copy of the same bytes
+    too: flutter_onnxruntime copies its 24 MB library beside its own), and
+    its SONAME when the build gave it under another name only: what loads
+    it asks for that."""
+    import filecmp
+    real, by_size = {}, {}
+    for name, path in libs.items():
+        if not os.path.islink(path):
+            real.setdefault(os.path.realpath(path), name)
+    for name, path in libs.items():
+        target = os.path.join(staging, name)
+        source = os.path.realpath(path)
+        if os.path.islink(path) and real.get(source, name) != name:
+            os.symlink(real[source], target)
+            continue
+        size = os.path.getsize(source)
+        same = next((other for other in by_size.get(size, [])
+                     if filecmp.cmp(source, os.path.join(staging, other), shallow=False)), None)
+        if same is not None:
+            os.symlink(same, target)
+            continue
+        shutil.copy2(path, target)
+        real.setdefault(source, name)
+        by_size.setdefault(size, []).append(name)
+    for name in list(libs):
+        target = os.path.join(staging, name)
+        if os.path.islink(target):
+            continue
+        soname = elf_dynamic(target)[0]
+        if soname and '/' not in soname and not os.path.lexists(os.path.join(staging, soname)):
+            os.symlink(name, os.path.join(staging, soname))
+
+
+def defines(path, symbol):
+    """Whether [path]'s symbol names hold [symbol]: the plugin's own library
+    among those it bundles (#363)."""
+    import mmap
+    try:
+        with open(path, 'rb') as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as data:
+            return data.find(b'\0' + symbol.encode() + b'\0') >= 0
+    except (OSError, ValueError):
+        return False
 
 
 def libraries(folder):
@@ -761,9 +926,13 @@ def fetch_prebuilt():
             raise
         try:
             with tarfile.open(archive) as tar:
-                # An entry's files, not the failures kept beside them.
+                # An entry's files, not the failures kept beside them, and
+                # the links among them: a library's other names
+                # (libfoo.so.1 for libfoo.so.1.2).
                 members = [m for m in tar.getmembers()
-                           if m.isfile() and '..' not in m.name
+                           if (m.isfile() or (m.issym() and '/' not in m.linkname
+                                              and m.linkname not in ('', '.', '..')))
+                           and '..' not in m.name
                            and len(parts := os.path.normpath(m.name).split('/')) == 2
                            and parts[0] != 'failed' and not parts[1].startswith('.')]
                 tar.extractall(staging, members=members)
@@ -1080,10 +1249,7 @@ def build(plugin):
         elif needs := missing_packages(log):
             why = 'did not build: needs the development files of %s; see %s' % (', '.join(needs), log)
         return 'failed', why, []
-    # What its targets built, and what it bundles; a name once.
-    libs = {}
-    for so in sorted(glob.glob(os.path.join(project, 'out', 'plugin', '**', '*.so'), recursive=True)) + bundled(project):
-        libs.setdefault(os.path.basename(so), so)
+    libs = gather(project)
     if not libs:
         # Built fine and made nothing: an FFI plugin whose library wants
         # a toolchain this machine has not (jni without a JDK).
@@ -1096,8 +1262,7 @@ def build(plugin):
     os.makedirs(cache, exist_ok=True)
     import tempfile
     staging = tempfile.mkdtemp(prefix=os.path.basename(cached) + '.partial-', dir=cache)
-    for so in libs.values():
-        shutil.copy2(so, staging)
+    stage_libraries(libs, staging)
     settle(staging, cached, lambda: libraries(cached))
     # Its build tree, once cached: the next install starts afresh.
     shutil.rmtree(project, ignore_errors=True)
@@ -1211,8 +1376,11 @@ for plugin in wanted:
     for so in libs:
         clone(so, os.path.join(out, 'lib'))
     if plugin['symbol'] is not None and libs:
-        # The plugin's own library is the one named after it.
+        # The plugin's own library is the one named after it, else the one
+        # that defines its symbol: fvp's is libfvp.so, beside libc++.so.1.
         main = ([so for so in libs if os.path.basename(so) == 'lib%s_plugin.so' % name]
+                or [so for so in libs if LIBRARY.search(so) and not os.path.islink(so)
+                    and defines(so, plugin['symbol'])]
                 or [so for so in libs if LIBRARY.search(so)] or libs)
         entries.append({'name': name, 'library': os.path.join(out, 'lib', os.path.basename(main[0])),
                         'symbol': plugin['symbol']})
@@ -2891,6 +3059,7 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
       wait "$plugins_job" || plugins_status=$?
       [ "$plugins_status" -eq 0 ] || exit "$plugins_status"
       report_skipped_native_assets "$APPS/$key"
+      [ "$UNAME_S" != Linux ] || linux_app_lib "$key" || true
     fi
     wait "$engine_job" || true
     ;;
