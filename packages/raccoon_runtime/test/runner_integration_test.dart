@@ -3264,6 +3264,69 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
     timeout: const Timeout(Duration(minutes: 2)),
   );
   test(
+    'on Linux camera is the runner\'s, with what it brings, and a window '
+    'package that is no plugin is not',
+    () async {
+      // raccoon#16: camera has no desktop implementation and the runner
+      // answers it, but the pane said it and its Android-only
+      // flutter_plugin_android_lifecycle had none. window_manager 0.7 is no
+      // plugin at all: it goes through FFI, which the runner doesn't answer.
+      final temp = Directory.systemTemp.createTempSync('raccoon_own');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      const android =
+          '    platforms:\n      android:\n'
+          '        package: dev.raccoon.x\n        pluginClass: X\n';
+      final graph = jsonEncode({
+        'roots': ['app'],
+        'packages': [
+          {
+            'name': 'app',
+            'dependencies': ['camera', 'window_manager'],
+            'devDependencies': <String>[],
+          },
+          {
+            'name': 'camera',
+            'dependencies': ['flutter_plugin_android_lifecycle'],
+          },
+          {
+            'name': 'flutter_plugin_android_lifecycle',
+            'dependencies': <String>[],
+          },
+          {'name': 'window_manager', 'dependencies': <String>[]},
+        ],
+        'configVersion': 1,
+      });
+      final manifest = await installFake(
+        temp,
+        {
+          'camera/pubspec.yaml':
+              'name: camera\nversion: 1.0.0\nflutter:\n  plugin:\n$android',
+          'flutter_plugin_android_lifecycle/pubspec.yaml':
+              'name: flutter_plugin_android_lifecycle\nversion: 1.0.0\n'
+              'flutter:\n  plugin:\n$android',
+          'window_manager/pubspec.yaml':
+              'name: window_manager\nversion: 0.7.0\n'
+              'platforms:\n  linux:\n  macos:\n  windows:\n',
+          'app/.dart_tool/package_graph.json': graph,
+        },
+        ['camera', 'flutter_plugin_android_lifecycle', 'window_manager'],
+      );
+      expect(
+        [
+          for (final entry in manifest['status'] as List)
+            ((entry as Map)['name'], entry['state']),
+        ],
+        [('camera', 'built_in')],
+      );
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isLinux)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'the Linux half of the helper',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+  test(
     'on macOS a plugin with a top-level platforms: list is built',
     () async {
       final temp = Directory.systemTemp.createTempSync('raccoon_platforms');

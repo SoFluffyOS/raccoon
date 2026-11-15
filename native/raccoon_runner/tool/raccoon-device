@@ -388,6 +388,9 @@ VIRTUAL_PLUGINS="$VIRTUAL_PLUGINS screen_retriever_macos screen_retriever_linux 
 # preferences in its data directory, where NSUserDefaults would share the
 # runner's one domain among every app.
 VIRTUAL_PLUGINS_MACOS="$VIRTUAL_PLUGINS shared_preferences_foundation"
+# On Linux camera is the runner's too: it has no desktop implementation, and
+# the runner answers its method channel one from a test pattern (#96).
+VIRTUAL_PLUGINS_LINUX="$VIRTUAL_PLUGINS camera"
 
 # The plugin-facing library and its headers: beside the runner in an archive,
 # in build/ and third_party/ in a checkout.
@@ -473,7 +476,7 @@ build_plugins_linux() {
   fi
   read_word version "$ROOT/VERSION"
   cache="${RACCOON_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/plugins/linux}"
-  python3 - "$config" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS" \
+  python3 - "$config" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS_LINUX" \
     "$cache" "$version" "$UNAME_M" \
     "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-linux-$UNAME_M.tar.gz}" \
     "$ROOT/tool/plugins/pubspec.lock" <<'PY'
@@ -809,6 +812,10 @@ def reached():
         if name in seen or name in elsewhere:
             continue
         seen.add(name)
+        # Nor what a plugin the runner answers brings: camera's
+        # flutter_plugin_android_lifecycle.
+        if name in virtual:
+            continue
         todo.extend(d for d in edges.get(name, []) if isinstance(d, str))
     return seen
 
@@ -817,11 +824,13 @@ ours = reached()
 for name, root, pubspec in packages:
     if ours is not None and name not in ours:
         continue
-    if name in virtual:
-        status.append({'name': name, 'state': 'built_in', 'detail': 'the runner answers it'})
-        continue
     found = re.search(r'^\s+plugin:\s*$', pubspec, re.M)
     if not found:
+        # window_manager 0.7 and screen_retriever 0.4 are no plugins: they
+        # reach the window through FFI, which the runner doesn't answer.
+        continue
+    if name in virtual:
+        status.append({'name': name, 'state': 'built_in', 'detail': 'the runner answers it'})
         continue
     # Only what flutter: plugin: says: pub.dev's top-level platforms: list
     # names hosts too, with nothing under them (#92).
