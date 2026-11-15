@@ -398,6 +398,10 @@ final class RunnerDownloader {
       return builder.takeBytes();
     } on IOException catch (error) {
       throw DownloadFailed('$uri: $error');
+    } on OSError catch (error) {
+      // No IOException: HttpClient throws it as it is for a connection the
+      // peer resets before answering (#362).
+      throw DownloadFailed('$uri: $error');
     } on TimeoutException {
       throw DownloadFailed(
         '$uri: nothing came for ${stallTimeout.inSeconds} seconds',

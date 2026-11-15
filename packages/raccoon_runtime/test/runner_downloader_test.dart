@@ -1,5 +1,6 @@
 import 'dart:ffi' show Abi;
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' show sha256;
 import 'package:path/path.dart' as p;
@@ -393,6 +394,41 @@ void main() {
           contains('nothing came'),
         ),
       ),
+    );
+  });
+
+  // #362: a connection the server resets before it answers comes out of
+  // HttpClient as an OSError, which is no IOException.
+  test('a connection reset is a failed download too', () async {
+    final resetting = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(resetting.close);
+    resetting.listen((socket) {
+      // SO_LINGER on, for no time: closing sends a reset. Windows' linger
+      // is two u_shorts, the others' two ints.
+      final linger = switch (Platform.isWindows) {
+        true => Uint8List(4)..buffer.asByteData().setUint16(0, 1, Endian.host),
+        false => Uint8List(8)..buffer.asByteData().setInt32(0, 1, Endian.host),
+      };
+      socket.setRawOption(
+        RawSocketOption(
+          RawSocketOption.levelSocket,
+          Platform.isLinux ? 13 : 0x80,
+          linger,
+        ),
+      );
+      socket.destroy();
+    });
+    final at = Uri.parse('http://127.0.0.1:${resetting.port}/releases');
+    final reset = RunnerDownloader(releases: at, platform: 'linux-x64');
+    for (var i = 0; i < 20; i++) {
+      await expectLater(reset.find(pinned), throwsA(isA<DownloadFailed>()));
+    }
+    await expectLater(
+      reset.install(
+        RunnerRelease(version: pinned, asset: at, prerelease: true),
+        prebuilt,
+      ),
+      throwsA(isA<DownloadFailed>()),
     );
   });
 
