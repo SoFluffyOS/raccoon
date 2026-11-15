@@ -101,6 +101,11 @@ Uint8List _jsonReply(Object? result) =>
 String? _firstExisting(Iterable<String> candidates) =>
     candidates.where((c) => c.isNotEmpty && File(c).existsSync()).firstOrNull;
 
+/// Whether [command] is a file on PATH.
+bool _onPath(String command) => (Platform.environment['PATH'] ?? '')
+    .split(Platform.isWindows ? ';' : ':')
+    .any((dir) => dir.isNotEmpty && File(p.join(dir, command)).existsSync());
+
 void main() {
   final workspace = p.normalize(p.join(Directory.current.path, '..', '..'));
   final runnerDir = p.join(workspace, 'native', 'raccoon_runner');
@@ -2496,6 +2501,83 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
       _ => false,
     },
     timeout: const Timeout(Duration(minutes: 4)),
+  );
+  // raccoon#16: printing's Linux code compares int with size_t, which
+  // GCC's -Wall flags for C++ and -Werror stops; Flutter builds with clang.
+  test(
+    'on Linux plugins build with clang, as Flutter\'s Linux build does',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_clang');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      write(
+        'plugin_s/pubspec.yaml',
+        'name: plugin_s\nversion: 1.0.0\nflutter:\n  plugin:\n    platforms:\n'
+            '      linux:\n        ffiPlugin: true\n',
+      );
+      write(
+        'plugin_s/linux/CMakeLists.txt',
+        'cmake_minimum_required(VERSION 3.14)\n'
+            'add_library(plugin_s SHARED plugin_s.cc)\n'
+            'apply_standard_settings(plugin_s)\n'
+            'set(plugin_s_bundled_libraries "\$<TARGET_FILE:plugin_s>" '
+            'PARENT_SCOPE)\n',
+      );
+      write(
+        'plugin_s/linux/plugin_s.cc',
+        '#include <cstddef>\n'
+            'int plugin_s_value(int i, std::size_t n) { return i < n; }\n',
+      );
+      write('app/pubspec.yaml', 'name: app\ndependencies:\n  plugin_s:\n');
+      write(
+        'app/.dart_tool/package_config.json',
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+            {'name': 'plugin_s', 'rootUri': '../../plugin_s'},
+          ],
+        }),
+      );
+      final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+        ..createSync(recursive: true);
+      final data = p.join(temp.path, 'data');
+      final result = await Process.run(
+        p.join(runnerDir, 'tool', 'raccoon-device'),
+        ['install', bundle.path, 'app'],
+        environment: {
+          'RACCOON_RUNNER': binary!,
+          if (sdk != null) 'FLUTTER_ROOT': sdk,
+          'XDG_DATA_HOME': data,
+          'RACCOON_PLUGIN_CACHE': p.join(temp.path, 'cache'),
+          'RACCOON_NO_PREBUILT': '1',
+          // Not the caller's: the helper's own pick.
+          'CC': '',
+          'CXX': '',
+        },
+      );
+      expect(result.exitCode, 0, reason: '${result.stderr}');
+      final plugins = p.join(data, 'raccoon', 'apps', 'app', 'plugins');
+      expect(
+        File(p.join(plugins, 'lib', 'libplugin_s.so')).existsSync(),
+        isTrue,
+        reason: '${result.stderr}',
+      );
+    },
+    skip: switch ((
+      binary != null && sdk != null,
+      Platform.isLinux,
+      _onPath('clang++'),
+    )) {
+      (false, _, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false, _) => 'the Linux half of the helper',
+      (_, _, false) => 'no clang++ here, as Flutter\'s Linux build wants',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
   );
   // #352: the release's archive was fetched before any build, alone, even
   // for an app with none of its plugins.

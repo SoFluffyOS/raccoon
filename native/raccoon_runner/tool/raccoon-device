@@ -823,15 +823,24 @@ FAILURE_DAYS = 1
 toolchain_id = None
 
 
+def compilers():
+    """The C and C++ compilers a plugin builds with: $CC and $CXX when
+    set, else clang, as Flutter's own Linux build takes it, else the
+    system's cc and c++. Plugins are written against clang: GCC's -Wall
+    adds -Wsign-compare for C++, which -Werror makes fatal (printing)."""
+    clang = shutil.which('clang') is not None and shutil.which('clang++') is not None
+    return (os.environ.get('CC') or ('clang' if clang else 'cc'),
+            os.environ.get('CXX') or ('clang++' if clang else 'c++'))
+
+
 def toolchain_identity():
     global toolchain_id
     if toolchain_id is None:
         import shlex
         versions = []
-        # The compilers CMake picks ($CC else cc, $CXX else c++, either
-        # perhaps behind ccache), and the JDK a plugin that made nothing
-        # without one (jni) wants.
-        for command in ('cmake', os.environ.get('CC') or 'cc', os.environ.get('CXX') or 'c++'):
+        # The compilers CMake is given (either perhaps behind ccache), and
+        # the JDK a plugin that made nothing without one (jni) wants.
+        for command in ('cmake',) + compilers():
             try:
                 found = subprocess.run(shlex.split(command) + ['--version'],
                                        capture_output=True, text=True).stdout
@@ -925,9 +934,11 @@ def build(plugin):
         f.write('file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/bundled.txt" '
                 'CONTENT "${%s_bundled_libraries}")\n' % name)
     log = os.path.join(project, 'build.log')
+    cc, cxx = compilers()
     with open(log, 'w') as written:
         configured = subprocess.run(['cmake', '-S', project, '-B', os.path.join(project, 'out'), '-G', 'Ninja'],
-                                    stdout=written, stderr=subprocess.STDOUT).returncode == 0
+                                    stdout=written, stderr=subprocess.STDOUT,
+                                    env=dict(os.environ, CC=cc, CXX=cxx)).returncode == 0
         ok = configured and subprocess.run(['cmake', '--build', os.path.join(project, 'out'),
                                             '--parallel', str(JOBS)],
                                            stdout=written, stderr=subprocess.STDOUT).returncode == 0
