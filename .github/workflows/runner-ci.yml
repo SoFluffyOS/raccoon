@@ -18,19 +18,21 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  FLUTTER_VERSION: 3.47.9
   PROTOC_VERSION: "21.12"
 
 jobs:
   build:
-    name: ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.host.name }}, Flutter ${{ matrix.flutter }}
+    runs-on: ${{ matrix.host.os }}
     # Jobs take 6-17 min; GitHub's default would let a hung one run 6 h (#333).
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        include:
+        # The latest patch of the newest minor, and of the one before it,
+        # each with its own engine (#350).
+        flutter: ['3.50.0', '3.47.9']
+        host:
           - name: linux-x64
             os: ubuntu-latest
             desktop: linux
@@ -77,7 +79,7 @@ jobs:
         timeout-minutes: 15
         with:
           channel: stable
-          flutter-version: ${{ env.FLUTTER_VERSION }}
+          flutter-version: ${{ matrix.flutter }}
           cache: true
 
       - name: Cache the engine and protoc
@@ -86,16 +88,16 @@ jobs:
           path: |
             ~/.cache/raccoon
             ~/.local/raccoon/protoc
-          key: raccoon-${{ matrix.name }}-flutter-${{ env.FLUTTER_VERSION }}-protoc-${{ env.PROTOC_VERSION }}
+          key: raccoon-${{ matrix.host.name }}-flutter-${{ matrix.flutter }}-protoc-${{ env.PROTOC_VERSION }}
 
       - name: Precache the desktop artifacts, for the ICU data
-        run: flutter precache --${{ matrix.desktop }}
+        run: flutter precache --${{ matrix.host.desktop }}
 
       # On Windows the Dart side reads these too, so they are written C:/...
       - name: Locate the engine and the ICU data
         run: |
           SDK="$(cd "$(dirname "$(readlink -f "$(command -v flutter)")")/.." && pwd)"
-          ICU="$SDK/bin/cache/artifacts/engine/${{ matrix.sdk-engine }}/icudtl.dat"
+          ICU="$SDK/bin/cache/artifacts/engine/${{ matrix.host.sdk-engine }}/icudtl.dat"
           if command -v cygpath >/dev/null; then ICU="$(cygpath -m "$ICU")"; fi
           # Its own line: a failed download inside the echo would pass the
           # step and fail at Configure, saying something else.
@@ -124,7 +126,7 @@ jobs:
       - name: Build the example bundles
         run: |
           for example in hello spin channels camera text views plugins_app plugins_modal plugins_static no_plugin no_plugin_late; do
-            (cd "example/$example" && flutter build bundle --target-platform=${{ matrix.target }})
+            (cd "example/$example" && flutter build bundle --target-platform=${{ matrix.host.target }})
           done
 
       # A code asset from a build hook (#53, #57); its C exports nothing for
@@ -132,7 +134,7 @@ jobs:
       - name: Build the native assets example
         if: runner.os != 'Windows'
         working-directory: native/raccoon_runner/example/native_assets_app
-        run: flutter build bundle --target-platform=${{ matrix.target }}
+        run: flutter build bundle --target-platform=${{ matrix.host.target }}
 
       # Libraries on Linux, frameworks on macOS: every plugin, or it fails.
       # No native plugins on Windows yet (#36). Minutes (six on macOS x64),
@@ -185,10 +187,10 @@ jobs:
       - name: Run the runtime's tests against the runner
         working-directory: packages/raccoon_runtime
         env:
-          RACCOON_RUNNER: ${{ github.workspace }}/native/raccoon_runner/build/raccoon_runner${{ matrix.exe }}
+          RACCOON_RUNNER: ${{ github.workspace }}/native/raccoon_runner/build/raccoon_runner${{ matrix.host.exe }}
         run: dart test --reporter expanded
 
       - uses: actions/upload-artifact@v6
         with:
-          name: raccoon_runner-${{ matrix.name }}
-          path: native/raccoon_runner/build/raccoon_runner${{ matrix.exe }}
+          name: raccoon_runner-${{ matrix.host.name }}-flutter-${{ matrix.flutter }}
+          path: native/raccoon_runner/build/raccoon_runner${{ matrix.host.exe }}
