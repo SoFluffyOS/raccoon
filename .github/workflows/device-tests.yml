@@ -50,12 +50,14 @@ jobs:
           flutter devices
 
       - name: flutter test integration_test -d raccoon-phone
+        timeout-minutes: 10
         working-directory: native/raccoon_runner/example/hello
         env:
           RACCOON_HEADLESS: '1'
         run: flutter test integration_test -d raccoon-phone
 
       - name: flutter drive -d raccoon-tablet
+        timeout-minutes: 10
         working-directory: native/raccoon_runner/example/hello
         env:
           RACCOON_HEADLESS: '1'
@@ -65,10 +67,19 @@ jobs:
           --target integration_test/app_test.dart
 
       - name: dart test with RaccoonTestDevice
+        timeout-minutes: 10
         working-directory: native/raccoon_runner/example/harness_test
         run: |
           dart pub get
           dart test --reporter expanded
+
+      # What each run's runner said, timestamped, for one that went wrong.
+      - name: The runners' logs
+        if: failure()
+        run: |
+          for log in ~/.local/share/raccoon/data/*/runner.log; do
+            echo "== $log"; tail -n 60 "$log"
+          done
 
       # A golden that does not match leaves what the device showed beside it.
       - uses: actions/upload-artifact@v6
