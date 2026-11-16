@@ -1,12 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
-import 'package:fixnum/fixnum.dart';
-import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:raccoon/raccoon.dart';
+import 'package:raccoon_runtime/src/device_input.dart';
+import 'package:raccoon_runtime/src/frame_capture.dart';
 import 'package:raccoon_runtime/src/frame_image.dart';
 import 'package:raccoon_runtime/src/raccoon_device.dart';
 import 'package:raccoon_runtime/src/runner_client.dart';
@@ -38,14 +37,15 @@ typedef DeviceSize = ({double width, double height, double pixelRatio});
 final class RaccoonTestDevice {
   RaccoonTestDevice._({
     required this.deviceId,
-    required this.size,
+    required DeviceSize size,
     required this.client,
     required this.vmServiceUri,
     required _Logs logs,
     _FlutterRun? run,
     RunnerProcess? runner,
     Directory? temporary,
-  }) : _logs = logs,
+  }) : _size = size,
+       _logs = logs,
        _run = run,
        _runner = runner,
        _temporary = temporary;
@@ -54,8 +54,9 @@ final class RaccoonTestDevice {
   final String deviceId;
 
   /// The app's logical size and pixel ratio. Input is in these logical
-  /// pixels, and frames are this size times the ratio.
-  final DeviceSize size;
+  /// pixels, and frames are this size times the ratio; [resize] changes it.
+  DeviceSize get size => _size;
+  DeviceSize _size;
 
   /// The connection to the runner, for what this class does not wrap:
   /// semantics, settings, the lifecycle, platform channels.
@@ -87,7 +88,6 @@ final class RaccoonTestDevice {
   final _FlutterRun? _run;
   final RunnerProcess? _runner;
   final Directory? _temporary;
-  var _nextPointer = 1;
   var _stopped = false;
 
   /// The built-in sized devices: phone, tablet and desktop.
@@ -311,12 +311,15 @@ final class RaccoonTestDevice {
     Duration timeout = const Duration(seconds: 10),
   }) => logs.firstWhere((line) => line.contains(pattern)).timeout(timeout);
 
+  /// Input in logical pixels: what [tap] and the rest send through.
+  late final RaccoonInput input = RaccoonInput(
+    client,
+    pixelRatio: () => _size.pixelRatio,
+    name: deviceId,
+  );
+
   /// Taps at ([x], [y]) in logical pixels.
-  Future<void> tap(double x, double y) async {
-    final id = _nextPointer++;
-    _touch(PointerPhase.POINTER_PHASE_DOWN, x, y, id);
-    _touch(PointerPhase.POINTER_PHASE_UP, x, y, id);
-  }
+  Future<void> tap(double x, double y) => input.tap(x, y);
 
   /// Presses at ([x], [y]) for [hold], longer than Flutter's long press
   /// takes (500 ms).
@@ -324,12 +327,7 @@ final class RaccoonTestDevice {
     double x,
     double y, {
     Duration hold = const Duration(milliseconds: 650),
-  }) async {
-    final id = _nextPointer++;
-    _touch(PointerPhase.POINTER_PHASE_DOWN, x, y, id);
-    await Future<void>.delayed(hold);
-    _touch(PointerPhase.POINTER_PHASE_UP, x, y, id);
-  }
+  }) => input.longPress(x, y, hold: hold);
 
   /// Drags a finger from ([fromX], [fromY]) to ([toX], [toY]) over
   /// [duration], in [steps] moves, then lifts it: a fling when short and
@@ -341,82 +339,32 @@ final class RaccoonTestDevice {
     double toY, {
     Duration duration = const Duration(milliseconds: 300),
     int steps = 20,
-  }) async {
-    final id = _nextPointer++;
-    _touch(PointerPhase.POINTER_PHASE_DOWN, fromX, fromY, id);
-    for (var i = 1; i <= steps; i++) {
-      await Future<void>.delayed(duration ~/ steps);
-      final t = i / steps;
-      _touch(
-        PointerPhase.POINTER_PHASE_MOVE,
-        fromX + (toX - fromX) * t,
-        fromY + (toY - fromY) * t,
-        id,
-      );
-    }
-    _touch(PointerPhase.POINTER_PHASE_UP, toX, toY, id);
-  }
+  }) => input.drag(fromX, fromY, toX, toY, duration: duration, steps: steps);
 
   /// Turns a mouse wheel over ([x], [y]) by [dx], [dy] logical pixels:
   /// positive [dy] scrolls down the content, as a wheel turned towards the
   /// user does.
-  Future<void> scroll(
-    double x,
-    double y, {
-    double dx = 0,
-    double dy = 0,
-  }) async {
-    final ratio = size.pixelRatio;
-    client.sendPointer(
-      PointerEvent(
-        phase: PointerPhase.POINTER_PHASE_HOVER,
-        x: x * ratio,
-        y: y * ratio,
-        device: PointerDevice.POINTER_DEVICE_MOUSE,
-        pointerId: 0,
-        scrollDeltaX: dx * ratio,
-        scrollDeltaY: dy * ratio,
-      ),
-    );
-  }
+  Future<void> scroll(double x, double y, {double dx = 0, double dy = 0}) =>
+      input.scroll(x, y, dx: dx, dy: dy);
 
   /// Types [text] into the text field that has the focus, in place of its
   /// selection, as a host's input method does. Tap the field first.
   Future<void> typeText(
     String text, {
     Duration focusWait = const Duration(seconds: 5),
-  }) async {
-    final field = await _activeField(focusWait);
-    final length = field.text.length;
-    final base = field.selectionBase.clamp(0, length);
-    final extent = field.selectionExtent.clamp(0, length);
-    final start = base < extent ? base : extent;
-    final end = base < extent ? extent : base;
-    final caret = start + text.length;
-    client.sendTextEditing(
-      TextEditing(
-        text: field.text.replaceRange(start, end, text),
-        selectionBase: caret,
-        selectionExtent: caret,
-        composingBase: -1,
-        composingExtent: -1,
-      ),
-    );
-  }
+  }) => input.typeText(text, focusWait: focusWait);
 
   /// Presses and releases [key], with [modifiers] held around it.
   Future<void> pressKey(
     RaccoonKey key, {
     List<RaccoonKey> modifiers = const [],
-  }) async {
-    for (final modifier in modifiers) {
-      _key(modifier, KeyKind.KEY_KIND_DOWN);
-    }
-    _key(key, KeyKind.KEY_KIND_DOWN);
-    _key(key, KeyKind.KEY_KIND_UP);
-    for (final modifier in modifiers.reversed) {
-      _key(modifier, KeyKind.KEY_KIND_UP);
-    }
+  }) => input.pressKey(key, modifiers: modifiers);
+
+  /// Gives the app a new logical size and pixel ratio, as a host's board
+  /// does, and waits for its first frame at that size.
+  Future<void> resize(DeviceSize size) async {
+    _size = size;
+    await _settleSize(true);
   }
 
   /// The app's frame once it settles: the latest frame after no new one
@@ -425,53 +373,13 @@ final class RaccoonTestDevice {
   Future<RaccoonFrame> frame({
     Duration settle = const Duration(milliseconds: 250),
     Duration timeout = const Duration(seconds: 5),
-  }) async {
-    client.wantPixels(true);
-    Frame? latest = switch (client.latestFrame) {
-      final frame? when !frame.inGpuBuffer => frame,
-      _ => null,
-    };
-    final done = Completer<void>();
-    Timer? quiet;
-    void rest() {
-      quiet?.cancel();
-      quiet = Timer(settle, () {
-        if (latest != null && !done.isCompleted) done.complete();
-      });
-    }
-
-    final subscription = client.messages
-        .where((message) => message.hasFrame())
-        .map((message) => message.frame)
-        .listen((frame) {
-          if (frame.inGpuBuffer) {
-            client.releaseGpuBuffer(frame.gpuGeneration, frame.bufferIndex);
-            return;
-          }
-          latest = frame;
-          rest();
-        }, onError: (Object _) {});
-    rest();
-    final cap = Timer(timeout, () {
-      if (done.isCompleted) return;
-      if (latest != null) {
-        done.complete();
-      } else {
-        done.completeError(
-          TimeoutException('no frame from $deviceId', timeout),
-        );
-      }
-    });
-    try {
-      await done.future;
-      return RaccoonFrame(latest!, size.pixelRatio);
-    } finally {
-      quiet?.cancel();
-      cap.cancel();
-      await subscription.cancel();
-      client.wantPixels(false);
-    }
-  }
+  }) => settledFrame(
+    client,
+    pixelRatio: _size.pixelRatio,
+    settle: settle,
+    timeout: timeout,
+    name: deviceId,
+  );
 
   /// Hot reloads the app: its code changed on disk, its state stays. Only
   /// for an app [launch]ed through the Flutter tool. Returns once the app
@@ -522,47 +430,6 @@ final class RaccoonTestDevice {
     drawn.ignore();
     await run.restart(full: full);
     await drawn;
-  }
-
-  void _touch(PointerPhase phase, double x, double y, int id) {
-    final ratio = size.pixelRatio;
-    client.sendPointer(
-      PointerEvent(
-        phase: phase,
-        x: x * ratio,
-        y: y * ratio,
-        buttons: Int64(phase == PointerPhase.POINTER_PHASE_UP ? 0 : 1),
-        device: PointerDevice.POINTER_DEVICE_TOUCH,
-        pointerId: id,
-      ),
-    );
-  }
-
-  void _key(RaccoonKey key, KeyKind kind) {
-    client.sendKey(
-      KeyEvent(
-        kind: kind,
-        physical: Int64(key.physical),
-        logical: Int64(key.logical),
-        character: kind == KeyKind.KEY_KIND_DOWN ? key.character : '',
-      ),
-    );
-  }
-
-  Future<TextField> _activeField(Duration wait) async {
-    if (client.latestTextField case final field? when field.active) {
-      return field;
-    }
-    return client.textFields
-        .firstWhere((field) => field.active)
-        .timeout(
-          wait,
-          onTimeout:
-              () =>
-                  throw StateError(
-                    'no text field has the focus on $deviceId: tap one first',
-                  ),
-        );
   }
 
   /// Sizes the app as [size] says when [resize], and waits for its first
@@ -673,148 +540,6 @@ final class RaccoonTestDevice {
     }
     return client;
   }
-}
-
-/// One frame of an app on a Raccoon device, with the device's pixel ratio.
-final class RaccoonFrame {
-  RaccoonFrame(this.frame, this.pixelRatio);
-
-  /// The runner's frame: its sequence, size and pixels.
-  final Frame frame;
-
-  /// Physical pixels to a logical one.
-  final double pixelRatio;
-
-  /// The frame's width in physical pixels.
-  int get width => frame.width;
-
-  /// The frame's height in physical pixels.
-  int get height => frame.height;
-
-  /// The frame's logical width.
-  double get logicalWidth => width / pixelRatio;
-
-  /// The frame's logical height.
-  double get logicalHeight => height / pixelRatio;
-
-  /// The frame as an RGBA image, decoded once.
-  late final img.Image image = frameImage(frame);
-
-  /// The frame as PNG bytes.
-  Future<Uint8List> png() => encodePngOf(image);
-
-  /// Writes the frame to [path] as a PNG.
-  Future<File> savePng(String path) async {
-    final file = File(path);
-    await file.parent.create(recursive: true);
-    return file.writeAsBytes(await png());
-  }
-
-  /// The colour at ([x], [y]) in logical pixels, as `0xAARRGGBB`.
-  int colorAt(double x, double y) => physicalColorAt(
-    (x * pixelRatio).floor().clamp(0, width - 1),
-    (y * pixelRatio).floor().clamp(0, height - 1),
-  );
-
-  /// The colour at physical pixel ([x], [y]), as `0xAARRGGBB`.
-  int physicalColorAt(int x, int y) {
-    final pixel = image.getPixel(x, y);
-    return (pixel.a.toInt() << 24) |
-        (pixel.r.toInt() << 16) |
-        (pixel.g.toInt() << 8) |
-        pixel.b.toInt();
-  }
-
-  /// Compares the frame with the PNG at [golden]; see
-  /// [compareToGoldenFile].
-  Future<GoldenResult> compareToGolden(
-    String golden, {
-    int channelTolerance = 0,
-    double maxDifferingRatio = 0,
-    bool? update,
-  }) => compareToGoldenFile(
-    image,
-    golden,
-    channelTolerance: channelTolerance,
-    maxDifferingRatio: maxDifferingRatio,
-    update: update,
-  );
-
-  /// [compareToGolden], throwing [GoldenMismatch] on a mismatch.
-  Future<GoldenResult> expectGolden(
-    String golden, {
-    int channelTolerance = 0,
-    double maxDifferingRatio = 0,
-  }) => expectGoldenFile(
-    image,
-    golden,
-    channelTolerance: channelTolerance,
-    maxDifferingRatio: maxDifferingRatio,
-  );
-}
-
-/// A key as Flutter knows it: its USB HID usage, its logical key id, and
-/// the text it types.
-final class RaccoonKey {
-  const RaccoonKey(this.physical, this.logical, [this.character = '']);
-
-  /// A printable character on a US keyboard, by itself: `a`, `7`, `.`.
-  /// Shifted characters (`A`, `!`) need [shift] held; [RaccoonTestDevice.
-  /// typeText] types any text without keys.
-  factory RaccoonKey.character(String character) {
-    if (character.length != 1) {
-      throw ArgumentError.value(character, 'character', 'one character');
-    }
-    final unit = character.toLowerCase().codeUnitAt(0);
-    final physical = switch (unit) {
-      >= 0x61 && <= 0x7a => 0x00070004 + unit - 0x61,
-      >= 0x31 && <= 0x39 => 0x0007001e + unit - 0x31,
-      0x30 => 0x00070027,
-      _ => _punctuation[character] ?? 0,
-    };
-    if (physical == 0) {
-      throw ArgumentError.value(character, 'character', 'no key types it');
-    }
-    return RaccoonKey(physical, unit, character);
-  }
-
-  final int physical;
-  final int logical;
-  final String character;
-
-  static const enter = RaccoonKey(0x00070028, 0x0010000000d, '\r');
-  static const escape = RaccoonKey(0x00070029, 0x0010000001b);
-  static const backspace = RaccoonKey(0x0007002a, 0x00100000008);
-  static const tab = RaccoonKey(0x0007002b, 0x00100000009, '\t');
-  static const space = RaccoonKey(0x0007002c, 0x00000000020, ' ');
-  static const delete = RaccoonKey(0x0007004c, 0x0010000007f);
-  static const home = RaccoonKey(0x0007004a, 0x00100000306);
-  static const end = RaccoonKey(0x0007004d, 0x00100000305);
-  static const pageUp = RaccoonKey(0x0007004b, 0x00100000308);
-  static const pageDown = RaccoonKey(0x0007004e, 0x00100000307);
-  static const arrowRight = RaccoonKey(0x0007004f, 0x00100000303);
-  static const arrowLeft = RaccoonKey(0x00070050, 0x00100000302);
-  static const arrowDown = RaccoonKey(0x00070051, 0x00100000301);
-  static const arrowUp = RaccoonKey(0x00070052, 0x00100000304);
-  static const shift = RaccoonKey(0x000700e1, 0x00200000102);
-  static const control = RaccoonKey(0x000700e0, 0x00200000100);
-  static const alt = RaccoonKey(0x000700e2, 0x00200000104);
-  static const meta = RaccoonKey(0x000700e3, 0x00200000106);
-
-  static const _punctuation = {
-    '-': 0x0007002d,
-    '=': 0x0007002e,
-    '[': 0x0007002f,
-    ']': 0x00070030,
-    r'\': 0x00070031,
-    ';': 0x00070033,
-    "'": 0x00070034,
-    '`': 0x00070035,
-    ',': 0x00070036,
-    '.': 0x00070037,
-    '/': 0x00070038,
-    ' ': 0x0007002c,
-  };
 }
 
 /// Log lines kept from the start, and streamed.

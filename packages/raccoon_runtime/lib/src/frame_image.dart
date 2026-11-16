@@ -48,8 +48,114 @@ img.Image frameImage(Frame frame) {
 Future<Uint8List> encodePngOf(img.Image image) =>
     Isolate.run(() => img.encodePng(image));
 
+/// [image] scaled by [scale] (0.5 halves each side) as PNG bytes, scaled
+/// and encoded on another isolate; [scale] 1 is [encodePngOf].
+Future<Uint8List> encodeScaledPngOf(img.Image image, double scale) {
+  if (scale == 1) return encodePngOf(image);
+  if (!(scale > 0) || scale > 1) {
+    throw ArgumentError.value(scale, 'scale', 'above 0, at most 1');
+  }
+  final width = (image.width * scale).round().clamp(1, image.width);
+  final height = (image.height * scale).round().clamp(1, image.height);
+  return Isolate.run(
+    () => img.encodePng(
+      img.copyResize(
+        image,
+        width: width,
+        height: height,
+        interpolation: img.Interpolation.average,
+      ),
+    ),
+  );
+}
+
 /// [frame] as PNG bytes; see [frameImage].
 Future<Uint8List> framePng(Frame frame) => encodePngOf(frameImage(frame));
+
+/// One frame of an app on a Raccoon device, with the device's pixel ratio.
+final class RaccoonFrame {
+  /// [image], when given, is the frame's pixels decoded already: for a
+  /// frame whose buffer the client reuses, read before the next frame
+  /// comes.
+  RaccoonFrame(this.frame, this.pixelRatio, [img.Image? image])
+    : _image = image;
+
+  /// The runner's frame: its sequence, size and pixels.
+  final Frame frame;
+
+  /// Physical pixels to a logical one.
+  final double pixelRatio;
+
+  img.Image? _image;
+
+  /// The frame's width in physical pixels.
+  int get width => frame.width;
+
+  /// The frame's height in physical pixels.
+  int get height => frame.height;
+
+  /// The frame's logical width.
+  double get logicalWidth => width / pixelRatio;
+
+  /// The frame's logical height.
+  double get logicalHeight => height / pixelRatio;
+
+  /// The frame as an RGBA image, decoded once.
+  img.Image get image => _image ??= frameImage(frame);
+
+  /// The frame as PNG bytes, each side times [scale] (above 0, at most 1):
+  /// `1 / pixelRatio` gives one image pixel per logical pixel.
+  Future<Uint8List> png({double scale = 1}) => encodeScaledPngOf(image, scale);
+
+  /// Writes the frame to [path] as a PNG.
+  Future<File> savePng(String path) async {
+    final file = File(path);
+    await file.parent.create(recursive: true);
+    return file.writeAsBytes(await png());
+  }
+
+  /// The colour at ([x], [y]) in logical pixels, as `0xAARRGGBB`.
+  int colorAt(double x, double y) => physicalColorAt(
+    (x * pixelRatio).floor().clamp(0, width - 1),
+    (y * pixelRatio).floor().clamp(0, height - 1),
+  );
+
+  /// The colour at physical pixel ([x], [y]), as `0xAARRGGBB`.
+  int physicalColorAt(int x, int y) {
+    final pixel = image.getPixel(x, y);
+    return (pixel.a.toInt() << 24) |
+        (pixel.r.toInt() << 16) |
+        (pixel.g.toInt() << 8) |
+        pixel.b.toInt();
+  }
+
+  /// Compares the frame with the PNG at [golden]; see
+  /// [compareToGoldenFile].
+  Future<GoldenResult> compareToGolden(
+    String golden, {
+    int channelTolerance = 0,
+    double maxDifferingRatio = 0,
+    bool? update,
+  }) => compareToGoldenFile(
+    image,
+    golden,
+    channelTolerance: channelTolerance,
+    maxDifferingRatio: maxDifferingRatio,
+    update: update,
+  );
+
+  /// [compareToGolden], throwing [GoldenMismatch] on a mismatch.
+  Future<GoldenResult> expectGolden(
+    String golden, {
+    int channelTolerance = 0,
+    double maxDifferingRatio = 0,
+  }) => expectGoldenFile(
+    image,
+    golden,
+    channelTolerance: channelTolerance,
+    maxDifferingRatio: maxDifferingRatio,
+  );
+}
 
 /// How an image compared with a golden PNG.
 final class GoldenResult {
