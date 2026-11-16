@@ -314,6 +314,21 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   GeoClue, here as under `flutter run -d linux`. desktop_drop loads since
   #369, but drops and dynamic_color's accent from the theme want the view
   (#365); desktop_multi_window makes windows of its own and doesn't load.
+  Tier 3 (#375, 2026-11-16: the 27 that declare Linux with 30k to 100k
+  downloads a month): these answer, Dart only, built here or through a
+  build hook: flutter_js (since #376), powersync, dart_ping, zstandard,
+  flutter_google_places_sdk, webcrypto, flutter_custom_cursor,
+  flutter_onnxruntime, fvp (as video_player's backend: a video opened),
+  charset_converter, disk_space_2, flutter_libserialport, pty2,
+  serious_python (since #377), mmkv, gamepads and oidc. As on desktop,
+  stream_thumbnail and fc_native_video_thumbnail need FFmpeg's
+  development files, pro_video_editor GStreamer's plugins-base,
+  ffmpeg_kit_flutter_new json-glib's, desktop_webview_auth WebKitGTK
+  4.0's, local_notifier libnotify's, biometric_storage libsecret's, and
+  flutter_vodozemac Rust, which the helper names (#378).
+  fullscreen_window's screen size is garbage under `flutter run -d linux`
+  too, and its fullscreen wants the view (#365). flutter_scene needs
+  Flutter GPU, which needs Impeller; the runner draws with Skia (#379).
 - Loads the project's native plugins on macOS too. A plugin framework links
   against `FlutterMacOS.framework` and uses its channel and codec classes;
   the runner opens the Flutter SDK's copy at run time, before the plugins,
