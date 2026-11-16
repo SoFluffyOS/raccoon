@@ -28,6 +28,8 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -41,6 +43,16 @@ namespace {
 constexpr uint64_t kModifierInvalid = 0x00ffffffffffffffULL;
 // More buffers than a ring will ever have; fences are kept per index.
 constexpr int kMaxBuffers = 16;
+
+// RACCOON_TRACE=1: says when a frame keeps the buffer of a ring that was
+// replaced, and when one shows nothing.
+bool tracing() {
+  static const bool on = [] {
+    const char* value = getenv("RACCOON_TRACE");
+    return value != nullptr && value[0] != '\0' && strcmp(value, "0") != 0;
+  }();
+  return on;
+}
 
 // One set of buffers as the runner described it, with the descriptors.
 struct BufferSet {
@@ -170,6 +182,9 @@ struct _RaccoonGpuTexture {
   // context, which only populate sees.
   std::unique_ptr<BufferSet> pending;
   std::unique_ptr<Imported> imported;
+  // The set imported before, while it holds the buffer bound last and
+  // nothing of |imported| is bound yet: that buffer shows until then.
+  std::unique_ptr<Imported> previous;
   uint32_t shown_generation;
   int shown_index;
   // The socket's reading state.
@@ -395,7 +410,20 @@ static gboolean import_pending(RaccoonGpuTexture* self, GError** error) {
     imported->images.push_back(image);
     imported->textures.push_back(texture);
   }
-  destroy_imported(self);
+  // The set that holds the buffer bound last stays until a buffer of the
+  // new one is bound: that buffer is what shows until then (#123).
+  bool imported_bound;
+  {
+    std::lock_guard<std::mutex> lock(*self->mutex);
+    imported_bound = self->imported && self->bound_index >= 0 &&
+                     self->bound_generation == self->imported->generation;
+  }
+  if (imported_bound) {
+    if (self->previous) destroy_set(*self->previous);
+    self->previous = std::move(self->imported);
+  } else {
+    destroy_imported(self);
+  }
   self->imported = std::move(imported);
   return TRUE;
 }
@@ -414,22 +442,24 @@ static gboolean raccoon_gpu_texture_populate(FlTextureGL* texture,
     return FALSE;
   }
   const Imported& imported = *self->imported;
-  if (imported.textures.empty() || imported.textures[0] == 0) {
-    g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "no GPU buffer imported");
-    return FALSE;
-  }
-  // The frame named is not of this set: the buffer bound last stays, and
-  // with nothing of this set bound, nothing shows: any other buffer of it
-  // may be the one being drawn (#157).
+  // The frame named is not of this set: the buffer bound last stays, of
+  // the set before if nothing of this one is bound yet (#123). With
+  // nothing bound, nothing shows: any other buffer may be the one being
+  // drawn (#157).
+  const Imported* from = &imported;
   int index = -1;
   int fence_fd = -1;
   bool rebound = false;
   uint32_t before_generation = 0;
   int before_index = -1;
+  uint32_t generation = 0;
+  int shown = -1;
+  bool ever_bound = false;
   {
     std::lock_guard<std::mutex> lock(*self->mutex);
-    const uint32_t generation = self->shown_generation;
-    const int shown = self->shown_index;
+    generation = self->shown_generation;
+    shown = self->shown_index;
+    ever_bound = self->bound_index >= 0;
     if (self->bound_generation == imported.generation && self->bound_index >= 0 &&
         static_cast<size_t>(self->bound_index) < imported.textures.size() &&
         imported.textures[self->bound_index] != 0) {
@@ -449,9 +479,28 @@ static gboolean raccoon_gpu_texture_populate(FlTextureGL* texture,
       self->bound_generation = generation;
       self->bound_index = shown;
     }
+    const Imported* previous = self->previous.get();
+    if (index < 0 && previous != nullptr && self->bound_index >= 0 &&
+        self->bound_generation == previous->generation &&
+        static_cast<size_t>(self->bound_index) < previous->textures.size() &&
+        previous->textures[self->bound_index] != 0) {
+      from = previous;
+      index = self->bound_index;
+    }
+  }
+  if (tracing() && from != &imported) {
+    fprintf(stderr, "🦝 raccoon_view: frame %u/%d is of no ring imported; ring %u's buffer %d stays\n",
+            generation, shown, from->generation, index);
   }
   if (index < 0) {
-    g_set_error(error, G_IO_ERROR, G_IO_ERROR_PENDING, "no frame of this ring named yet");
+    if (tracing()) {
+      fprintf(stderr, "🦝 raccoon_view: frame %u/%d shows nothing; ring %u imported, %s\n",
+              generation, shown, imported.generation,
+              ever_bound ? "a buffer shown before" : "none shown yet");
+    }
+    const bool none = imported.textures.empty() || imported.textures[0] == 0;
+    g_set_error(error, G_IO_ERROR, none ? G_IO_ERROR_FAILED : G_IO_ERROR_PENDING,
+                none ? "no GPU buffer imported" : "no frame of this ring named yet");
     return FALSE;
   }
   // The runner's draw may still be running: sample after it.
@@ -463,10 +512,16 @@ static gboolean raccoon_gpu_texture_populate(FlTextureGL* texture,
     std::lock_guard<std::mutex> lock(*self->mutex);
     send_release(self, before_generation, before_index, release_fence);
   }
+  // A buffer of the set imported last is bound: the one before goes. What
+  // drew from it last is in GL's queue already, and keeps it until done.
+  if (from == &imported && self->previous) {
+    destroy_set(*self->previous);
+    self->previous.reset();
+  }
   *target = GL_TEXTURE_2D;
-  *name = imported.textures[index];
-  *width = imported.width;
-  *height = imported.height;
+  *name = from->textures[index];
+  *width = from->width;
+  *height = from->height;
   return TRUE;
 }
 
@@ -488,6 +543,7 @@ static void raccoon_gpu_texture_dispose(GObject* object) {
     self->pending.reset();
   }
   bury(std::move(self->imported));
+  bury(std::move(self->previous));
   delete self->mutex;
   self->mutex = nullptr;
   G_OBJECT_CLASS(raccoon_gpu_texture_parent_class)->dispose(object);
