@@ -233,7 +233,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   (#123). While a dialog's nested GLib loop runs, a
   source of the pump's takes the runner's turns, a dialog opened over it
   too; a stop then quits those loops, which the runner knows because its
-  own `g_main_loop_run`, exported, stands in for GLib's (#337). The registrar hands out no view: the
+  own `g_main_loop_run`, exported, stands in for GLib's (#337). The registrar hands out no view;
+  the view's getters are there for a plugin that names them, answering as
+  for none, so desktop_drop loads (#369). The
   window plugins (`desktop_window`, `window_manager`, `window_size`,
   `screen_retriever` and its `_macos`, `_linux` and `_windows` halves)
   stay the runner's own, above. `example/plugins/echo`

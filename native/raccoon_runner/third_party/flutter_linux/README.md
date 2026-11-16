@@ -9,7 +9,7 @@ engine behind it is the runner's: `raccoon/fl_engine.cc` is an `FlEngine`
 over a bridge of five calls (`raccoon/fl_raccoon_bridge.h`), and
 `flutter/shell/platform/linux/fl_engine_private.h` is ours too, kept to the
 declarations the vendored sources use. `raccoon/fl_view.cc` gives the view
-type a name; there is no view.
+type a name and its getters, which answer as for no view; there is no view.
 
 Everything under `flutter/` except `fl_engine_private.h` and
 `embedder/embedder.h` is verbatim from flutter/flutter at the revision in

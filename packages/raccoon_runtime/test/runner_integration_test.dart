@@ -2816,6 +2816,76 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );
+  // raccoon#369: desktop_drop names fl_view_get_engine and fl_view_get_id,
+  // which it calls only on a view the registrar hands it; the runner's
+  // library lacked both, and the plugin didn't load at all.
+  test(
+    'on Linux a plugin that names the view\'s getters loads',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_view');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final library = p.join(temp.path, 'libview_user_plugin.so');
+      File(p.join(temp.path, 'view_user.cc')).writeAsStringSync(
+        '#include <flutter_linux/flutter_linux.h>\n'
+        'extern "C" __attribute__((visibility("default")))\n'
+        'void view_user_plugin_register_with_registrar(FlPluginRegistrar* r) {\n'
+        '  FlView* view = fl_plugin_registrar_get_view(r);\n'
+        '  if (view == nullptr) return;\n'
+        '  g_message("%p %ld", fl_view_get_engine(view),\n'
+        '            static_cast<long>(fl_view_get_id(view)));\n'
+        '}\n',
+      );
+      final flags = await Process.run('pkg-config', ['--cflags', 'gtk+-3.0']);
+      expect(flags.exitCode, 0, reason: '${flags.stderr}');
+      final built = await Process.run('c++', [
+        '-shared',
+        '-fPIC',
+        ...'${flags.stdout}'.trim().split(RegExp(r'\s+')),
+        '-I${p.join(runnerDir, 'third_party', 'flutter_linux', 'flutter', 'shell', 'platform', 'linux', 'public')}',
+        p.join(temp.path, 'view_user.cc'),
+        '-L${p.dirname(binary!)}',
+        '-lflutter_linux_gtk',
+        '-o',
+        library,
+      ]);
+      expect(built.exitCode, 0, reason: '${built.stderr}');
+      final manifest = File(p.join(temp.path, 'manifest.json'))
+        ..writeAsStringSync(
+          jsonEncode({
+            'plugins': [
+              {
+                'name': 'view_user',
+                'library': library,
+                'symbol': 'view_user_plugin_register_with_registrar',
+              },
+            ],
+            'library_path': temp.path,
+          }),
+        );
+      final render = await Process.run(binary, [
+        'render',
+        '--engine-dir',
+        engineDir!,
+        '--assets',
+        assets,
+        '--icu',
+        icu!,
+        '--plugins',
+        manifest.path,
+        '--out',
+        p.join(temp.path, 'frame.ppm'),
+      ]);
+      expect('${render.stderr}', contains('🦝 plugin view_user loaded'));
+      expect('${render.stderr}', isNot(contains('undefined symbol')));
+    },
+    skip: switch ((ready, Platform.isLinux, _onPath('c++'))) {
+      (false, _, _) => 'build the runner and example/hello first',
+      (_, false, _) => 'the Linux plugin library',
+      (_, _, false) => 'no c++ here to build the plugin',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
   // raccoon#16: flutter_secure_storage_linux without libsecret-1's
   // development files said only "did not build; see <log>".
   test(
