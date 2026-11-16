@@ -36,6 +36,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -99,12 +100,30 @@ void destroy_set(Imported& imported) {
 
 // Sets of disposed textures: their GL objects belong to Flutter's context,
 // current only on the raster thread, so the next populate in that context
-// deletes them. Each holds a ring's buffers until then.
+// deletes them, unless the janitor gets there first. Each holds a ring's
+// buffers until then.
 std::mutex graveyard_mutex;
 std::vector<std::unique_ptr<Imported>> graveyard;
 
 // Plugin instances gone, with their engines and GL contexts. Graveyard mutex.
 std::set<uint64_t> gone_owners;
+
+// A context of the plugin's own in an engine's share group, made current
+// only on a short-lived thread: a disposed texture's sets go there at once.
+// The next populate would delete them too, but none comes once the last
+// pane is gone, and the ring stays imported for good (#374).
+struct Janitor {
+  EGLDisplay display = EGL_NO_DISPLAY;
+  EGLContext context = EGL_NO_CONTEXT;
+  EGLenum api = EGL_OPENGL_ES_API;
+};
+
+// By plugin instance; EGL_NO_CONTEXT where one could not be made, and the
+// graveyard waits for a populate as before. Graveyard mutex.
+std::map<uint64_t, Janitor> janitors;
+
+// One janitor thread at a time: a context is current on one thread only.
+std::mutex sweep_mutex;
 
 // Lets go of |imported|'s EGL images only: its context is gone, and its
 // texture names with it; deleting them in another context would delete
@@ -121,29 +140,125 @@ void release_images(Imported& imported) {
   imported.textures.clear();
 }
 
-void bury(std::unique_ptr<Imported> imported) {
-  if (!imported) return;
-  std::lock_guard<std::mutex> lock(graveyard_mutex);
-  if (gone_owners.count(imported->owner) != 0) {
-    release_images(*imported);
-    return;
-  }
-  graveyard.push_back(std::move(imported));
-}
-
-// |owner|'s engine is gone: its sets leave the graveyard, so a new context
-// at the same address never takes them for its own.
-void forget_owner(uint64_t owner) {
-  std::lock_guard<std::mutex> lock(graveyard_mutex);
-  gone_owners.insert(owner);
+// Takes |owner|'s sets out of the graveyard. Graveyard mutex held.
+std::vector<std::unique_ptr<Imported>> exhume(uint64_t owner) {
+  std::vector<std::unique_ptr<Imported>> sets;
   for (auto it = graveyard.begin(); it != graveyard.end();) {
     if ((*it)->owner == owner) {
-      release_images(**it);
+      sets.push_back(std::move(*it));
       it = graveyard.erase(it);
     } else {
       ++it;
     }
   }
+  return sets;
+}
+
+// Makes a janitor for |owner| the first time, sharing the context current
+// here. Raster thread, Flutter's context current.
+void hire_janitor(uint64_t owner) {
+  {
+    std::lock_guard<std::mutex> lock(graveyard_mutex);
+    if (janitors.count(owner) != 0 || gone_owners.count(owner) != 0) return;
+  }
+  Janitor janitor;
+  janitor.display = eglGetCurrentDisplay();
+  janitor.api = eglQueryAPI();
+  const EGLContext shared = eglGetCurrentContext();
+  EGLint config_id = 0;
+  EGLint version = 2;
+  eglQueryContext(janitor.display, shared, EGL_CONFIG_ID, &config_id);
+  eglQueryContext(janitor.display, shared, EGL_CONTEXT_CLIENT_VERSION, &version);
+  EGLConfig config = nullptr;  // EGL_NO_CONFIG_KHR
+  if (config_id != 0) {
+    const EGLint wanted[] = {EGL_CONFIG_ID, config_id, EGL_NONE};
+    EGLint found = 0;
+    if (!eglChooseConfig(janitor.display, wanted, &config, 1, &found) || found != 1) {
+      config = nullptr;
+    }
+  }
+  const EGLint attributes[] = {EGL_CONTEXT_CLIENT_VERSION, version, EGL_NONE};
+  if (shared != EGL_NO_CONTEXT) {
+    janitor.context = eglCreateContext(janitor.display, config, shared,
+                                       janitor.api == EGL_OPENGL_ES_API ? attributes : nullptr);
+  }
+  std::lock_guard<std::mutex> lock(graveyard_mutex);
+  if (janitors.count(owner) != 0 || gone_owners.count(owner) != 0) {
+    if (janitor.context != EGL_NO_CONTEXT) eglDestroyContext(janitor.display, janitor.context);
+    return;
+  }
+  janitors[owner] = janitor;
+}
+
+// Deletes |owner|'s sets in the graveyard in its janitor, on the thread it
+// returns, and lets the janitor go too if |last|. Sets it can't delete stay
+// for the next populate, or have their images let go if |last|.
+std::thread sweep(uint64_t owner, bool last) {
+  return std::thread([owner, last] {
+    std::lock_guard<std::mutex> sweeping(sweep_mutex);
+    Janitor janitor;
+    std::vector<std::unique_ptr<Imported>> sets;
+    {
+      std::lock_guard<std::mutex> lock(graveyard_mutex);
+      const auto found = janitors.find(owner);
+      if (found == janitors.end()) return;
+      janitor = found->second;
+      if (last) janitors.erase(found);
+      sets = exhume(owner);
+    }
+    const bool current =
+        eglBindAPI(janitor.api) &&
+        eglMakeCurrent(janitor.display, EGL_NO_SURFACE, EGL_NO_SURFACE, janitor.context);
+    if (current) {
+      for (auto& set : sets) destroy_set(*set);
+      glFlush();
+      eglMakeCurrent(janitor.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+      sets.clear();
+    }
+    if (last) {
+      for (auto& set : sets) release_images(*set);
+      eglDestroyContext(janitor.display, janitor.context);
+    } else if (!sets.empty()) {
+      std::lock_guard<std::mutex> lock(graveyard_mutex);
+      for (auto& set : sets) graveyard.push_back(std::move(set));
+    }
+    eglReleaseThread();
+  });
+}
+
+void bury(std::unique_ptr<Imported> imported) {
+  if (!imported) return;
+  const uint64_t owner = imported->owner;
+  {
+    std::lock_guard<std::mutex> lock(graveyard_mutex);
+    if (gone_owners.count(owner) != 0) {
+      release_images(*imported);
+      return;
+    }
+    graveyard.push_back(std::move(imported));
+    const auto found = janitors.find(owner);
+    if (found == janitors.end() || found->second.context == EGL_NO_CONTEXT) return;
+  }
+  sweep(owner, false).detach();
+}
+
+// |owner|'s engine is gone: its sets leave the graveyard, so a new context
+// at the same address never takes them for its own. Its janitor deletes
+// them, the share group still alive through it, and goes; without one their
+// EGL images are let go.
+void forget_owner(uint64_t owner) {
+  {
+    std::lock_guard<std::mutex> lock(graveyard_mutex);
+    gone_owners.insert(owner);
+    const auto found = janitors.find(owner);
+    if (found == janitors.end() || found->second.context == EGL_NO_CONTEXT) {
+      if (found != janitors.end()) janitors.erase(found);
+      for (auto& set : exhume(owner)) release_images(*set);
+      return;
+    }
+  }
+  // Waited for: the engine's display may go with it.
+  sweep(owner, true).join();
 }
 
 // Raster thread, context current: deletes the sets made in it.
@@ -425,6 +540,7 @@ static gboolean import_pending(RaccoonGpuTexture* self, GError** error) {
     destroy_imported(self);
   }
   self->imported = std::move(imported);
+  hire_janitor(self->owner);
   return TRUE;
 }
 

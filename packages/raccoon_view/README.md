@@ -24,7 +24,8 @@ last read where there are fences. A frame of a ring not imported yet leaves
 the buffer shown last in place; on Linux that buffer's ring is kept across
 the import of the next until a buffer of the new one is bound (#123), and
 `RACCOON_TRACE=1` in the host's environment says when it stays and when a
-frame shows nothing. With `spin` on Windows, at 60 Hz, the
+frame shows nothing. A disposed Linux texture's ring is deleted at once, in
+a GL context of the plugin's own that shares Flutter's (#374). With `spin` on Windows, at 60 Hz, the
 runner takes 4–5% of a core and the host app 4–6%, against 22–24% and
 93–95% decoding pixels. Anywhere else, or on a connection without
 GPU buffers, frames are decoded from pixels as before. A host app needs

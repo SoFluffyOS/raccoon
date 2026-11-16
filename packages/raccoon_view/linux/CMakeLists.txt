@@ -24,6 +24,9 @@ target_link_libraries(${PLUGIN_NAME} PRIVATE flutter)
 target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::GTK)
 pkg_check_modules(RACCOON_VIEW_GL REQUIRED IMPORTED_TARGET egl glesv2)
 target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::RACCOON_VIEW_GL)
+# A janitor thread deletes a disposed texture's GL objects.
+find_package(Threads REQUIRED)
+target_link_libraries(${PLUGIN_NAME} PRIVATE Threads::Threads)
 
 set(raccoon_view_bundled_libraries
   ""
