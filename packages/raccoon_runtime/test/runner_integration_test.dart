@@ -3095,6 +3095,94 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
     },
     timeout: const Timeout(Duration(minutes: 4)),
   );
+  // raccoon#373: cargokit compiles super_native_extensions' crate in a cargo
+  // target directory inside the plugin's build, where its proc macros are
+  // libraries too; the build copies out the one it gives.
+  test(
+    'on Linux a plugin keeps no library of a cargo target directory',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_cargo');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      write(
+        'plugin_r/pubspec.yaml',
+        'name: plugin_r\nversion: 1.0.0\n'
+            'flutter:\n  plugin:\n    platforms:\n'
+            '      linux:\n        ffiPlugin: true\n',
+      );
+      write(
+        'plugin_r/linux/CMakeLists.txt',
+        'cmake_minimum_required(VERSION 3.14)\n'
+            'add_library(plugin_r SHARED r.cc)\n'
+            'add_library(derive_m SHARED m.cc)\n'
+            'set_target_properties(derive_m PROPERTIES LIBRARY_OUTPUT_DIRECTORY '
+            '"\${CMAKE_CURRENT_BINARY_DIR}/target/release/deps")\n'
+            'file(WRITE "\${CMAKE_CURRENT_BINARY_DIR}/target/.rustc_info.json" '
+            '"{}")\n',
+      );
+      write('plugin_r/linux/r.cc', 'int plugin_r_value() { return 7; }\n');
+      write('plugin_r/linux/m.cc', 'int derive_m_value() { return 8; }\n');
+      write('app/pubspec.yaml', 'name: app\ndependencies:\n  plugin_r:\n');
+      write(
+        'app/.dart_tool/package_config.json',
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+            {
+              'name': 'plugin_r',
+              'rootUri': '../../plugin_r',
+              'packageUri': 'lib/',
+            },
+          ],
+        }),
+      );
+      final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+        ..createSync(recursive: true);
+      final data = p.join(temp.path, 'data');
+      final cache = p.join(temp.path, 'cache');
+      final result = await Process.run(
+        p.join(runnerDir, 'tool', 'raccoon-device'),
+        ['install', bundle.path, 'app'],
+        environment: {
+          'RACCOON_RUNNER': binary!,
+          if (sdk != null) 'FLUTTER_ROOT': sdk,
+          'XDG_DATA_HOME': data,
+          'RACCOON_PLUGIN_CACHE': cache,
+          'RACCOON_NO_PREBUILT': '1',
+        },
+      );
+      expect(result.exitCode, 0, reason: '${result.stderr}');
+      expect(
+        '${result.stderr}',
+        contains('1 built: plugin_r'),
+        reason: '${result.stderr}',
+      );
+      final entry = Directory(
+        cache,
+      ).listSync().whereType<Directory>().singleWhere(
+        (folder) => p.basename(folder.path).startsWith('plugin_r-'),
+      );
+      expect(entry.listSync().map((file) => p.basename(file.path)), [
+        'libplugin_r.so',
+      ]);
+      expect(
+        Directory(
+          p.join(data, 'raccoon', 'apps', 'app', 'plugins', 'lib'),
+        ).listSync().map((file) => p.basename(file.path)),
+        ['libplugin_r.so'],
+      );
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isLinux)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'the Linux half of the helper',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 4)),
+  );
   // raccoon#16: flutter_secure_storage_linux without libsecret-1's
   // development files said only "did not build; see <log>".
   test(

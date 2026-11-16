@@ -749,11 +749,17 @@ def elf_dynamic(path):
         return None, []
 
 
-def shared_libraries(folder):
+def shared_libraries(folder, cargo=True):
     """The libraries under [folder], links among them, by file name: the
-    first found of a name. Not CMake's own scratch."""
+    first found of a name. Not CMake's own scratch, and without [cargo] not
+    a cargo target directory's (it holds .rustc_info.json): a Rust crate's
+    proc macros and intermediates, which the plugin's build copies its
+    library out of (#373)."""
     found = {}
     for dirpath, dirs, files in os.walk(folder):
+        if not cargo and '.rustc_info.json' in files:
+            dirs[:] = []
+            continue
         dirs[:] = sorted(d for d in dirs if d != 'CMakeFiles')
         for f in sorted(files):
             if LIBRARY.search(f):
@@ -788,7 +794,7 @@ def gather(project):
             if need in everywhere:
                 take(everywhere[need])
 
-    for path in sorted(shared_libraries(os.path.join(tree, 'plugin')).values()) + bundled(project):
+    for path in sorted(shared_libraries(os.path.join(tree, 'plugin'), cargo=False).values()) + bundled(project):
         take(path)
     return libs
 
