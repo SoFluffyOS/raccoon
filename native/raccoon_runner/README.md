@@ -29,6 +29,17 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   its pixel ratio with it: the app keeps its logical size (#117).
   The app sees `RACCOON_ENDPOINT=unix:<socket>`, which `package:raccoon`'s
   `Raccoon().isPresent` reads (#150).
+- Headless (`--headless`, or `RACCOON_HEADLESS=1` through the Flutter tool):
+  no client is expected, for tests and CI. `serve` never needs one: the
+  engine renders at 60 Hz with nobody on the socket, each frame read back
+  and kept, and the VM service answers. Headless says so: what the app asks
+  of the client's plugins before one connects gets "no plugin" at once
+  instead of after a second's wait, and the runner prints how many frames
+  it presented as it stops. A client may still connect and is served as
+  usual, the current frame first. On Linux, spin at a phone's 1170 × 2532
+  presents 587 frames in 10 s on GL through EGL's surfaceless platform,
+  589 in software; a client connecting 3 s in has its first frame in 21 ms.
+  `raccoon_runner --help` says it all.
 - Views mode (`--views`, or `RACCOON_VIEWS=1` through the Flutter tool)
   shows one app in several views, each with its own size and pixel ratio,
   all from one engine, so one hot reload updates them all (#182).
@@ -630,7 +641,7 @@ On macOS the ICU data is under `engine/darwin-x64` and the sockets live in
 `$TMPDIR/raccoon`, which is where `tool/raccoon-device` puts them; on
 Windows under `engine/windows-x64` and in `%TEMP%\raccoon`.
 
-Run `build/raccoon_runner` with no arguments for every option. The size is
+Run `build/raccoon_runner --help` for every option. The size is
 in pixels: `--width 1170 --height 2532 --dpr 3` is a 390 × 844 phone at 3x.
 
 Register the custom device and run any project on it:

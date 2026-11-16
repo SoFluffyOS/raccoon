@@ -220,6 +220,85 @@ void main() {
             : 'build the runner and example first: $binary / $engineDir / $icu',
     timeout: const Timeout(Duration(minutes: 2)),
   );
+  test(
+    'headless, the app renders at 60 Hz with no client, its VM service '
+    'answers, and a client that comes later gets the current frame',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final spinAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'spin',
+        'build',
+        'flutter_assets',
+      );
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: spinAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          headless: true,
+        ),
+      );
+      // Said as it stops, with how many frames it presented.
+      final presented = runner.stderr
+          .map(RegExp(r'(\d+) frames presented in (\d+) ms').firstMatch)
+          .firstWhere((match) => match != null);
+      presented.ignore();
+      RunnerClient? client;
+      try {
+        // The VM service, through its WebSocket, with nobody on the socket.
+        final http = Uri.parse(
+          await runner.vmServiceUri.timeout(const Duration(seconds: 10)),
+        );
+        final ws = await WebSocket.connect(
+          http.replace(scheme: 'ws', path: '${http.path}ws').toString(),
+        );
+        ws.add(jsonEncode({'jsonrpc': '2.0', 'id': '1', 'method': 'getVM'}));
+        final vm =
+            jsonDecode(
+                  await ws.first.timeout(const Duration(seconds: 10)) as String,
+                )
+                as Map<String, Object?>;
+        await ws.close();
+        expect((vm['result'] as Map)['type'], 'VM');
+
+        await Future<void>.delayed(const Duration(seconds: 3));
+        final watch = Stopwatch()..start();
+        client = await RunnerClient.connect(endpoint);
+        final first = await client.frames.first.timeout(
+          const Duration(seconds: 5),
+        );
+        final late = watch.elapsedMilliseconds;
+        expect(first.width, 800);
+        expect(late, lessThan(1000));
+        client.shutdown();
+        await client.close();
+        client = null;
+        await _expectExit(runner);
+        final count = await presented.timeout(const Duration(seconds: 5));
+        final frames = int.parse(count!.group(1)!);
+        final millis = int.parse(count.group(2)!);
+        printOnFailure('$frames frames in $millis ms; late client $late ms');
+        // 60 Hz less the start, with room for a slow machine.
+        expect(frames, greaterThan(millis * 60 ~/ 1000 ~/ 2));
+        expect(frames, lessThanOrEqualTo(millis * 60 ~/ 1000 + 2));
+        expect(runner.lastLines, contains(startsWith('🦝 headless')));
+      } finally {
+        if (client != null) {
+          client.shutdown();
+          await client.close();
+          await _exitCode(runner);
+        }
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   // A whole ratio is worked out in the shell, a fractional one by awk.
   for (final (size, pixels) in [
     ('200x150@2', (400, 300)),

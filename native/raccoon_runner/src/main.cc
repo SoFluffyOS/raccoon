@@ -68,6 +68,8 @@ struct Options {
   int timeout_ms = 10000;
   // render: the frame read as RGBA whatever it says (--rgba).
   bool rgba = false;
+  // serve: no client is expected (--headless, or RACCOON_HEADLESS=1).
+  bool headless = false;
   // A manifest of native plugins to load (see plugins.h), or empty.
   std::string plugins;
   // render: views beside the app's own, each written beside --out as
@@ -111,18 +113,41 @@ raccoon::v1::PixelFormat FormatOf(bool bgra) {
   return bgra ? raccoon::v1::PIXEL_FORMAT_BGRA8888 : raccoon::v1::PIXEL_FORMAT_RGBA8888;
 }
 
-void Usage() {
-  std::fprintf(stderr,
+void Usage(FILE* to) {
+  std::fprintf(to,
                "usage: raccoon_runner render --engine-dir DIR --assets DIR"
                " --icu FILE [--out F] [--frames N] [--timeout-ms N] [--rgba]\n"
                "       raccoon_runner serve --engine-dir DIR --assets DIR"
-               " --icu FILE --socket PATH\n"
-               "       raccoon_runner --version\n"
+               " --icu FILE --socket PATH [--headless]\n"
+               "       raccoon_runner --version | --help\n"
                "       render takes [--view WxH@DPR] for each view beside the first\n"
                "common: [--width N] [--height N] [--dpr X] [--data-dir DIR] [--renderer auto|gl|metal|vulkan|software]"
                " [--views]"
                " [--plugins MANIFEST] [--camera-source PNG|JPEG]"
                " [-- engine switches...]\n");
+}
+
+void Help() {
+  Usage(stdout);
+  std::fprintf(stdout,
+               "\n"
+               "serve runs the app until it is stopped, with or without a client on the\n"
+               "socket. Without one the engine renders at 60 Hz all the same, each frame\n"
+               "read back and kept, the VM service is reachable, and a client that\n"
+               "connects later gets the current frame first.\n"
+               "\n"
+               "--headless   says no client is expected, for tests and CI: what the app\n"
+               "             asks of the client's plugins before one connects is answered\n"
+               "             \"no plugin\" at once rather than after a second's wait, and\n"
+               "             the runner says how many frames it presented as it stops.\n"
+               "             A client may still connect, and is served as usual.\n"
+               "\n"
+               "environment:\n"
+               "  RACCOON_HEADLESS=1   --headless, for a run through the Flutter tool\n"
+               "  RACCOON_RENDERER     --renderer\n"
+               "  RACCOON_VIEWS=1      --views\n"
+               "  RACCOON_PARENT_PID   a process whose end stops the run, as the parent's does\n"
+               "  RACCOON_TRACE=1      prints what the client sends\n");
 }
 
 bool ParseOptions(int argc, char** argv, Options* options) {
@@ -140,6 +165,10 @@ bool ParseOptions(int argc, char** argv, Options* options) {
     }
     if (arg == "--views") {
       options->engine.views = true;
+      continue;
+    }
+    if (arg == "--headless") {
+      options->headless = true;
       continue;
     }
     if (i + 1 >= argc) return false;
@@ -946,7 +975,7 @@ int Serve(const Options& options) {
           Forward(channel, data, size, handle);
           return;
         }
-        if (had_client || handle == nullptr) {
+        if (had_client || handle == nullptr || options.headless) {
           host.RespondNoPlugin(channel, handle, "no client");
           return;
         }
@@ -1463,6 +1492,9 @@ int Serve(const Options& options) {
   std::fprintf(stdout, "🦝 listening on unix:%s\n",
                options.socket.c_str());
   std::fflush(stdout);
+  if (options.headless) {
+    std::fprintf(stderr, "🦝 headless: no client expected; frames go on at 60 Hz\n");
+  }
 
   // Sends |client| what is new for its view: the VM service, its GPU
   // buffers, and the latest frame.
@@ -1707,8 +1739,14 @@ int Serve(const Options& options) {
     client->server->Send(exited);
     client->server->Drain(500);
   }
+  // Read before the engine goes: its frames go with it.
+  const size_t presented = host.frame().FrameCount();
   host.Shutdown();
   capture.Stop();
+  if (options.headless) {
+    std::fprintf(stderr, "🦝 %zu frames presented in %ld ms\n", presented,
+                 MillisBetween(kLaunched, std::chrono::steady_clock::now()));
+  }
   std::fprintf(stderr, "🦝 stopped\n");
   return 0;
 }
@@ -1740,10 +1778,21 @@ int main(int argc, char** argv) {
     std::printf("%s\n", RACCOON_RUNNER_VERSION);
     return 0;
   }
+  for (int i = 1; i < argc; ++i) {
+    if (std::strcmp(argv[i], "--") == 0) break;
+    if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
+      Help();
+      return 0;
+    }
+  }
   Options options;
   if (!ParseOptions(argc, argv, &options)) {
-    Usage();
+    Usage(stderr);
     return 2;
+  }
+  if (const char* env = std::getenv("RACCOON_HEADLESS");
+      env != nullptr && std::strcmp(env, "1") == 0) {
+    options.headless = true;
   }
   if (options.command == "render") return Render(options);
   return Serve(options);

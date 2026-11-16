@@ -23,6 +23,7 @@ final class RunnerLaunch {
     this.plugins,
     this.cameraSource,
     this.views = false,
+    this.headless = false,
   });
 
   /// The runner executable.
@@ -66,6 +67,12 @@ final class RunnerLaunch {
   /// on [UnixSocketEndpoint.views] (#182).
   final bool views;
 
+  /// Headless: no client is expected (`--headless`). The app renders and
+  /// its VM service answers all the same; what it asks of the client's
+  /// plugins before one connects is answered "no plugin" at once. A
+  /// client may still connect.
+  final bool headless;
+
   /// The runner's command line after [runnerBinary]: `serve` and its
   /// options.
   List<String> get arguments => [
@@ -82,6 +89,7 @@ final class RunnerLaunch {
     if (plugins case final manifest?) ...['--plugins', manifest],
     if (cameraSource case final source?) ...['--camera-source', source],
     if (views) '--views',
+    if (headless) '--headless',
     '--width',
     '$width',
     '--height',
