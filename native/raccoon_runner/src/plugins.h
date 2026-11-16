@@ -48,7 +48,10 @@ struct PluginEntry {
 // as far as a library, the runner's own on the ones it loaded or not.
 struct PluginStatus {
   std::string name;
-  std::string state;   // loaded, failed, built_nothing, no_host, built_in, skipped
+  // loaded, failed, built_nothing, no_host, built_in, skipped, or
+  // wants_view: one that acts on the view's window, left out (#386), told to
+  // a client as no_host.
+  std::string state;
   std::string detail;
 };
 

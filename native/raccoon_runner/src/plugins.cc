@@ -99,6 +99,12 @@ bool PluginHost::LoadManifest(const std::string& path, std::string* error) {
     if (status.state == "failed") {
       std::fprintf(stderr, "🦝 plugin %s not built\n     %s\n", status.name.c_str(),
                    ShortReason(status.detail).c_str());
+    } else if (status.state == "wants_view") {
+      // Left out by the helper: it acts on the view's window, which the
+      // registrar has not got, and loaded it killed the runner (#386).
+      // Its calls go unanswered, as a plugin's with no implementation.
+      std::fprintf(stderr, "🦝 plugin %s not loaded: it wants the view (#365); the app sees no plugin\n",
+                   status.name.c_str());
     }
     statuses_.push_back(std::move(status));
   }

@@ -834,6 +834,7 @@ int Serve(const Options& options) {
           : status.state == "failed"        ? raccoon::v1::PLUGIN_STATE_FAILED
           : status.state == "built_nothing" ? raccoon::v1::PLUGIN_STATE_BUILT_NOTHING
           : status.state == "no_host"       ? raccoon::v1::PLUGIN_STATE_NO_HOST
+          : status.state == "wants_view"    ? raccoon::v1::PLUGIN_STATE_NO_HOST
           : status.state == "built_in"      ? raccoon::v1::PLUGIN_STATE_BUILT_IN
           : status.state == "skipped"       ? raccoon::v1::PLUGIN_STATE_SKIPPED
                                             : raccoon::v1::PLUGIN_STATE_UNSPECIFIED);

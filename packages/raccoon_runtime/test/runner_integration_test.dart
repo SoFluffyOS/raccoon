@@ -4681,6 +4681,45 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
     timeout: const Timeout(Duration(minutes: 2)),
   );
   test(
+    'on Linux a plugin that wants the view\'s window is not built or loaded',
+    () async {
+      // raccoon#386: bitsdojo_window_linux, flutter_window_close and
+      // yaru_window_linux take their window from the registrar's view and
+      // killed the runner on their first call. Left out, their calls get a
+      // missing plugin's answer; a build would fail here.
+      final temp = Directory.systemTemp.createTempSync('raccoon_view');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final manifest = await installFake(
+        temp,
+        {
+          'bitsdojo_window_linux/pubspec.yaml':
+              'name: bitsdojo_window_linux\nversion: 0.1.4\n'
+              'flutter:\n  plugin:\n    platforms:\n      linux:\n'
+              '        pluginClass: BitsdojoWindowPlugin\n',
+          'bitsdojo_window_linux/linux/CMakeLists.txt':
+              'message(FATAL_ERROR "built though it wants the view")\n',
+        },
+        ['bitsdojo_window_linux'],
+      );
+      expect(manifest['plugins'], isEmpty);
+      expect(manifest['status'], [
+        {
+          'name': 'bitsdojo_window_linux',
+          'state': 'wants_view',
+          'detail':
+              'no implementation on Raccoon: it wants the view\'s GTK '
+              'window, and there is no view yet (#365)',
+        },
+      ]);
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isLinux)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'the Linux half of the helper',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+  test(
     'on macOS a plugin with a top-level platforms: list is built',
     () async {
       final temp = Directory.systemTemp.createTempSync('raccoon_platforms');
@@ -10050,6 +10089,11 @@ void main() => runApp(
                 'state': 'skipped',
                 'detail': 'not built: native plugins are cached only',
               },
+              {
+                'name': 'yaru_window_linux',
+                'state': 'wants_view',
+                'detail': 'no implementation on Raccoon: it wants the view',
+              },
             ],
           }),
         );
@@ -10091,6 +10135,25 @@ void main() => runApp(
           byName['geolocator_apple']?.state,
           PluginState.PLUGIN_STATE_SKIPPED,
         );
+        // One that wants the view (#386) is, to a client, one with no
+        // implementation here; the runner's line names it and the view.
+        expect(
+          byName['yaru_window_linux']?.state,
+          PluginState.PLUGIN_STATE_NO_HOST,
+        );
+        expect(
+          byName['yaru_window_linux']?.detail,
+          'no implementation on Raccoon: it wants the view',
+        );
+        const wantsView =
+            '🦝 plugin yaru_window_linux not loaded: it wants the view '
+            '(#365); the app sees no plugin';
+        final said = DateTime.now().add(const Duration(seconds: 5));
+        while (!logs.any((l) => l.contains(wantsView)) &&
+            DateTime.now().isBefore(said)) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        expect(logs, contains(contains(wantsView)));
         expect(client.latestPlugins, plugins);
         if (Platform.isMacOS) {
           // FlutterMacOS shares classes with the engine library; the

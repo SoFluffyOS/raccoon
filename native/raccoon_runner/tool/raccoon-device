@@ -526,6 +526,13 @@ VIRTUAL_PLUGINS_MACOS="$VIRTUAL_PLUGINS shared_preferences_foundation"
 # On Linux camera is the runner's too: it has no desktop implementation, and
 # the runner answers its method channel one from a test pattern (#96).
 VIRTUAL_PLUGINS_LINUX="$VIRTUAL_PLUGINS camera"
+# On Linux these take their window from fl_plugin_registrar_get_view() and
+# act on it, and the runner's registrar has no view: loaded, each killed the
+# runner on its first window call (#386). They aren't loaded, so their calls
+# get what a plugin with no Linux implementation gets. The view (#365) makes
+# them work instead. Not the ones that log GTK criticals and go on
+# (flutter_acrylic, handy_window): those apps run.
+VIEW_PLUGINS_LINUX="flutter_window_close bitsdojo_window_linux yaru_window_linux"
 
 # The plugin-facing library and its headers: beside the runner in an archive,
 # in build/ and third_party/ in a checkout.
@@ -616,7 +623,7 @@ build_plugins_linux() {
   python3 - "$config" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS_LINUX" \
     "$cache" "$version" "$UNAME_M" \
     "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-linux-$UNAME_M.tar.gz}" \
-    "$ROOT/tool/plugins/pubspec.lock" "$project" "$source_path" <<'PY'
+    "$ROOT/tool/plugins/pubspec.lock" "$project" "$source_path" "$VIEW_PLUGINS_LINUX" <<'PY'
 # What only a build or a fetch needs is imported there: tarfile, tempfile
 # and concurrent.futures cost a cached install ~6 ms (#315).
 import hashlib, importlib, json, os, re, sys, time
@@ -672,6 +679,9 @@ config, out, lib, headers, virtual, cache, runner_version, arch, prebuilt_url, p
 # What an install that may only take the cache says of the rest (#214).
 SKIPPED = 'not built: native plugins are cached only (RACCOON_PLUGINS=cached)'
 virtual = set(virtual.split())
+# The ones that want the view's window, which the runner has not got (#386).
+wants_view = set(sys.argv[13].split())
+VIEW = "no implementation on Raccoon: it wants the view's GTK window, and there is no view yet (#365)"
 dart_tool = os.path.dirname(os.path.abspath(config))
 
 PREAMBLE = """cmake_minimum_required(VERSION 3.14)
@@ -1344,6 +1354,9 @@ for name, root, pubspec in packages:
     if name in virtual:
         status.append({'name': name, 'state': 'built_in', 'detail': 'the runner answers it'})
         continue
+    if name in wants_view:
+        status.append({'name': name, 'state': 'wants_view', 'detail': VIEW})
+        continue
     # Only what flutter: plugin: says: pub.dev's top-level platforms: list
     # names hosts too, with nothing under them (#92).
     plugin = pubspec[found.end():]
@@ -1949,6 +1962,9 @@ if failed:
     parts.append('%d failed: %s' % (len(failed), '; '.join(failed)))
 if skipped:
     parts.append('%d not built (RACCOON_PLUGINS=cached): %s' % (len(skipped), ', '.join(skipped)))
+view = [s['name'] for s in status if s['state'] == 'wants_view']
+if view:
+    parts.append('%d left out, wanting the view (#365): %s' % (len(view), ', '.join(view)))
 if not parts:
     parts.append('none to build')
 print('🦝 native plugins ready in %.1f s: ' % (time.time() - started) + '; '.join(parts), file=sys.stderr)

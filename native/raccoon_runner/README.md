@@ -292,7 +292,11 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   no Linux implementation (Firebase, permission_handler, webview_flutter,
   video_player, ...) is reported as such and its calls fail within a
   second, as under `flutter run -d linux`; an app that awaits one before
-  `runApp` stops with the exception and the plugin named.
+  `runApp` stops with the exception and the plugin named. One that acts
+  on the view's GTK window (flutter_window_close, bitsdojo_window,
+  yaru_window, listed in `tool/raccoon-device`) killed the runner on its
+  first call: it isn't loaded, its calls fail the same way, bitsdojo's
+  FFI lookup with an `ArgumentError`, until the view (#365, #386).
   Of 13 plugins that bundle or open a library of their own (#363,
   2026-11-16), these answer, built here: sqlite3_flutter_libs,
   isar_community_flutter_libs, objectbox_flutter_libs,
