@@ -3865,6 +3865,85 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );
+  // raccoon#385: webview_win_floating asks for WebKitGTK with
+  // pkg_search_module, any one of three; none found said only "did not
+  // build; see <log>".
+  test(
+    'on Linux a plugin whose pkg_search_module finds none says which',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_dev_search');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      write(
+        'plugin_s/pubspec.yaml',
+        'name: plugin_s\nversion: 1.0.0\nflutter:\n  plugin:\n    platforms:\n'
+            '      linux:\n        ffiPlugin: true\n',
+      );
+      write(
+        'plugin_s/linux/CMakeLists.txt',
+        'cmake_minimum_required(VERSION 3.14)\n'
+            'pkg_search_module(NOPE REQUIRED raccoon-missing-4.1 '
+            'raccoon-missing-4.2)\n',
+      );
+      write('app/pubspec.yaml', 'name: app\ndependencies:\n  plugin_s:\n');
+      write(
+        'app/.dart_tool/package_config.json',
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+            {'name': 'plugin_s', 'rootUri': '../../plugin_s'},
+          ],
+        }),
+      );
+      final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+        ..createSync(recursive: true);
+      final data = p.join(temp.path, 'data');
+      final result = await Process.run(
+        p.join(runnerDir, 'tool', 'raccoon-device'),
+        ['install', bundle.path, 'app'],
+        environment: {
+          'RACCOON_RUNNER': binary!,
+          if (sdk != null) 'FLUTTER_ROOT': sdk,
+          'XDG_DATA_HOME': data,
+          'RACCOON_PLUGIN_CACHE': p.join(temp.path, 'cache'),
+          'RACCOON_NO_PREBUILT': '1',
+        },
+      );
+      expect(result.exitCode, 0, reason: '${result.stderr}');
+      final manifest =
+          jsonDecode(
+                File(
+                  p.join(
+                    data,
+                    'raccoon',
+                    'apps',
+                    'app',
+                    'plugins',
+                    'manifest.json',
+                  ),
+                ).readAsStringSync(),
+              )
+              as Map;
+      final detail = (manifest['status'] as List).cast<Map>().single['detail'];
+      expect(
+        detail,
+        startsWith(
+          'did not build: needs the development files of raccoon-missing-4.1 '
+          '(or raccoon-missing-4.2); see ',
+        ),
+      );
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isLinux)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'the Linux half of the helper',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
   // #352: the release's archive was fetched before any build, alone, even
   // for an app with none of its plugins.
   test(

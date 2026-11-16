@@ -1552,15 +1552,21 @@ def needs_rust(log):
 
 def missing_packages(log):
     """What a CMake configure that stopped in [log] did not find, as
-    pkg-config (Package 'libsecret-1' not found) or a CMake find module
-    (Could NOT find CURL) names it: the -dev package to install."""
+    pkg-config (Package 'libsecret-1' not found), pkg_search_module (None of
+    the required 'webkit2gtk-4.1;webkit2gtk-4.2' found, any one will do) or
+    a CMake find module (Could NOT find CURL) names it: the -dev package to
+    install."""
     try:
         text = open(log, errors='replace').read()
     except OSError:
         return []
     found = []
-    for match in re.finditer(r"Package '([^']+)'[^\n]*? not found|Could NOT find (\w+)", text):
+    for match in re.finditer(r"Package '([^']+)'[^\n]*? not found|Could NOT find (\w+)"
+                             r"|None of the required '([^']+)' found", text):
         name = match.group(1) or match.group(2)
+        if match.group(3):
+            first, *others = [m.strip() for m in match.group(3).split(';') if m.strip()] or ['?']
+            name = first + (' (or %s)' % ', '.join(others) if others else '')
         if name not in found:
             found.append(name)
     return found
