@@ -5,6 +5,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -266,14 +268,19 @@ void main() {
         expect((vm['result'] as Map)['type'], 'VM');
 
         await Future<void>.delayed(const Duration(seconds: 3));
+        final held = await _HeldWatch.start();
         final watch = Stopwatch()..start();
         client = await RunnerClient.connect(endpoint);
         final first = await client.frames.first.timeout(
-          const Duration(seconds: 5),
+          const Duration(seconds: 10),
         );
         final late = watch.elapsedMilliseconds;
+        final heldMillis = await held.stop();
+        printOnFailure(
+          'late client $late ms, this process held up for $heldMillis ms '
+          'of it; the runner said:\n  ${runner.lastLines.join('\n  ')}',
+        );
         expect(first.width, 800);
-        expect(late, lessThan(1000));
         client.shutdown();
         await client.close();
         client = null;
@@ -289,14 +296,21 @@ void main() {
                 .firstOrNull;
         final drawing = millis - (firstFrame ?? 0);
         printOnFailure(
-          '$frames frames in $millis ms, the first at $firstFrame ms; '
-          'late client $late ms',
+          '$frames frames in $millis ms, the first at $firstFrame ms',
         );
         // Frames go on with nobody there: at 60 Hz on a desktop, at a
         // tenth of it at the least on a slow CI machine (macOS x64 drew
         // 87 in 3.8 s), and never faster than the vsync.
         expect(frames, greaterThan(drawing * 6 ~/ 1000));
         expect(frames, lessThanOrEqualTo(millis * 60 ~/ 1000 + 2));
+        // The late client's frame is the one the runner already has, sent
+        // in the loop's next turn: it comes within a second's worth of the
+        // machine's own frames, 60 of them, 1 s at 60 Hz, about 3 s on the
+        // macOS x64 CI machine at 20 fps. Plus however long the machine
+        // held this process up meanwhile: that CI machine stalls now and
+        // then, and its late client once waited 2048 ms (#382).
+        final interval = max(drawing / frames, 1000 / 60);
+        expect(late, lessThan(heldMillis + 60 * interval));
         expect(runner.lastLines, contains(startsWith('🦝 headless')));
       } finally {
         if (client != null) {
@@ -11211,6 +11225,56 @@ Future<int?> _exitCode(RunnerProcess runner) async {
     }
     runner.kill();
     return null;
+  }
+}
+
+/// How long this process went without running, at the longest, while a
+/// test waits: an isolate of its own ticks every few milliseconds, so the
+/// test's own work doesn't count, only a machine that held the whole
+/// process up.
+class _HeldWatch {
+  _HeldWatch._(this._isolate, this._replies, this._stop);
+
+  static const _tick = Duration(milliseconds: 2);
+
+  final Isolate _isolate;
+  final StreamIterator<Object?> _replies;
+  final SendPort _stop;
+
+  static Future<_HeldWatch> start() async {
+    final port = ReceivePort();
+    final replies = StreamIterator<Object?>(port);
+    final isolate = await Isolate.spawn(_watch, port.sendPort);
+    await replies.moveNext();
+    return _HeldWatch._(isolate, replies, replies.current! as SendPort);
+  }
+
+  /// The longest time the watch went without a tick, past its own tick.
+  Future<int> stop() async {
+    _stop.send(null);
+    await _replies.moveNext();
+    final longest = _replies.current! as int;
+    await _replies.cancel();
+    _isolate.kill();
+    return max(0, longest - _tick.inMilliseconds);
+  }
+
+  static void _watch(SendPort out) {
+    final control = ReceivePort();
+    out.send(control.sendPort);
+    final clock = Stopwatch()..start();
+    var last = 0;
+    var longest = 0;
+    final ticks = Timer.periodic(_tick, (_) {
+      final now = clock.elapsedMilliseconds;
+      longest = max(longest, now - last);
+      last = now;
+    });
+    control.first.then((_) {
+      ticks.cancel();
+      out.send(max(longest, clock.elapsedMilliseconds - last));
+      control.close();
+    });
   }
 }
 
