@@ -544,6 +544,31 @@ that does not match. Plain `v*` tags are the `raccoon` package's. Run by
 hand, the workflow builds and keeps the archives as artifacts without
 publishing them.
 
+Without a checkout, the device is registered with `raccoon_runtime`
+from the repository (2.5 s, a fresh pub cache):
+
+```sh
+flutter config --enable-custom-devices
+dart pub global activate --source git https://github.com/SoFluffyOS/raccoon.git --git-path packages/raccoon_runtime
+dart pub global run raccoon_runtime:raccoon_device setup --helper "$PWD/raccoon_runner/tool/raccoon-device"
+flutter run -d raccoon
+```
+
+First run, measured (2026-11-16, Flutter 3.50.0, Linux x64 on a Ryzen 9
+7945HX, nothing of Raccoon on the machine, median of 3, over IPv4). The
+runner archive is 554 KB, 0.3 s; the engine 15.3 MB, 2.5-2.8 s, 0.19 s of
+it the unzip; the Linux plugin archive 164 KB, 0.2 s. Registering the
+device takes 0.2-0.7 s. From `flutter run -d raccoon` to the first frame,
+since #367 and #368: `example/hello` 3.4 s, an app with
+flutter_libserialport to build 4.4 s, one with url_launcher,
+shared_preferences, path_provider, sqlite3_flutter_libs and file_selector
+from the plugin archive 5.1 s. The engine downloads during the tool's
+kernel compile, and the install takes 0.1-1.0 s; the rest is the tool's:
+kernel 1.9-3.2 s, bundle 0.8-1.0 s, 0.4 s to launch. The 0.3.0-pre.31
+release takes 6.2, 7.2 and 39 s for the same three; there sqlite3_flutter_libs
+builds, 26 s. A slow resolver adds its stall to each GitHub download:
+12 s for the archive, whose download redirects to a second host.
+
 ## Try it
 
 ```sh
