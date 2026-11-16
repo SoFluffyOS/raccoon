@@ -63,6 +63,8 @@ struct EngineOptions {
   // embedder's GL ES path, as Flutter's Linux desktop draws by default.
   // Off, Skia. The software renderer is always Skia: Impeller has none.
   bool impeller = false;
+  // With --impeller-use-sdfs, as Flutter's Linux embedder runs Impeller.
+  bool impeller_sdfs = false;
   // Flutter GPU (--enable-flutter-gpu) for apps built on it, flutter_scene
   // among them; implies Impeller.
   bool flutter_gpu = false;

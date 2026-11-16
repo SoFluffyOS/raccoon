@@ -146,7 +146,8 @@ void Help() {
                "  RACCOON_HEADLESS=1   --headless, for a run through the Flutter tool\n"
                "  RACCOON_RENDERER     --renderer\n"
                "  RACCOON_VIEWS=1      --views\n"
-               "  RACCOON_IMPELLER=1   rasterizes with Impeller on the GL renderer\n"
+               "  RACCOON_IMPELLER=1   rasterizes with Impeller on the GL renderer; sdf adds\n"
+               "                       its distance-field shapes, as Flutter's Linux embedder\n"
                "  RACCOON_FLUTTER_GPU=1  Flutter GPU (flutter_scene), Impeller with it\n"
                "  RACCOON_PARENT_PID   a process whose end stops the run, as the parent's does\n"
                "  RACCOON_TRACE=1      prints what the client sends\n");
@@ -458,8 +459,9 @@ raccoon::EngineOptions EngineOptionsFromEnvironment(raccoon::EngineOptions engin
   }
   // The Flutter tool hands a custom device neither --enable-impeller nor
   // --enable-flutter-gpu: these ask for them through it (#379).
-  if (const char* env = std::getenv("RACCOON_IMPELLER"); env != nullptr && std::strcmp(env, "1") == 0) {
-    engine.impeller = true;
+  if (const char* env = std::getenv("RACCOON_IMPELLER"); env != nullptr) {
+    if (std::strcmp(env, "1") == 0) engine.impeller = true;
+    if (std::strcmp(env, "sdf") == 0) engine.impeller = engine.impeller_sdfs = true;
   }
   if (const char* env = std::getenv("RACCOON_FLUTTER_GPU");
       env != nullptr && std::strcmp(env, "1") == 0) {

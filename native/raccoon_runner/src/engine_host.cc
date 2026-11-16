@@ -125,9 +125,11 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
                  renderer_.c_str());
   }
   command_line_ = {"raccoon_runner", impeller ? "--enable-impeller" : "--enable-impeller=false"};
-  // With the signed-distance-field shapes Flutter's Linux embedder turns on
-  // with Impeller, so frames match what the desktop target draws.
-  if (impeller) command_line_.push_back("--impeller-use-sdfs");
+  // Flutter's Linux embedder turns on Impeller's signed-distance-field
+  // shapes too; here only when asked (RACCOON_IMPELLER=sdf): on 3.50 they
+  // draw a linear gradient under a later rectangle in its end colour,
+  // radeonsi and llvmpipe alike.
+  if (impeller && options.impeller_sdfs) command_line_.push_back("--impeller-use-sdfs");
   if (impeller && options.flutter_gpu) command_line_.push_back("--enable-flutter-gpu");
   impeller_ = impeller;
   for (const std::string& arg : options.extra_args) command_line_.push_back(arg);
