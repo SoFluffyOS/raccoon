@@ -608,6 +608,46 @@ void main() {
       }
     });
 
+    testWidgets('a reveal pans a frame out of view into it, and no more', (
+      tester,
+    ) async {
+      await pumpBoard(tester, ['a', 'b']);
+      layout.move('b', const Offset(6000, 3000));
+      await tester.pump();
+      const screen = Rect.fromLTWH(0, 0, 2400, 1600);
+      bool inView(String name) {
+        final shown = tester.getRect(find.byKey(RaccoonBoard.titleKey(name)));
+        return screen.contains(shown.topLeft) &&
+            screen.contains(shown.bottomRight);
+      }
+
+      expect(inView('b'), isFalse);
+      final before = tester.getRect(find.byKey(RaccoonBoard.titleKey('a')));
+      layout.reveal('a');
+      await tester.pump();
+      await tester.pump();
+      expect(
+        tester.getRect(find.byKey(RaccoonBoard.titleKey('a'))),
+        before,
+        reason: 'in view already',
+      );
+      layout.reveal('b');
+      await tester.pump();
+      await tester.pump();
+      expect(inView('b'), isTrue);
+      expect(layout.pendingReveal, isNull);
+    });
+
+    testWidgets('a reveal of a session not on the board waits for it', (
+      tester,
+    ) async {
+      await pumpBoard(tester, ['a']);
+      layout.reveal('later');
+      await tester.pump();
+      await tester.pump();
+      expect(layout.pendingReveal, 'later');
+    });
+
     testWidgets('scrolling pans the board', (tester) async {
       await pumpBoard(tester, ['counter']);
       final before = tester.getTopLeft(find.byType(RaccoonView));

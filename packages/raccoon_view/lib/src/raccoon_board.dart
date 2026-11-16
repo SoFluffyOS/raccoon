@@ -229,6 +229,23 @@ class RaccoonBoardLayout extends ChangeNotifier {
     );
   }
 
+  String? _reveal;
+
+  /// Asks the board to bring [name]'s frame into view, as when something
+  /// other than the person's pointer acts on it: an agent tapping an app
+  /// the board had panned away from. Kept until a board showing [name]
+  /// takes it.
+  void reveal(String name) {
+    _reveal = name;
+    notifyListeners();
+  }
+
+  /// The frame [reveal] asked for, until a board takes it.
+  String? get pendingReveal => _reveal;
+
+  /// Takes [pendingReveal]: the board showing it is bringing it into view.
+  void takeReveal() => _reveal = null;
+
   /// Takes a saved layout's frames in place of the current ones.
   void replaceAll(Iterable<RaccoonBoardFrame> frames) {
     _frames.clear();
@@ -469,6 +486,8 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
     super.initState();
     HardwareKeyboard.instance.addHandler(_onKey);
     widget.layout.addListener(_changed);
+    // A board made for a new session, with a reveal asked for before it.
+    _revealAfterLayout();
   }
 
   @override
@@ -493,7 +512,59 @@ class _RaccoonBoardState extends State<RaccoonBoard> {
   }
 
   void _changed() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+    if (widget.layout.pendingReveal != null) _revealAfterLayout();
+  }
+
+  void _revealAfterLayout() =>
+      WidgetsBinding.instance.addPostFrameCallback((_) => _reveal());
+
+  /// Brings the frame [RaccoonBoardLayout.reveal] asked for into view: by
+  /// the least pan that shows it whole, zoomed out first if it does not fit.
+  /// One this board does not show yet waits for it.
+  void _reveal() {
+    final name = widget.layout.pendingReveal;
+    if (!mounted || name == null || _viewport.isEmpty) return;
+    if (!_sessions.any((session) => session.name == name)) return;
+    widget.layout.takeReveal();
+    final bounds = _frameBounds(widget.layout.frameFor(name));
+    // Less than the gap frames are placed at: a board as laid out shows
+    // its first frame whole.
+    const margin = 12.0;
+    final room = Size(
+      math.max(1, _viewport.width - 2 * margin),
+      math.max(1, _viewport.height - 2 * margin),
+    );
+    if (bounds.width * _zoom > room.width ||
+        bounds.height * _zoom > room.height) {
+      final zoom = math
+          .min(room.width / bounds.width, room.height / bounds.height)
+          .clamp(minZoom, maxZoom);
+      setState(() {
+        _zoom = zoom;
+        _pan = _viewport.center(Offset.zero) - bounds.center * zoom;
+      });
+      return;
+    }
+    final shown = Rect.fromLTWH(
+      bounds.left * _zoom + _pan.dx,
+      bounds.top * _zoom + _pan.dy,
+      bounds.width * _zoom,
+      bounds.height * _zoom,
+    );
+    double shift(double start, double end, double size) {
+      if (start < margin) return margin - start;
+      if (end > size - margin) return size - margin - end;
+      return 0;
+    }
+
+    final by = Offset(
+      shift(shown.left, shown.right, _viewport.width),
+      shift(shown.top, shown.bottom, _viewport.height),
+    );
+    if (by == Offset.zero) return;
+    setState(() => _pan += by);
   }
 
   bool _onKey(KeyEvent event) {
