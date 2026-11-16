@@ -201,6 +201,22 @@ dependency (`path: packages/raccoon_runtime`). Give each test step a
 `libEGL.so.1`) leaves `flutter test` and `flutter drive` waiting for good.
 `RaccoonTestDevice.launch` fails at once instead.
 
+### For coding agents: raccoon_mcp
+
+[raccoon_mcp](../raccoon_mcp/README.md) gives an agent these devices as MCP
+tools: `run` a project on `raccoon-phone` and `raccoon-tablet`,
+`screenshot`, `tap`, `type_text`, `resize`, `logs` with the runner's own
+lines, `hot_reload`, and the rest. With the Raccoon Simulator open it acts
+through the simulator's board, where you watch it; with none, it runs the
+apps itself through `RaccoonTestDevice`, as here. The same input and frame
+code serves both: `RaccoonInput`, `settledFrame` and the control endpoint,
+`RaccoonControl` over a host's `RaccoonControlHost`.
+
+```sh
+dart pub global activate --source git https://github.com/SoFluffyOS/raccoon.git --git-path packages/raccoon_mcp
+claude mcp add raccoon -- raccoon_mcp                           # or your agent's own
+```
+
 ### For coding agents: marionette_mcp
 
 [marionette_mcp](https://pub.dev/packages/marionette_mcp) lets an agent
