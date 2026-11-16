@@ -940,19 +940,26 @@ final class _FlutterRun {
   }
 
   /// Keeps [line]; one saying the engine could not start fails the
-  /// launch, which the tool would wait on for good.
+  /// launch, which the tool would wait on for good: it waits for the VM
+  /// service of a runner that is gone.
   void _log(String line) {
     _logs.add(line);
-    if (!_started.isCompleted &&
-        line.contains('Could not launch engine with configuration')) {
+    if (!_started.isCompleted && _fatal.any(line.contains)) {
       _started.completeError(
         StateError(
-          'the engine did not start:\n'
+          'the app did not start:\n'
           '${_logs.lines.reversed.take(10).toList().reversed.join('\n')}',
         ),
       );
     }
   }
+
+  /// What the engine and the device helper say when the app cannot start.
+  static const _fatal = [
+    'Could not launch engine with configuration',
+    '🦝 raccoon_runner exited with code',
+    '🦝 raccoon_runner died of signal',
+  ];
 
   /// The VM service's HTTP URI from the tool's WebSocket one:
   /// `ws://127.0.0.1:1234/abc=/ws` is `http://127.0.0.1:1234/abc=/`.
