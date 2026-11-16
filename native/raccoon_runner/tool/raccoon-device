@@ -1387,6 +1387,51 @@ def cmake_text(plugin):
     return '\n'.join(text)
 
 
+# What a plugin's CMake reads from the environment is in its key (#381):
+# serious_python_linux's install copies the folders SERIOUS_PYTHON_APP
+# and SERIOUS_PYTHON_SITE_PACKAGES name into its bundle, which made one
+# app's Python every app's. Each variable its linux/ CMake names, set or
+# not, and its value; for a value that names a file or folder, the shape
+# of what is there too (names, sizes, times), so an edit to the app's
+# Python makes an entry of its own, as one to a path package does. Not
+# a folder that holds home, the app or the cache ($HOME, /): that is
+# where everything lives, no input of the plugin's. A plugin that reads
+# no variable keeps its key.
+ENVIRONMENT = re.compile(r'\bENV\{([A-Za-z_][A-Za-z0-9_]*)\}')
+
+
+def environment_key(plugin):
+    names = sorted(set(ENVIRONMENT.findall(cmake_text(plugin))))
+    if not names:
+        return None
+    places = [os.path.realpath(p) for p in (os.path.expanduser('~'), project_dir, cache)]
+    digest = hashlib.sha256()
+    for name in names:
+        value = os.environ.get(name)
+        digest.update(('%s%s\n' % (name, '' if value is None else '=' + value)).encode('utf-8', 'surrogateescape'))
+        if not value or not os.path.isabs(value) or not os.path.exists(value):
+            continue
+        real = os.path.realpath(value)
+        if any(place == real or place.startswith(real.rstrip(os.sep) + os.sep) for place in places):
+            continue
+        found = [real] if os.path.isfile(real) else []
+        for dirpath, dirs, files in os.walk(real):
+            dirs.sort()
+            found.extend(os.path.join(dirpath, f) for f in sorted(files))
+        for full in found:
+            try:
+                st = os.lstat(full)
+            except OSError:
+                continue
+            digest.update(('%s %d %d\n' % (os.path.relpath(full, real), st.st_size, int(st.st_mtime))).encode('utf-8', 'surrogateescape'))
+    return digest.hexdigest()[:16]
+
+
+for plugin in wanted:
+    if (environment := environment_key(plugin)) is not None:
+        plugin['key'] = '%s-env-%s-%s-%s' % (plugin['version'], environment, lib_stamp, arch)
+
+
 # The plugins each one links by their targets: those it depends on, through
 # pub's graph, whose names its CMake files hold, as livekit_client's
 # flutter_webrtc_plugin. Each builds in a project of its own, so they are

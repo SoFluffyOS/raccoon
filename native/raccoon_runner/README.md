@@ -241,7 +241,10 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   and builds with clang as Flutter's Linux build does (`$CC` and `$CXX`
   when set; without clang, the system's compiler);
   what built is cached by plugin version and runner version (not by
-  engine: a plugin builds against the runner's own library), each entry
+  engine: a plugin builds against the runner's own library), and by
+  whatever its CMake reads from the environment, so each app's
+  `SERIOUS_PYTHON_APP` gets serious_python an entry of its own (#381),
+  each entry
   stamped with a digest of the helper's build code, so one an older
   helper built is built again once that code changes (#380), and a
   release's archive of the common plugins (`tool/plugins`, built by CI)
