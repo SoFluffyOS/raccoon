@@ -152,6 +152,53 @@ final class RaccoonTestDevice {
     }
   }
 
+  /// Several devices at once, the same project on each, each through its
+  /// own `flutter run`, back in [devices]' order. The first builds the app
+  /// alone, the rest then start together on its build: tools building
+  /// into one project's `build/` at once overwrite each other's bundle.
+  /// One that fails stops the others.
+  static Future<List<RaccoonTestDevice>> launchAll(
+    String projectDir, {
+    List<String> devices = presets,
+    String? target,
+    bool gpuBuffers = false,
+    bool headless = true,
+    String flutter = 'flutter',
+    List<String> flutterArgs = const [],
+    Map<String, String> environment = const {},
+    Duration timeout = const Duration(minutes: 5),
+  }) async {
+    Future<RaccoonTestDevice> one(String device) => launch(
+      projectDir,
+      device: device,
+      target: target,
+      gpuBuffers: gpuBuffers,
+      headless: headless,
+      flutter: flutter,
+      flutterArgs: flutterArgs,
+      environment: environment,
+      timeout: timeout,
+    );
+    if (devices.isEmpty) return [];
+    final first = await one(devices.first);
+    final launches = [
+      Future.value(first),
+      for (final device in devices.skip(1)) one(device),
+    ];
+    final settled = await Future.wait([
+      for (final launch in launches)
+        launch.then<Object>((device) => device, onError: (Object e) => e),
+    ]);
+    final failure = settled.whereType<Object>().where(
+      (value) => value is! RaccoonTestDevice,
+    );
+    if (failure.isEmpty) return settled.cast<RaccoonTestDevice>();
+    await Future.wait(
+      settled.whereType<RaccoonTestDevice>().map((d) => d.stop()),
+    );
+    throw failure.first;
+  }
+
   /// Starts the runner itself on a bundle built already
   /// (`flutter build bundle`, its `build/flutter_assets`), at [device]'s
   /// size or [size], and attaches to it: no Flutter tool, so no hot

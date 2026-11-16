@@ -1,0 +1,3 @@
+# Both files run example/hello on raccoon-phone: one at a time, or the
+# second run would take the first's socket.
+concurrency: 1
