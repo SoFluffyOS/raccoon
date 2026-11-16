@@ -65,6 +65,20 @@ final class RaccoonTestDevice {
   /// DevTools, `package:vm_service` and an agent's MCP server attach to.
   final String vmServiceUri;
 
+  /// [vmServiceUri] as a WebSocket, `ws://127.0.0.1:<port>/<token>/ws`:
+  /// what `package:vm_service`'s `vmServiceConnectUri` and marionette_mcp's
+  /// `connect` take.
+  String get vmServiceWebSocketUri {
+    final uri = Uri.parse(vmServiceUri);
+    final path = uri.path.endsWith('/') ? uri.path : '${uri.path}/';
+    return uri
+        .replace(
+          scheme: uri.scheme == 'https' ? 'wss' : 'ws',
+          path: '${path}ws',
+        )
+        .toString();
+  }
+
   /// From the call to launch to the first frame at the device's size.
   Duration get startup => _startup;
   var _startup = Duration.zero;

@@ -51,6 +51,10 @@ void main() {
           '(gpu buffers: $gpuBuffers), VM service ${phone.vmServiceUri}',
         );
         expect(phone.vmServiceUri, startsWith('http://'));
+        expect(
+          phone.vmServiceWebSocketUri,
+          allOf(startsWith('ws://'), endsWith('/ws')),
+        );
 
         var frame = await phone.frame();
         expect((frame.width, frame.height), (1170, 2532));
