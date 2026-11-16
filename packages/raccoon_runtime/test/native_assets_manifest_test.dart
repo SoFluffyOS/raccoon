@@ -12,6 +12,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 const _fakeFlutter = r'''#!/bin/bash
+[ -z "${ASSEMBLED:-}" ] || : > "$ASSEMBLED"
 for arg; do case "$arg" in --output=*) out="${arg#--output=}" ;; esac; done
 case "$(uname -s)" in
   Darwin)
@@ -93,8 +94,9 @@ void main() {
   tearDown(() => temp.deleteSync(recursive: true));
 
   Future<(String, Map<String, List<Object?>>)> install(
-    Map<String, List<String>> assets,
-  ) async {
+    Map<String, List<String>> assets, {
+    Map<String, String> extra = const {},
+  }) async {
     final result = await Process.run(
       helper,
       ['install', p.join(project, 'build', 'flutter_assets'), 'fixture_app'],
@@ -107,6 +109,7 @@ void main() {
           'format-version': [1, 0, 0],
           'native-assets': {target: assets},
         }),
+        ...extra,
       },
     );
     expect(result.exitCode, 0, reason: '${result.stderr}');
@@ -199,6 +202,74 @@ void main() {
       });
     },
   );
+
+  group('on Linux', () {
+    // The tool built the run's bundle for the device's platform, with its
+    // hooks' code assets under native_assets/linux (#367).
+    void bundled(String platform) {
+      final bundle = p.join(project, 'build', 'flutter_assets');
+      File(p.join(bundle, 'native_assets', 'linux', 'libfixture.so'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('bundled');
+      File(p.join(bundle, 'NativeAssetsManifest.json')).writeAsStringSync(
+        jsonEncode({
+          'format-version': [1, 0, 0],
+          'native-assets': {
+            platform: {
+              'package:fixture_hook/fixture.dart': [
+                'absolute',
+                'libfixture.so',
+              ],
+            },
+          },
+        }),
+      );
+    }
+
+    test(
+      'the code assets come from the run\'s bundle, with no build',
+      () async {
+        bundled(target);
+        final assembled = p.join(temp.path, 'assembled');
+
+        final (said, assets) = await install(
+          const {},
+          extra: {'ASSEMBLED': assembled},
+        );
+
+        expect(said, contains("1 for this host, from the run's bundle"));
+        expect(assets['package:fixture_hook/fixture.dart'], [
+          'absolute',
+          installedLibrary(),
+        ]);
+        expect(File(installedLibrary()).readAsStringSync(), 'bundled');
+        expect(File(assembled).existsSync(), isFalse);
+      },
+    );
+
+    test('a bundle built for another platform builds them', () async {
+      bundled(switch (target) {
+        'linux_x64' => 'linux_arm64',
+        _ => 'linux_x64',
+      });
+      final assembled = p.join(temp.path, 'assembled');
+
+      final (said, assets) = await install(
+        {
+          'package:fixture_hook/fixture.dart': ['absolute', inBundle],
+        },
+        extra: {'ASSEMBLED': assembled},
+      );
+
+      expect(File(assembled).existsSync(), isTrue);
+      expect(said, isNot(contains("from the run's bundle")));
+      expect(assets['package:fixture_hook/fixture.dart'], [
+        'absolute',
+        installedLibrary(),
+      ]);
+      expect(File(installedLibrary()).readAsStringSync(), 'library\n');
+    });
+  }, testOn: 'linux');
 
   test('a code asset the build left out is reported', () async {
     final (said, assets) = await install({

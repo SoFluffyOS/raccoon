@@ -1351,8 +1351,9 @@ void main() {
     'a code asset from a build hook loads, on macOS and on Linux',
     () async {
       // native_add's hook compiles add() in C. The tool builds the bundle
-      // for the Linux device it thinks Raccoon is, without running hooks for
-      // this host; the helper runs them and installs the library (#53, #57).
+      // for the Linux device it thinks Raccoon is: on macOS the helper runs
+      // the hooks for this host and installs the library (#53); on Linux the
+      // bundle has it already, built for this very host (#57, #367).
       final temp = Directory.systemTemp.createTempSync('raccoon_native');
       final helper = p.join(runnerDir, 'tool', 'raccoon-device');
       final data = p.join(temp.path, 'data');
@@ -1385,6 +1386,9 @@ void main() {
       }
       expect(install.exitCode, 0, reason: '${install.stderr}');
       expect('${install.stderr}', contains('1 for this host'));
+      if (Platform.isLinux) {
+        expect('${install.stderr}', contains("from the run's bundle"));
+      }
       // The Linux target's engine copy goes again.
       expect(
         Directory(p.join(nativeAssetsApp, 'linux')).existsSync(),
@@ -1713,6 +1717,8 @@ void main() {
       (_, true) => 'native assets come from the Flutter tool on Windows',
       _ when !Directory(nativeAssetsBundle).existsSync() =>
         'build example/native_assets_app first',
+      // No build of their own there: the run's bundle has them (#367).
+      _ when Platform.isLinux => 'Linux takes native assets from the bundle',
       _ => false,
     },
     timeout: const Timeout(Duration(minutes: 3)),

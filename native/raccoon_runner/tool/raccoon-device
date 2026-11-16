@@ -2809,15 +2809,17 @@ def located_asset(path, root):
 
 # Code assets of packages with build hooks (native assets: objective_c
 # under path_provider_foundation, sqlite3 3.x), built for this host. The
-# tool builds the bundle for the Linux device it believes Raccoon to be (#1)
-# without running the hooks for this machine, so its NativeAssetsManifest.json
-# names none. The tool's own bundle target for this host runs them: on macOS
-# the macOS one, without the app's macos/ directory; on Linux the Linux one,
-# which unpacks the GTK engine into linux/flutter/ephemeral, a folder that
-# goes again when the project had no linux/ of its own (#57, #136). The code assets
-# land beside the app's bundle, and the installed manifest names them by
-# absolute path under this host's key, so the engine opens them as an app's
-# would. Skipped without hook packages.
+# tool builds the bundle for the Linux device it believes Raccoon to be (#1):
+# on Linux that is this host, so the bundle has them already, and they are
+# taken from it (#367). On macOS its NativeAssetsManifest.json names none
+# for this machine, and the tool's own bundle target for this host runs the
+# hooks: the macOS one, without the app's macos/ directory. A Linux bundle
+# built for another platform runs the Linux one, which unpacks the GTK
+# engine into linux/flutter/ephemeral, a folder that goes again when the
+# project had no linux/ of its own (#57, #136). The code assets land beside
+# the app's bundle, and the installed manifest names them by absolute path
+# under this host's key, so the engine opens them as an app's would.
+# Skipped without hook packages.
 build_native_assets() {
   local project="$1" app="$2" config out log manifest built
   local -a target
@@ -2959,6 +2961,19 @@ PY
   # The hash, then the hook packages, by name.
   local hooked="${inputs#* }"
   inputs="${inputs%% *}"
+  local status=0 started unchanged="" stamp="$out/raccoon_inputs" saved=""
+  # On Linux the tool built the run's bundle for this host: setup gives the
+  # device the host's platform, so the hooks ran for it then, and their code
+  # assets came with the bundle (native_assets/linux, which its manifest
+  # names). Taken from there: a flutter assemble of its own compiled the
+  # app's kernel again and unpacked the GTK engine, seconds of a first run
+  # (#367). A bundle built for another platform builds as before.
+  if [ "$UNAME_S" = Linux ]; then
+    started="$(perl -MTime::HiRes=time -e 'printf "%.6f", time')"
+    install_native_assets "$app/flutter_assets/NativeAssetsManifest.json" \
+      "$app/flutter_assets/native_assets/linux" "$app" "$started" bundle \
+      "${platform/-/_}" && return 0
+  fi
   lock_build "$project"
   if [ ! -f "$project/lib/main.dart" ]; then
     echo "🦝 native assets skipped: no lib/main.dart to build them with" >&2
@@ -2966,7 +2981,6 @@ PY
   fi
   log="$app/native_assets.log"
   mkdir -p "$out"
-  local status=0 started unchanged="" stamp="$out/raccoon_inputs" saved=""
   [ ! -f "$stamp" ] || read_word saved "$stamp"
   # perl, as the run log's timestamps: a Python start only to read the
   # clock cost ~25 ms (#336).
@@ -2995,9 +3009,22 @@ PY
     fi
     [ -n "$inputs" ] && echo "$inputs" > "$stamp"
   fi
+  install_native_assets "$manifest" "$built" "$app" "$started" "${unchanged:+unchanged}"
+}
+
+# The code assets a build put in |built|, installed beside |app|'s bundle,
+# and the manifest that names them (|manifest|) rewritten into the bundle
+# by absolute path, as the engine opens them. |how| says where they came
+# from in the log line: unchanged, bundle, or a build. With a platform key
+# last, the manifest must name nothing else, or this returns 5 and leaves
+# everything as it was.
+install_native_assets() {
   { echo "$NATIVE_ASSET_PY"; cat <<'PY'
 import json, os, shutil, sys, time
-manifest_path, built, app, started, unchanged = sys.argv[1:6]
+manifest_path, built, app, started, how = sys.argv[1:6]
+# The manifest's platform key it must name nothing but, when it comes from
+# the run's bundle: 5, and nothing touched, when it doesn't.
+host = sys.argv[6] if len(sys.argv) > 6 else None
 
 def clone(source, target):
     # A copy-on-write clone where the file system has one, so an install
@@ -3028,7 +3055,17 @@ def clone(source, target):
     else:
         shutil.copy2(source, target)
 
-manifest = json.load(open(manifest_path))
+try:
+    manifest = json.load(open(manifest_path))
+    found = manifest.get('native-assets', {})
+    if not isinstance(found, dict):
+        raise ValueError(manifest_path)
+except (OSError, ValueError, AttributeError):
+    if host:
+        sys.exit(5)
+    raise
+if host and any(key != host for key in found):
+    sys.exit(5)
 installed = os.path.join(app, 'native_assets')
 shutil.rmtree(installed, ignore_errors=True)
 if os.path.isdir(built):
@@ -3046,9 +3083,12 @@ for assets in manifest.get('native-assets', {}).values():
         count += 1
 json.dump(manifest, open(os.path.join(app, 'flutter_assets', 'NativeAssetsManifest.json'), 'w'))
 print('🦝 native assets ready in %.1f s, %d for this host%s' % (
-    time.time() - float(started), count, ', unchanged since the last build' if unchanged else ''), file=sys.stderr)
+    time.time() - float(started), count, {
+        'unchanged': ', unchanged since the last build',
+        'bundle': ", from the run's bundle",
+    }.get(how, '')), file=sys.stderr)
 PY
-} | python3 - "$manifest" "$built" "$app" "$started" "$unchanged"
+} | python3 - "$@"
 }
 
 # The hook packages a cached-only install built no native assets for
