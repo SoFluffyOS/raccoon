@@ -474,11 +474,13 @@ final class RaccoonTestDevice {
   }
 
   /// Hot reloads the app: its code changed on disk, its state stays. Only
-  /// for an app [launch]ed through the Flutter tool.
+  /// for an app [launch]ed through the Flutter tool. Returns once the app
+  /// has drawn after it.
   Future<void> hotReload() => _restart(full: false);
 
   /// Hot restarts the app: its code reloads and its state starts again.
-  /// Only for an app [launch]ed through the Flutter tool.
+  /// Only for an app [launch]ed through the Flutter tool. Returns once the
+  /// app has drawn after it.
   Future<void> hotRestart() => _restart(full: true);
 
   /// Stops the app and its runner, and with them the Flutter tool's run.
@@ -511,7 +513,15 @@ final class RaccoonTestDevice {
         '${full ? 'restart' : 'reload'}: use launch',
       );
     }
+    // The app draws once it has reloaded or restarted, as the tool answers
+    // or after: until that frame, [frame] would show the app as before.
+    final drawn = client.messages
+        .where((message) => message.hasFrame())
+        .first
+        .timeout(const Duration(seconds: 10), onTimeout: () => RunnerMessage());
+    drawn.ignore();
     await run.restart(full: full);
+    await drawn;
   }
 
   void _touch(PointerPhase phase, double x, double y, int id) {
