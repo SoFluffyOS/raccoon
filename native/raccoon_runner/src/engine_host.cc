@@ -174,6 +174,35 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   procs.NotifyDisplayUpdate(engine_, kFlutterEngineDisplaysUpdateTypeStartup,
                             &display, 1);
   Resize(0, options.width, options.height, options.pixel_ratio);
+#if RACCOON_HAS_GL
+  // The first frame's readback target and the memory its pixels are kept
+  // in, made on the raster thread while the app starts rather than as that
+  // frame is drawn and read back, where they held it up (#387). In views
+  // mode, the app's own view's. A first frame of another size makes its own
+  // then, as before.
+  {
+    const std::shared_ptr<View> own = views_mode_ ? ViewOf(0) : nullptr;
+    GlRenderer* gl = own ? own->gl : gl_;
+    SoftwareFrame* frame = own ? &own->frame : &frame_;
+    const size_t width = metrics_.width;
+    const size_t height = metrics_.height;
+    if (gl != nullptr) {
+      auto* task = new std::function<void()>([own, gl, frame, width, height] {
+        gl->PrepareReadback(width, height);
+        frame->Reserve(width * height * 4);
+      });
+      const bool posted = procs.PostRenderThreadTask(
+                              engine_,
+                              [](void* data) {
+                                auto* run = static_cast<std::function<void()>*>(data);
+                                (*run)();
+                                delete run;
+                              },
+                              task) == kSuccess;
+      if (!posted) delete task;
+    }
+  }
+#endif
   SendHostSettings();
   // The app is shown, as far as the runner knows: desktop embeddings say
   // so once the engine runs, and without it the app's lifecycle stays null.

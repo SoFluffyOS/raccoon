@@ -790,6 +790,21 @@ uint32_t GlRenderer::Fbo(size_t width, size_t height) {
   return fbo;
 }
 
+void GlRenderer::PrepareReadback(size_t width, size_t height) {
+  if (width == 0 || height == 0) return;
+  // Not MakeCurrent: that starts a frame.
+  const bool current = eglGetCurrentContext() == context_;
+  if (!current &&
+      eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, context_) != EGL_TRUE) {
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    EnsureSize(width, height);
+  }
+  if (!current) ClearCurrent();
+}
+
 bool GlRenderer::Present(const FrameCallback& callback) {
   int index = -1;
   uint32_t generation = 0;

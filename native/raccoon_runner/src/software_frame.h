@@ -96,6 +96,11 @@ class SoftwareFrame {
   void Present(const void* allocation, size_t row_bytes, size_t height,
                bool bgra = kSoftwareFrameIsBgra);
 
+  // Memory for a first frame of |bytes|, its pages touched already, so that
+  // frame's copy does not pay for them. The first frame takes it, or lets
+  // it go when it goes into a shared or a GPU buffer instead.
+  void Reserve(size_t bytes);
+
   // Copies the latest frame into |out| when its sequence is newer than
   // |after_sequence|. Returns false otherwise, and while a frame that fits
   // the shared buffers waits for one to come back (PromoteInline).
@@ -126,6 +131,8 @@ class SoftwareFrame {
   mutable std::mutex mutex_;
   std::function<void()> presented_;
   std::vector<uint8_t> pixels_;
+  // What Reserve made, until the first frame.
+  std::vector<uint8_t> reserved_;
   bool pixels_bgra_ = kSoftwareFrameIsBgra;
   size_t width_ = 0;
   size_t height_ = 0;

@@ -18,8 +18,18 @@ constexpr auto kInlineHold = std::chrono::milliseconds(100);
 
 }  // namespace
 
+void SoftwareFrame::Reserve(size_t bytes) {
+  // Made outside the lock: touching twelve megabytes of new pages takes
+  // milliseconds.
+  std::vector<uint8_t> reserved(bytes);
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (frame_count_ == 0) reserved_ = std::move(reserved);
+}
+
 void SoftwareFrame::Present(const void* allocation, size_t row_bytes,
                             size_t height, bool bgra) {
+  // What Reserve made and this frame did not take, freed after the lock.
+  std::vector<uint8_t> unused;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     row_bytes_ = row_bytes;
@@ -51,6 +61,7 @@ void SoftwareFrame::Present(const void* allocation, size_t row_bytes,
         pool_->Release(pending_shared_.index);
         pending_shared_ = Shared{};
       }
+      if (pixels_.empty()) pixels_.swap(reserved_);
       pixels_.resize(bytes);
       std::memcpy(pixels_.data(), allocation, bytes);
       pixels_bgra_ = bgra;
@@ -58,6 +69,7 @@ void SoftwareFrame::Present(const void* allocation, size_t row_bytes,
       inline_waits_ = pool_ != nullptr && bytes <= pool_->size();
       inline_at_ = std::chrono::steady_clock::now();
     }
+    unused.swap(reserved_);
   }
   if (presented_) presented_();
 }
@@ -171,8 +183,10 @@ SoftwareFrame::~SoftwareFrame() {
 
 void SoftwareFrame::PresentGpu(uint32_t generation, int index, size_t width,
                                size_t height, int fence_fd) {
+  std::vector<uint8_t> unused;
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    unused.swap(reserved_);
     width_ = width;
     height_ = height;
     row_bytes_ = width * 4;

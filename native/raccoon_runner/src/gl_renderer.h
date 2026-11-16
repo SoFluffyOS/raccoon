@@ -64,6 +64,10 @@ class GlRenderer : public GpuRenderer {
   // counts its own; in views mode, where the root renderer makes no Fbo,
   // the host counts one per frame for it (#229).
   void CountFrame();
+  // Makes the readback target for frames of |width| x |height| before the
+  // first asks for it, on the raster thread between frames: the context is
+  // left as it was found, current or not.
+  void PrepareReadback(size_t width, size_t height);
   // Hands the drawn frame on: to |gpu| when it is in a pool buffer, else read
   // back through |callback|; an empty |callback| drops a frame that would
   // be read back. Context current.
