@@ -281,9 +281,21 @@ void main() {
         final count = await presented.timeout(const Duration(seconds: 5));
         final frames = int.parse(count!.group(1)!);
         final millis = int.parse(count.group(2)!);
-        printOnFailure('$frames frames in $millis ms; late client $late ms');
-        // 60 Hz less the start, with room for a slow machine.
-        expect(frames, greaterThan(millis * 60 ~/ 1000 ~/ 2));
+        final firstFrame =
+            runner.lastLines
+                .map(RegExp(r'first frame (\d+) ms after launch').firstMatch)
+                .nonNulls
+                .map((match) => int.parse(match.group(1)!))
+                .firstOrNull;
+        final drawing = millis - (firstFrame ?? 0);
+        printOnFailure(
+          '$frames frames in $millis ms, the first at $firstFrame ms; '
+          'late client $late ms',
+        );
+        // Frames go on with nobody there: at 60 Hz on a desktop, at a
+        // tenth of it at the least on a slow CI machine (macOS x64 drew
+        // 87 in 3.8 s), and never faster than the vsync.
+        expect(frames, greaterThan(drawing * 6 ~/ 1000));
         expect(frames, lessThanOrEqualTo(millis * 60 ~/ 1000 + 2));
         expect(runner.lastLines, contains(startsWith('🦝 headless')));
       } finally {
