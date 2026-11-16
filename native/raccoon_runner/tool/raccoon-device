@@ -1295,6 +1295,10 @@ def toolchain_identity():
                 versions.append('')
         javac = shutil.which('javac')
         versions.append(os.environ.get('JAVA_HOME') or (os.path.realpath(javac) if javac else ''))
+        # And rustup, which cargokit builds a Rust plugin's crate with: one
+        # that failed without it builds again once it is there (#378).
+        rustup = shutil.which('rustup')
+        versions.append(os.path.realpath(rustup) if rustup else '')
         toolchain_id = ' / '.join(versions)
     return toolchain_id
 
@@ -1362,6 +1366,16 @@ def keep_failure(plugin, why, log, state='failed'):
 # disk: ninja's own width is all of them.
 WORKERS = max(1, min(4, (os.cpu_count() or 2) // 2))
 JOBS = (os.cpu_count() or 2) // WORKERS + 2
+
+
+def needs_rust(log):
+    """Whether the build in [log] stopped for want of Rust: cargokit, which
+    builds a plugin's crate when no precompiled library is published for
+    it (flutter_vodozemac), says rustup is not on the PATH."""
+    try:
+        return 'rustup not found in PATH' in open(log, errors='replace').read()
+    except OSError:
+        return False
 
 
 def missing_packages(log):
@@ -1536,6 +1550,9 @@ def build(plugin):
                            stdout=written, stderr=subprocess.STDOUT, env=env)
     if not ok:
         why = 'did not build; see ' + log
+        # cargokit without Rust, as a desktop build stops too (#378).
+        if configured and needs_rust(log):
+            why = 'did not build: needs Rust (rustup), as a desktop build does; see ' + log
         # Not one CMake stopped configuring: that is a missing package
         # (a -dev one), which the next install should find once it is in.
         if configured:

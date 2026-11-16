@@ -249,7 +249,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   (a hosted one at a version `tool/plugins`' lock names), and only those
   wait for it: the rest build meanwhile, and an app with none of them
   fetches nothing (#352). Without a toolchain for the rest, or when a
-  plugin fails to build, it says so and the app sees no plugin. A
+  plugin fails to build, it says so and the app sees no plugin; one that
+  wants Rust (cargokit's, with no precompiled library) says that, and
+  builds again once rustup is on the PATH (#378). A
   loaded plugin's channels are answered before a client sees them, GLib's
   main context is pumped from the runner's loop, and a plugin's textures
   draw through the GL renderer. A texture a plugin lets go while a frame

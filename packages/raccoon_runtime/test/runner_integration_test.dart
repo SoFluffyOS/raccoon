@@ -3524,6 +3524,87 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
     },
     timeout: const Timeout(Duration(minutes: 4)),
   );
+  // raccoon#378: flutter_vodozemac builds its crate through cargokit, which
+  // stops on "rustup not found in PATH"; the failure said nothing of Rust
+  // and was kept after Rust came, the toolchain's identity without it.
+  test(
+    'on Linux a plugin that wants Rust says so, and Rust builds it again',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_rust');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      write(
+        'plugin_z/pubspec.yaml',
+        'name: plugin_z\nversion: 1.0.0\n'
+            'flutter:\n  plugin:\n    platforms:\n'
+            '      linux:\n        ffiPlugin: true\n',
+      );
+      // What cargokit's build step does without Rust.
+      write(
+        'plugin_z/linux/CMakeLists.txt',
+        'cmake_minimum_required(VERSION 3.14)\n'
+            'add_custom_target(plugin_z_cargo ALL COMMAND sh -c '
+            '"echo SEVERE: rustup not found in PATH. >&2; exit 1")\n',
+      );
+      write('app/pubspec.yaml', 'name: app\ndependencies:\n  plugin_z:\n');
+      write(
+        'app/.dart_tool/package_config.json',
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+            {
+              'name': 'plugin_z',
+              'rootUri': '../../plugin_z',
+              'packageUri': 'lib/',
+            },
+          ],
+        }),
+      );
+      write('rust/rustup', '#!/bin/sh\necho "rustup 1.28.2"\n');
+      Process.runSync('chmod', ['+x', p.join(temp.path, 'rust', 'rustup')]);
+      final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+        ..createSync(recursive: true);
+      final data = p.join(temp.path, 'data');
+      final cache = p.join(temp.path, 'cache');
+      Future<String> install({bool rust = false}) async {
+        final result = await Process.run(
+          p.join(runnerDir, 'tool', 'raccoon-device'),
+          ['install', bundle.path, 'app'],
+          environment: {
+            'RACCOON_RUNNER': binary!,
+            if (sdk != null) 'FLUTTER_ROOT': sdk,
+            'XDG_DATA_HOME': data,
+            'RACCOON_PLUGIN_CACHE': cache,
+            'RACCOON_NO_PREBUILT': '1',
+            if (rust)
+              'PATH':
+                  '${p.join(temp.path, 'rust')}:${Platform.environment['PATH']}',
+          },
+        );
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        return '${result.stderr}';
+      }
+
+      final first = await install();
+      expect(first, contains('plugin_z (did not build: needs Rust (rustup)'));
+      // Kept while nothing changed...
+      expect(await install(), contains('kept from'));
+      // ...and built again once rustup is there.
+      final again = await install(rust: true);
+      expect(again, contains('needs Rust (rustup)'));
+      expect(again, isNot(contains('kept from')));
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isLinux)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'the Linux half of the helper',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 4)),
+  );
   // raccoon#16: flutter_secure_storage_linux without libsecret-1's
   // development files said only "did not build; see <log>".
   test(
