@@ -1,0 +1,79 @@
+# Tests apps on Raccoon devices, the recipe for any project's CI: one Linux
+# job, no display, the prebuilt runner from the runner-v* releases. Its
+# proof is the runner's examples: example/hello's integration test through
+# flutter test and flutter drive, and example/harness_test, plain dart test
+# with raccoon_runtime's RaccoonTestDevice on a phone, a tablet and a
+# desktop at once.
+name: Device tests
+
+# Only when asked for: from the Actions tab, or
+# gh workflow run device-tests.yml --ref <branch> (#131).
+on:
+  workflow_dispatch:
+
+# A newer run on the same branch cancels the one it replaces.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.50.0
+
+jobs:
+  test:
+    name: example tests on Raccoon devices
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        timeout-minutes: 15
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      # The ICU data the device helper hands the runner.
+      - name: Precache the Linux artifacts
+        run: flutter precache --linux
+
+      - name: Fetch the runner and register the devices
+        working-directory: packages/raccoon_runtime
+        run: |
+          dart pub get
+          helper="$(dart run raccoon_runtime:raccoon_device fetch --into "$RUNNER_TEMP/raccoon_runner")"
+          dart run raccoon_runtime:raccoon_device setup --helper "$helper"
+          for device in phone tablet desktop; do
+            dart run raccoon_runtime:raccoon_device add "$device"
+          done
+          flutter config --enable-custom-devices
+          flutter devices
+
+      - name: flutter test integration_test -d raccoon-phone
+        working-directory: native/raccoon_runner/example/hello
+        env:
+          RACCOON_HEADLESS: '1'
+        run: flutter test integration_test -d raccoon-phone
+
+      - name: flutter drive -d raccoon-tablet
+        working-directory: native/raccoon_runner/example/hello
+        env:
+          RACCOON_HEADLESS: '1'
+        run: >-
+          flutter drive -d raccoon-tablet
+          --driver test_driver/integration_test.dart
+          --target integration_test/app_test.dart
+
+      - name: dart test with RaccoonTestDevice
+        working-directory: native/raccoon_runner/example/harness_test
+        run: |
+          dart pub get
+          dart test --reporter expanded
+
+      # A golden that does not match leaves what the device showed beside it.
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: goldens-actual
+          path: native/raccoon_runner/example/harness_test/goldens/*.actual.png
+          if-no-files-found: ignore
