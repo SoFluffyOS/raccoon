@@ -219,7 +219,9 @@ final class RunnerProcess {
       _listening.complete();
     }
     if (said != null && said.startsWith('renderer ')) {
-      _renderer = said.substring('renderer '.length).split(' ').first;
+      // "gl (...), Impeller", "software, Skia": the name is the first word.
+      _renderer =
+          said.substring('renderer '.length).split(RegExp('[ ,]')).first;
     }
     if (line.startsWith(_vmServicePrefix) && !_vmService.isCompleted) {
       _vmService.complete(line.substring(_vmServicePrefix.length).trim());

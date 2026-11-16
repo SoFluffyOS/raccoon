@@ -888,6 +888,73 @@ void main() {
     skip: ready ? false : 'build the runner and example first',
   );
 
+  // #379: Impeller has no software backend; the engine aborts on the
+  // first text it draws there. Asked for, it is GL's only.
+  test(
+    'Impeller only when asked, and never on the software renderer',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_impeller');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      Future<(ProcessResult, String)> render(
+        String renderer,
+        Map<String, String> environment,
+      ) async {
+        final out = p.join(temp.path, '$renderer.ppm');
+        final result = await Process.run(binary!, [
+          'render',
+          '--engine-dir',
+          engineDir!,
+          '--assets',
+          assets,
+          '--icu',
+          icu!,
+          '--renderer',
+          renderer,
+          '--out',
+          out,
+        ], environment: environment);
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        expect(File(out).existsSync(), isTrue);
+        // Without the emoji, and its line end trimmed: Windows' console
+        // encoding and \r\n.
+        final line = '${result.stdout}\n${result.stderr}'
+            .split('\n')
+            .map((line) => line.trimRight())
+            .firstWhere(
+              (line) =>
+                  line.contains('renderer ') &&
+                  (line.endsWith(', Skia') || line.endsWith(', Impeller')),
+              orElse: () => '',
+            );
+        return (result, line);
+      }
+
+      final (_, usual) = await render('auto', {});
+      expect(usual, endsWith(', Skia'));
+
+      final (software, softwareLine) = await render('software', {
+        'RACCOON_IMPELLER': '1',
+        'RACCOON_FLUTTER_GPU': '1',
+      });
+      expect(
+        '${software.stderr}',
+        contains(
+          'Impeller asked for, but the software renderer draws with Skia',
+        ),
+      );
+      expect(softwareLine, endsWith('renderer software, Skia'));
+
+      if (!usual.contains('renderer gl ')) {
+        printOnFailure('no GL here: $usual');
+        return;
+      }
+      final (_, impeller) = await render('auto', {'RACCOON_IMPELLER': '1'});
+      expect(impeller, contains('renderer gl '));
+      expect(impeller, endsWith(', Impeller'));
+    },
+    skip: ready ? false : 'build the runner and example first',
+  );
+
   // #123: the GL renderer took the first EGL display there was. A device
   // whose eglInitialize failed left the runner on the software renderer
   // with a working EGL device beside it, and Mesa's surfaceless platform,

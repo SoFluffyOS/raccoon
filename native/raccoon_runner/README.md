@@ -202,6 +202,11 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   fails to start is said in the log, and the next is tried.
   `RACCOON_GL_DEVICE` narrows the choice: `surfaceless`, `device` (EGL
   devices only) or a render node, such as `/dev/dri/renderD128`.
+  Skia draws by default. `RACCOON_IMPELLER=1` (`--impeller`) tries Impeller,
+  on Linux's GL renderer only; software stays Skia, as Impeller has no
+  software backend. `RACCOON_FLUTTER_GPU=1` (`--flutter-gpu`) adds Flutter
+  GPU, for flutter_scene. The renderer line ends `, Skia` or `, Impeller`
+  (#379).
 - Loads the project's native plugins on Linux, instead of answering their
   channels itself. A plugin binary links against `libflutter_linux_gtk.so`;
   the runner ships one of its own with the plugin-facing half of Flutter's

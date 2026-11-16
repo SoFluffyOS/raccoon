@@ -116,7 +116,22 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
     });
   }
 
-  command_line_ = {"raccoon_runner", "--enable-impeller=false"};
+  // Impeller only where it has a backend here: GL. In software, or with
+  // a GPU renderer it is not tried on yet, Skia, said so (#379).
+  const bool impeller_asked = options.impeller || options.flutter_gpu;
+  const bool impeller = impeller_asked && renderer.type == kOpenGL;
+  if (impeller_asked && !impeller) {
+    std::fprintf(stderr, "🦝 Impeller asked for, but the %s renderer draws with Skia\n",
+                 renderer_.c_str());
+  }
+  command_line_ = {"raccoon_runner", impeller ? "--enable-impeller" : "--enable-impeller=false"};
+  // Flutter's Linux embedder turns on Impeller's signed-distance-field
+  // shapes too; here only when asked (RACCOON_IMPELLER=sdf): on 3.50 they
+  // draw a linear gradient under a later rectangle in its end colour,
+  // radeonsi and llvmpipe alike.
+  if (impeller && options.impeller_sdfs) command_line_.push_back("--impeller-use-sdfs");
+  if (impeller && options.flutter_gpu) command_line_.push_back("--enable-flutter-gpu");
+  impeller_ = impeller;
   for (const std::string& arg : options.extra_args) command_line_.push_back(arg);
   argv_.clear();
   for (const std::string& arg : command_line_) argv_.push_back(arg.c_str());
@@ -209,7 +224,10 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   static constexpr char kResumed[] = "AppLifecycleState.resumed";
   SendPlatformMessage("flutter/lifecycle", reinterpret_cast<const uint8_t*>(kResumed),
                       sizeof(kResumed) - 1);
-  if (on_log_) on_log_("raccoon_runner", "🦝 renderer " + renderer_);
+  if (on_log_) {
+    on_log_("raccoon_runner",
+            "🦝 renderer " + renderer_ + (impeller_ ? ", Impeller" : ", Skia"));
+  }
   return true;
 }
 
