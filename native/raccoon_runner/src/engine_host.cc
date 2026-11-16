@@ -284,10 +284,16 @@ void EngineHost::Resize(FlutterViewId view, size_t width, size_t height,
     metrics_ = metrics;
     loader_.procs().SendWindowMetricsEvent(engine_, &metrics);
     windows_.SetViewSize(metrics.width, metrics.height, metrics.pixel_ratio);
+#if RACCOON_HAS_PLUGINS && !defined(__APPLE__) && !defined(_WIN32)
+    if (plugins_) plugins_->ViewSized(0, metrics.width, metrics.height, metrics.pixel_ratio);
+#endif
     return;
   }
   const std::shared_ptr<View> found = ViewOf(view);
   if (!found || found->removing || engine_ == nullptr) return;
+#if RACCOON_HAS_PLUGINS && !defined(__APPLE__) && !defined(_WIN32)
+  if (plugins_) plugins_->ViewSized(view, metrics.width, metrics.height, metrics.pixel_ratio);
+#endif
   metrics.view_id = view;
   found->metrics = metrics;
   found->input_scale = scale;
@@ -350,6 +356,9 @@ void EngineHost::RemoveView(FlutterViewId view) {
     semantics_.erase(view);
   }
   if (focused_ == view) focused_ = 0;
+#if RACCOON_HAS_PLUGINS && !defined(__APPLE__) && !defined(_WIN32)
+  if (plugins_) plugins_->ViewRemoved(view);
+#endif
   if (found->asked && engine_ != nullptr) {
     FlutterRemoveViewInfo info{};
     info.struct_size = sizeof(FlutterRemoveViewInfo);
@@ -1503,6 +1512,14 @@ bool EngineHost::LoadPlugins(const std::string& manifest, std::string* error) {
     bridge.metal_device = metal_ != nullptr ? metal_->device() : nullptr;
 #endif
     plugins_ = std::make_unique<PluginHost>(std::move(bridge));
+#if !defined(__APPLE__) && !defined(_WIN32)
+    // The plugin view (RACCOON_PLUGIN_VIEW=1) at the size view 0 has, and
+    // with no manifest, for what Dart opens by FFI and looks for there.
+    if (metrics_.width > 0) {
+      plugins_->ViewSized(0, metrics_.width, metrics_.height, metrics_.pixel_ratio);
+    }
+    if (manifest.empty()) return true;
+#endif
   }
   return plugins_->LoadManifest(manifest, error);
 #else

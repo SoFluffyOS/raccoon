@@ -4,8 +4,13 @@
 
 #include <dlfcn.h>
 #include <glib-object.h>
+#include <limits.h>
+#include <stdlib.h>
 
+#include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <string>
 
 #include "flutter/shell/platform/linux/fl_binary_messenger_private.h"
 #include "flutter/shell/platform/linux/fl_pixel_buffer_texture_private.h"
@@ -36,6 +41,78 @@ void InitGtkIfLoaded() {
 
 }  // namespace
 
+struct PluginHost::PluginView {
+  gboolean (*start)();
+  GObject* (*add)(int64_t id, FlEngine* engine, int width, int height);
+  void (*resize)(int64_t id, int width, int height);
+  void (*remove)(int64_t id);
+};
+
+bool PluginHost::PluginViewWanted() {
+  const char* wanted = std::getenv("RACCOON_PLUGIN_VIEW");
+  return wanted != nullptr && std::strcmp(wanted, "1") == 0;
+}
+
+namespace {
+
+// libraccoon_plugin_view.so, beside the real libflutter_linux_gtk.so (the
+// app's executable has a link to it), opened global before any plugin so
+// its window calls come before GTK's; null, said once, when it can't be
+// or GTK has no display.
+const PluginHost::PluginView* OpenPluginView() {
+  static bool tried = false;
+  static PluginHost::PluginView view{};
+  if (tried) return view.start != nullptr ? &view : nullptr;
+  tried = true;
+  const gint64 start = g_get_monotonic_time();
+  Dl_info info{};
+  std::string dir;
+  char resolved[PATH_MAX];
+  if (dladdr(reinterpret_cast<void*>(&fl_engine_new_raccoon), &info) != 0 &&
+      info.dli_fname != nullptr && realpath(info.dli_fname, resolved) != nullptr) {
+    dir = resolved;
+    dir.resize(dir.rfind('/'));
+  }
+  const std::string library = dir + "/libraccoon_plugin_view.so";
+  void* handle = dlopen(library.c_str(), RTLD_NOW | RTLD_GLOBAL);
+  if (handle == nullptr) {
+    std::fprintf(stderr, "🦝 plugin view: %s\n", dlerror());
+    return nullptr;
+  }
+  PluginHost::PluginView found{
+      reinterpret_cast<gboolean (*)()>(dlsym(handle, "raccoon_plugin_view_start")),
+      reinterpret_cast<GObject* (*)(int64_t, FlEngine*, int, int)>(
+          dlsym(handle, "raccoon_plugin_view_add")),
+      reinterpret_cast<void (*)(int64_t, int, int)>(dlsym(handle, "raccoon_plugin_view_resize")),
+      reinterpret_cast<void (*)(int64_t)>(dlsym(handle, "raccoon_plugin_view_remove"))};
+  if (found.start == nullptr || found.add == nullptr || found.resize == nullptr ||
+      found.remove == nullptr) {
+    std::fprintf(stderr, "🦝 plugin view: %s lacks its calls\n", library.c_str());
+    return nullptr;
+  }
+  if (!found.start()) return nullptr;
+  view = found;
+  std::fprintf(stderr, "🦝 plugin view: on, %.1f ms\n", (g_get_monotonic_time() - start) / 1000.0);
+  return &view;
+}
+
+int Logical(size_t physical, double pixel_ratio) {
+  return static_cast<int>(std::lround(static_cast<double>(physical) /
+                                      (pixel_ratio > 0 ? pixel_ratio : 1.0)));
+}
+
+}  // namespace
+
+void PluginHost::ViewSized(int64_t view, size_t width, size_t height, double pixel_ratio) {
+  if (plugin_view_ == nullptr) return;
+  plugin_view_->add(view, engine_, Logical(width, pixel_ratio), Logical(height, pixel_ratio));
+  plugin_view_->resize(view, Logical(width, pixel_ratio), Logical(height, pixel_ratio));
+}
+
+void PluginHost::ViewRemoved(int64_t view) {
+  if (plugin_view_ != nullptr) plugin_view_->remove(view);
+}
+
 PluginHost::PluginHost(Bridge bridge) : bridge_(std::move(bridge)) {
   c_bridge_.send_platform_message = SendPlatformMessage;
   c_bridge_.send_platform_message_response = SendPlatformMessageResponse;
@@ -45,8 +122,15 @@ PluginHost::PluginHost(Bridge bridge) : bridge_(std::move(bridge)) {
   engine_ = fl_engine_new_raccoon(&c_bridge_, this);
   messenger_ = FL_BINARY_MESSENGER(g_object_ref(fl_engine_get_binary_messenger(engine_)));
   textures_ = FL_TEXTURE_REGISTRAR(g_object_ref(fl_engine_get_texture_registrar(engine_)));
-  // No view: the app's window is the client's pane.
-  registrar_ = fl_plugin_registrar_new(nullptr, messenger_, textures_);
+  // No view: the app's window is the client's pane. Unless
+  // RACCOON_PLUGIN_VIEW=1 gives plugins a hidden one, view 0's, at a size
+  // the host's first resize replaces.
+  GObject* view = nullptr;
+  if (PluginViewWanted()) {
+    plugin_view_ = OpenPluginView();
+    if (plugin_view_ != nullptr) view = plugin_view_->add(0, engine_, 800, 600);
+  }
+  registrar_ = fl_plugin_registrar_new(reinterpret_cast<FlView*>(view), messenger_, textures_);
 }
 
 PluginHost::~PluginHost() {
@@ -54,6 +138,7 @@ PluginHost::~PluginHost() {
   // engine with them, which a plugin thread or a reply still to come can
   // keep. What they call on it from now on does nothing.
   fl_engine_raccoon_detach(engine_);
+  // The views' toplevels stay: a plugin may hold one, and GTK with it.
   g_clear_object(&registrar_);
   g_clear_object(&textures_);
   g_clear_object(&messenger_);

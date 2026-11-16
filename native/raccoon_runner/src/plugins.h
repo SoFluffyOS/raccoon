@@ -113,6 +113,18 @@ class PluginHost {
                        FlutterOpenGLTexture* out);
 #endif
 
+#if !defined(__APPLE__) && !defined(_WIN32)
+  // RACCOON_PLUGIN_VIEW=1 (Linux, a spike): plugins get a view, a hidden
+  // GTK toplevel per view of the app's (src/plugin_view_linux.cc). Whether
+  // the variable asks for it; then |view|'s toplevel takes the host's size,
+  // physical pixels at |pixel_ratio|, made at its first; and goes.
+  static bool PluginViewWanted();
+  // The plugin view library's calls (plugins_linux.cc).
+  struct PluginView;
+  void ViewSized(int64_t view, size_t width, size_t height, double pixel_ratio);
+  void ViewRemoved(int64_t view);
+#endif
+
  private:
   // Opens what every plugin of the manifest needs before any loads: on
   // macOS, |flutter_framework|. False, with why, when it cannot.
@@ -156,6 +168,9 @@ class PluginHost {
   FlTextureRegistrar* textures_ = nullptr;
   FlPluginRegistrar* registrar_ = nullptr;
   std::vector<void*> handles_;
+  // The plugin view library's calls, when RACCOON_PLUGIN_VIEW=1 and GTK
+  // has a display; null otherwise.
+  const PluginView* plugin_view_ = nullptr;
 #endif
 };
 

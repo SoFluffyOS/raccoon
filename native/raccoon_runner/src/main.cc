@@ -446,7 +446,14 @@ using PluginPump = raccoon::GlibPump;
 // while the returned pump lives.
 std::unique_ptr<PluginPump> LoadPlugins(raccoon::EngineHost& host, raccoon::EventLoop& loop,
                                         const std::string& manifest) {
-  if (manifest.empty()) return nullptr;
+#if RACCOON_HAS_PLUGINS && !defined(__APPLE__) && !defined(_WIN32)
+  // RACCOON_PLUGIN_VIEW=1: the views' toplevels and GLib's loop even for an
+  // app without plugins, whose FFI libraries may look for its window.
+  const bool view_only = manifest.empty() && raccoon::PluginHost::PluginViewWanted();
+#else
+  const bool view_only = false;
+#endif
+  if (manifest.empty() && !view_only) return nullptr;
 #if RACCOON_HAS_PLUGINS
   auto pump = std::make_unique<PluginPump>(loop);
   std::string error;
@@ -454,7 +461,7 @@ std::unique_ptr<PluginPump> LoadPlugins(raccoon::EngineHost& host, raccoon::Even
     std::fprintf(stderr, "🦝 plugins: %s\n", error.c_str());
     return nullptr;
   }
-  std::fprintf(stderr, "🦝 %zu plugins loaded\n", host.plugins_loaded());
+  if (!view_only) std::fprintf(stderr, "🦝 %zu plugins loaded\n", host.plugins_loaded());
   return pump;
 #else
   (void)host;

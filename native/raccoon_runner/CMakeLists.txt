@@ -462,6 +462,15 @@ else()
         target_compile_options(${TARGET} PRIVATE -Wall -Werror)
       endfunction()
       pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0)
+      # A spike (RACCOON_PLUGIN_VIEW=1): the hidden toplevel per view, in a
+      # library of its own that links GTK, opened only when asked for, so
+      # the runner itself still loads no GTK (#223).
+      add_library(raccoon_plugin_view SHARED src/plugin_view_linux.cc)
+      target_link_libraries(raccoon_plugin_view PRIVATE flutter_linux_gtk PkgConfig::GTK)
+      target_compile_definitions(raccoon_plugin_view PRIVATE FLUTTER_LINUX_COMPILATION)
+      set_target_properties(raccoon_plugin_view PROPERTIES BUILD_RPATH "$ORIGIN"
+        INSTALL_RPATH "$ORIGIN" BUILD_WITH_INSTALL_RPATH ON)
+      add_dependencies(raccoon_runner raccoon_plugin_view)
       add_library(flutter INTERFACE)
       target_include_directories(flutter INTERFACE
         ${CMAKE_SOURCE_DIR}/third_party/flutter_linux/flutter/shell/platform/linux/public)
