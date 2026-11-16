@@ -1,6 +1,7 @@
 export 'package:raccoon_runtime/src/app_plugins.dart';
 export 'package:raccoon_runtime/src/app_sizes.dart';
 export 'package:raccoon_runtime/src/custom_device_config.dart';
+export 'package:raccoon_runtime/src/control/control.dart';
 export 'package:raccoon_runtime/src/device_channel.dart';
 export 'package:raccoon_runtime/src/device_input.dart';
 export 'package:raccoon_runtime/src/frame_capture.dart';
