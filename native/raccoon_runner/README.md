@@ -244,7 +244,14 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   too; a stop then quits those loops, which the runner knows because its
   own `g_main_loop_run`, exported, stands in for GLib's (#337). The registrar hands out no view;
   the view's getters are there for a plugin that names them, answering as
-  for none, so desktop_drop loads (#369). The
+  for none, so desktop_drop loads (#369). A spike, off by default:
+  `RACCOON_PLUGIN_VIEW=1` gives plugins a view after all, a GTK toplevel
+  per view of the app's, realized and never shown, sized as the host
+  sizes the view (`src/plugin_view_linux.cc`, a library of its own so the
+  runner still loads no GTK unasked). A plugin's show or present of it is
+  refused, a move, resize or full screen is left to GTK, which records it
+  for a window that isn't mapped, each with a 🦝 line; with no display it
+  says so once and there is no view (#365, #361). The
   window plugins (`desktop_window`, `window_manager`, `window_size`,
   `screen_retriever` and its `_macos`, `_linux` and `_windows` halves)
   stay the runner's own, above. `example/plugins/echo`
