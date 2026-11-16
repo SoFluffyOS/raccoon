@@ -1,5 +1,6 @@
 #include "gl_renderer.h"
 
+#include <fcntl.h>
 #include <poll.h>
 #include <unistd.h>
 
@@ -402,6 +403,17 @@ void GlRenderer::DisablePool() {
 bool GlRenderer::pool_set(GpuBufferSet* out) const {
   std::lock_guard<std::mutex> lock(mutex_);
   if (pool_.empty()) return false;
+  // The descriptors are copied under the lock: a pool rebuilt on the raster
+  // thread closes its own, and the numbers go to the next one's buffers.
+  std::vector<int> fds;
+  for (const Buffer& buffer : pool_) {
+    const int fd = fcntl(buffer.fd, F_DUPFD_CLOEXEC, 0);
+    if (fd < 0) {
+      for (const int taken : fds) close(taken);
+      return false;
+    }
+    fds.push_back(fd);
+  }
   out->generation = generation_;
   out->width = pool_width_;
   out->height = pool_height_;
@@ -409,11 +421,11 @@ bool GlRenderer::pool_set(GpuBufferSet* out) const {
   out->modifier = modifier_;
   out->strides.clear();
   out->offsets.clear();
-  out->fds.clear();
+  for (const int fd : out->fds) close(fd);
+  out->fds = std::move(fds);
   for (const Buffer& buffer : pool_) {
     out->strides.push_back(buffer.stride);
     out->offsets.push_back(buffer.offset);
-    out->fds.push_back(buffer.fd);
   }
   return true;
 }

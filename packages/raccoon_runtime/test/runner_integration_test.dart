@@ -10177,6 +10177,141 @@ void main() => runApp(
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  // #123: a ring's descriptors were copied as numbers and sent after the
+  // renderer's lock, and a pool rebuilt meanwhile closed them, its own
+  // taking the same numbers: a client could get the next ring's dmabufs
+  // under the generation before.
+  test(
+    'on Linux each ring on the GPU socket comes with its own dmabufs while the view resizes',
+    () async {
+      final spinAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'spin',
+        'build',
+        'flutter_assets',
+      );
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: spinAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint, gpuBuffers: true);
+      RawSocket? gpuSocket;
+      try {
+        final frames = client.frames.listen((frame) {
+          if (frame.inGpuBuffer) {
+            client.releaseGpuBuffer(frame.gpuGeneration, frame.bufferIndex);
+          }
+        });
+        await client.hello.timeout(const Duration(seconds: 10));
+        final GpuBuffers set;
+        try {
+          set = await client.gpuBufferSets.first.timeout(
+            const Duration(seconds: 5),
+          );
+        } on TimeoutException {
+          await frames.cancel();
+          printOnFailure('no GPU buffers offered');
+          return;
+        }
+
+        // Each ring as described, with the size of each dmabuf that came
+        // with it.
+        final rings =
+            <
+              ({int generation, int height, List<int> strides, List<int> sizes})
+            >[];
+        final handles = <ResourceHandle>[];
+        final bytes = <int>[];
+        final socket =
+            gpuSocket = await RawSocket.connect(
+              InternetAddress(set.socket, type: InternetAddressType.unix),
+              0,
+            );
+        socket.listen((event) {
+          if (event != RawSocketEvent.read) return;
+          final message = socket.readMessage();
+          if (message == null) return;
+          bytes.addAll(message.data);
+          for (final control in message.controlMessages) {
+            handles.addAll(control.extractHandles());
+          }
+          while (bytes.length >= 4) {
+            final length = ByteData.sublistView(
+              Uint8List.fromList(bytes.sublist(0, 4)),
+            ).getUint32(0, Endian.little);
+            if (bytes.length < 4 + length) break;
+            final body = Uint8List.fromList(bytes.sublist(4, 4 + length));
+            bytes.removeRange(0, 4 + length);
+            final data = ByteData.sublistView(body);
+            switch (String.fromCharCodes(body.sublist(0, 4))) {
+              case 'RGPU':
+                final count = data.getUint32(8, Endian.little);
+                final taken = handles.take(count).toList();
+                handles.removeRange(0, taken.length);
+                final sizes = <int>[];
+                for (final handle in taken) {
+                  final file = handle.toFile();
+                  sizes.add(file.lengthSync());
+                  file.closeSync();
+                }
+                rings.add((
+                  generation: data.getUint32(4, Endian.little),
+                  height: data.getUint32(16, Endian.little),
+                  strides: [
+                    for (var i = 0; i < count; i++)
+                      data.getUint32(32 + i * 8, Endian.little),
+                  ],
+                  sizes: sizes,
+                ));
+              case 'RFEN':
+                if (handles.isNotEmpty)
+                  handles.removeAt(0).toFile().closeSync();
+            }
+          }
+        });
+        // Two sizes in turn: each resize builds a ring anew.
+        for (var i = 0; i < 40; i++) {
+          client.resize(i.isEven ? 1200 : 800, i.isEven ? 900 : 600, 1);
+          await Future<void>.delayed(const Duration(milliseconds: 30));
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        await frames.cancel();
+        printOnFailure('${rings.length} rings: $rings');
+        expect(rings.length, greaterThan(2));
+        for (final ring in rings) {
+          expect(ring.sizes, hasLength(ring.strides.length));
+          for (var i = 0; i < ring.sizes.length; i++) {
+            expect(
+              ring.sizes[i],
+              greaterThanOrEqualTo(ring.strides[i] * ring.height),
+              reason: 'buffer $i of generation ${ring.generation}',
+            );
+          }
+        }
+      } finally {
+        await gpuSocket?.close();
+        client.shutdown();
+        await client.close();
+        await _expectExit(runner);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        !Platform.isLinux
+            ? 'dmabufs are Linux'
+            : ready
+            ? false
+            : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   // example/no_plugin calls a Pigeon channel nobody serves in main(), before
   // runApp, and dies of the null reply; example/no_plugin_late draws first,
   // then calls a method channel nobody serves, and again on every tap.

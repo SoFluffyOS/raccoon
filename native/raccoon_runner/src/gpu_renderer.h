@@ -9,13 +9,29 @@
 #include <string>
 #include <vector>
 
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
+
 namespace raccoon {
 
 // A set of exported GPU buffers, as a client needs to describe or import
 // them. On Linux each buffer is a dmabuf: fourcc, modifier, stride, offset
-// and a descriptor, which stays the renderer's; do not close them. On macOS
-// each is an IOSurface named by its ID, with no descriptor.
+// and a descriptor of the set's own, which it closes. The renderer's are
+// closed when a pool is rebuilt, and their numbers come back as the new
+// pool's: a copy of the numbers sent after that named the next generation's
+// buffers (#123). On macOS each is an IOSurface named by its ID, with no
+// descriptor.
 struct GpuBufferSet {
+  GpuBufferSet() = default;
+  GpuBufferSet(const GpuBufferSet&) = delete;
+  GpuBufferSet& operator=(const GpuBufferSet&) = delete;
+  ~GpuBufferSet() {
+#if !defined(_WIN32)
+    for (const int fd : fds) close(fd);
+#endif
+  }
+
   uint32_t generation = 0;
   size_t width = 0;
   size_t height = 0;
@@ -53,7 +69,8 @@ class GpuRenderer {
   virtual bool EnablePool(size_t count, std::string* error) = 0;
   virtual void DisablePool() = 0;
   virtual void SetGpuFrameCallback(GpuFrameCallback callback) = 0;
-  // The current set, false when the pool is off or not yet built.
+  // The current set, false when the pool is off or not yet built. |out|
+  // comes empty, and owns its descriptors.
   virtual bool pool_set(GpuBufferSet* out) const = 0;
   // Whether the next frame has a pool buffer to go into: true as well when
   // there is no pool, or none built yet.
