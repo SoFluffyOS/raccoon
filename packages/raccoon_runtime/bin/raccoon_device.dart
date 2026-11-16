@@ -5,12 +5,14 @@
 //   dart run raccoon_runtime:raccoon_device remove <name>
 //   dart run raccoon_runtime:raccoon_device list
 //   dart run raccoon_runtime:raccoon_device doctor [project directory]
+//   dart run raccoon_runtime:raccoon_device fetch --into <directory> [--version V]
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:raccoon_runtime/raccoon_runtime.dart';
 
-void main(List<String> arguments) {
+Future<void> main(List<String> arguments) async {
   final file = CustomDevicesFile.forHost(Platform.environment);
   switch (arguments) {
     case ['setup', '--helper', final given]:
@@ -43,6 +45,8 @@ void main(List<String> arguments) {
       stdout.writeln(ids.isEmpty ? 'no Raccoon devices' : ids.join('\n'));
     case ['doctor', ...final rest]:
       _doctor(rest.firstOrNull ?? Directory.current.path);
+    case ['fetch', ...final options]:
+      exitCode = await _fetch(options);
     default:
       stderr.writeln(
         'usage: raccoon_device setup --helper <path/to/raccoon-device>\n'
@@ -50,7 +54,8 @@ void main(List<String> arguments) {
         '[--size WxH@R] [--label text] [--helper path]\n'
         '       raccoon_device remove <name>\n'
         '       raccoon_device list\n'
-        '       raccoon_device doctor [project directory]',
+        '       raccoon_device doctor [project directory]\n'
+        '       raccoon_device fetch --into <directory> [--version V]',
       );
       exitCode = 2;
   }
@@ -146,5 +151,66 @@ void _doctor(String project) {
   );
   for (final status in report) {
     stdout.writeln('  $status');
+  }
+}
+
+/// Downloads the prebuilt runner from the `runner-v*` releases into the
+/// directory after `--into`: the newest release compatible with the
+/// runtime's own version, or with `--version`. Prints the device helper's
+/// path, for setup.
+Future<int> _fetch(List<String> options) async {
+  String? into;
+  String? asked;
+  for (var i = 0; i < options.length; i++) {
+    switch (options[i]) {
+      case '--into' when i + 1 < options.length:
+        into = options[++i];
+      case '--version' when i + 1 < options.length:
+        asked = options[++i];
+      case '--into' || '--version':
+        stderr.writeln('${options[i]} needs a value');
+        return 2;
+      default:
+        stderr.writeln('unknown option ${options[i]}');
+        return 2;
+    }
+  }
+  if (into == null) {
+    stderr.writeln('fetch needs --into <directory>');
+    return 2;
+  }
+  final version = RunnerVersion.parse(asked ?? RunnerVersion.current);
+  if (version == null) {
+    stderr.writeln('not a version: $asked');
+    return 2;
+  }
+  final runner = PrebuiltRunner(
+    Directory(into).absolute.path,
+    isWindows: Platform.isWindows,
+  );
+  final downloader = RunnerDownloader();
+  try {
+    final release = await downloader.find(version);
+    if (release == null) {
+      stderr.writeln(
+        'no runner release for ${downloader.platform} compatible with $version',
+      );
+      return 1;
+    }
+    if (runner.version case final have? when have == release.version) {
+      stdout.writeln(runner.deviceHelper);
+      return 0;
+    }
+    final clock = Stopwatch()..start();
+    await downloader.install(release, runner);
+    stderr.writeln(
+      'runner ${release.version} in ${runner.directory} '
+      '(${clock.elapsedMilliseconds} ms)',
+    );
+    stdout.writeln(runner.deviceHelper);
+    return 0;
+  } on DownloadFailed catch (error) {
+    stderr.writeln('$error');
+    return 1;
   }
 }
