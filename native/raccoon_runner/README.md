@@ -241,7 +241,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   and builds with clang as Flutter's Linux build does (`$CC` and `$CXX`
   when set; without clang, the system's compiler);
   what built is cached by plugin version and runner version (not by
-  engine: a plugin builds against the runner's own library), and a
+  engine: a plugin builds against the runner's own library), each entry
+  stamped with a digest of the helper's build code, so one an older
+  helper built is built again once that code changes (#380), and a
   release's archive of the common plugins (`tool/plugins`, built by CI)
   drops into that cache on the first install, whatever the Flutter
   version, so those cost nothing and a machine without a toolchain still

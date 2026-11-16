@@ -616,7 +616,7 @@ build_plugins_linux() {
   python3 - "$config" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS_LINUX" \
     "$cache" "$version" "$UNAME_M" \
     "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-linux-$UNAME_M.tar.gz}" \
-    "$ROOT/tool/plugins/pubspec.lock" "$project" <<'PY'
+    "$ROOT/tool/plugins/pubspec.lock" "$project" "$source_path" <<'PY'
 # What only a build or a fetch needs is imported there: tarfile, tempfile
 # and concurrent.futures cost a cached install ~6 ms (#315).
 import hashlib, importlib, json, os, re, sys, time
@@ -668,7 +668,7 @@ def clone(source, target):
     else:
         shutil.copy2(source, target)
 
-config, out, lib, headers, virtual, cache, runner_version, arch, prebuilt_url, prebuilt_lock, project_dir = sys.argv[1:12]
+config, out, lib, headers, virtual, cache, runner_version, arch, prebuilt_url, prebuilt_lock, project_dir, helper = sys.argv[1:13]
 # What an install that may only take the cache says of the rest (#214).
 SKIPPED = 'not built: native plugins are cached only (RACCOON_PLUGINS=cached)'
 virtual = set(virtual.split())
@@ -970,6 +970,134 @@ def version_key(name, root):
 # prebuilt, so its archive drops straight into the cache.
 lib_stamp = runner_version
 
+# What made an entry, written in it as .recipe (#380): a digest of the code
+# a build runs, build() and every function and setting it reaches in this
+# half of the helper, without comments, blank lines or docstrings. An entry
+# an older helper made, whose build or install has changed since, is built
+# again (#376 and #377 changed what flutter_js's and serious_python's hold);
+# one this helper made is kept, and a change elsewhere in the helper
+# rebuilds nothing. A digest rather than a number to bump by hand: the
+# fixes that change what a build makes are the ones that would forget it.
+# The release's entries say PREBUILT: they are not the helper's builds, and
+# are kept until the runner's version moves on, as before.
+RECIPE = '.recipe'
+PREBUILT = 'prebuilt'
+recipe_digest = False
+
+
+def recipe_of(text):
+    """The digest of the build in [text], this helper's source."""
+    import ast
+    start = text.index('\nbuild_plugins_linux() {\n')
+    start = text.index("<<'PY'\n", start) + len("<<'PY'\n")
+    source = text[start:text.index('\nPY\n', start)]
+    lines = source.split('\n')
+    nodes = {}
+    for node in ast.parse(source).body:
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            names = [node.name]
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            names = [n.id for t in targets for n in ast.walk(t) if isinstance(n, ast.Name)]
+        else:
+            continue
+        for name in names:
+            nodes.setdefault(name, []).append(node)
+
+    def free(node):
+        # The names [node] reads that are not its own: a function's
+        # arguments and locals are not the module's.
+        used = {n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            used -= ({n.id for n in ast.walk(node) if isinstance(n, ast.Name) and not isinstance(n.ctx, ast.Load)}
+                     | {a.arg for a in ast.walk(node) if isinstance(a, ast.arg)}) - {
+                name for g in ast.walk(node) if isinstance(g, ast.Global) for name in g.names}
+        return used
+
+    # From build(), not into recipe(): the stamp's own reckoning is no
+    # part of what a build makes.
+    seen, todo = set(), ['build']
+    while todo:
+        name = todo.pop()
+        if name in seen or name not in nodes or name == 'recipe':
+            continue
+        seen.add(name)
+        for node in nodes[name]:
+            todo.extend(free(node))
+
+    def code(node):
+        docstrings = set()
+        for inner in ast.walk(node):
+            if (isinstance(inner, (ast.FunctionDef, ast.ClassDef)) and isinstance(inner.body[0], ast.Expr)
+                    and isinstance(inner.body[0].value, ast.Constant) and isinstance(inner.body[0].value.value, str)):
+                docstrings.update(range(inner.body[0].lineno, inner.body[0].end_lineno + 1))
+        kept = (lines[n - 1].rstrip() for n in range(node.lineno, node.end_lineno + 1) if n not in docstrings)
+        return '\n'.join(line for line in kept if line.strip() and not line.lstrip().startswith('#'))
+
+    chosen = {id(node): node for name in seen for node in nodes[name]}.values()
+    joined = '\n\0'.join(sorted(code(node) for node in chosen))
+    return hashlib.sha256(joined.encode('utf-8', 'surrogateescape')).hexdigest()[:16]
+
+
+def recipe():
+    """This helper's recipe; None when its source can't be read, and then
+    every entry is kept, as before there were any. Remembered in the cache
+    by the helper's place, size and time: parsing it costs an install ~5 ms."""
+    global recipe_digest
+    if recipe_digest is not False:
+        return recipe_digest
+    recipe_digest = None
+    known_path = os.path.join(cache, '.recipes')
+    try:
+        place = os.path.abspath(helper)
+        st = os.stat(place)
+    except OSError:
+        return None
+    mark = [st.st_size, st.st_mtime_ns]
+    try:
+        with open(known_path) as f:
+            known = json.load(f)
+        if not isinstance(known, dict):
+            known = {}
+    except (OSError, ValueError):
+        known = {}
+    remembered = known.get(place)
+    if isinstance(remembered, list) and remembered[:2] == mark and len(remembered) == 3:
+        recipe_digest = remembered[2]
+        return recipe_digest
+    try:
+        with open(place, encoding='utf-8', errors='surrogateescape') as f:
+            recipe_digest = recipe_of(f.read())
+    except (OSError, ValueError, SyntaxError):
+        return None
+    known[place] = mark + [recipe_digest]
+    try:
+        os.makedirs(cache, exist_ok=True)
+        staging = known_path + '.partial-%d' % os.getpid()
+        with open(staging, 'w') as f:
+            json.dump(known, f)
+        os.replace(staging, known_path)
+    except OSError:
+        pass
+    return recipe_digest
+
+
+def made(folder):
+    """What made the entry in [folder]: a recipe, PREBUILT, or None for
+    one from before either was written."""
+    try:
+        with open(os.path.join(folder, RECIPE)) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def stamp(folder, what):
+    staging = os.path.join(folder, RECIPE + '.partial-%d' % os.getpid())
+    with open(staging, 'w') as f:
+        f.write(what + '\n')
+    os.replace(staging, os.path.join(folder, RECIPE))
+
 
 swept = False
 
@@ -1054,6 +1182,7 @@ def fetch_prebuilt():
             if (os.path.isdir(source) and not os.path.islink(source)
                     and not os.path.exists(os.path.join(cache, entry))):
                 try:
+                    stamp(source, PREBUILT)
                     os.replace(source, os.path.join(cache, entry))
                 except OSError:
                     # A build beside the fetch, or another install, put
@@ -1089,6 +1218,45 @@ def release_plugins():
         elif name and (version := re.match(r'    version: "?([^"\s]+)"?\s*$', line)) is not None:
             found.add('%s-%s' % (name, version.group(1)))
     return found
+
+
+release = False  # tool/plugins' lock, read when wanted
+
+
+def in_release(plugin):
+    """Whether the release's archive may hold [plugin]."""
+    global release
+    if not plugin['hosted']:
+        return False
+    if release is False:
+        release = release_plugins()
+    return release is None or plugin['version'] in release
+
+
+stale = {}  # the entries an older helper made: their libraries
+
+
+def entry(plugin):
+    """[plugin]'s cache entry's files, when the release made it or this
+    helper's recipe did; else none, and one an older helper made is noted
+    stale (#380)."""
+    folder = os.path.join(cache, plugin['key'])
+    libs = libraries(folder)
+    if not libs:
+        return libs
+    by = made(folder)
+    if by is None and in_release(plugin):
+        # From before entries said: one the archive may hold is taken for
+        # the archive's, as it most likely is, and said so for next time.
+        try:
+            stamp(folder, PREBUILT)
+        except OSError:
+            pass
+        by = PREBUILT
+    if by == PREBUILT or recipe() is None or by == recipe():
+        return libs
+    stale[plugin['name']] = libs
+    return []
 
 
 def can_build():
@@ -1321,6 +1489,9 @@ def kept_failure(plugin):
         return None
     if kept.get('toolchain') != toolchain_identity():
         return None
+    # And by the helper's recipe: an older helper's failure is tried again.
+    if recipe() is not None and kept.get('recipe') != recipe():
+        return None
     return kept.get('state', 'failed'), '%s (kept from %s; RACCOON_RETRY_PLUGINS=1 builds it again)' % (
         kept.get('why', 'failed'), time.strftime('%Y-%m-%d %H:%M', time.localtime(kept['at'])))
 
@@ -1357,7 +1528,8 @@ def keep_failure(plugin, why, log, state='failed'):
         why = why.replace(log, kept_log)
     staging = record + '.partial-%d' % os.getpid()
     with open(staging, 'w') as f:
-        json.dump({'why': why, 'at': time.time(), 'toolchain': toolchain_identity(), 'state': state}, f)
+        json.dump({'why': why, 'at': time.time(), 'toolchain': toolchain_identity(), 'state': state,
+                   'recipe': recipe()}, f)
     os.replace(staging, record)
 
 
@@ -1575,7 +1747,9 @@ def build(plugin):
     staging = tempfile.mkdtemp(prefix=os.path.basename(cached) + '.partial-', dir=cache)
     stage_libraries(libs, staging)
     stage_bundle(project, staging)
-    settle(staging, cached, lambda: libraries(cached))
+    if recipe() is not None:
+        stamp(staging, recipe())
+    settle(staging, cached, lambda: libraries(cached) and made(cached) in (PREBUILT, recipe()))
     # Its build tree, once cached: the next install starts afresh.
     shutil.rmtree(project, ignore_errors=True)
     return 'built', None, libraries(cached)
@@ -1596,7 +1770,6 @@ outcome = {}
 # build meanwhile (#352).
 now, later = [], []
 fetcher = None
-release = False  # tool/plugins' lock, read when a fetch may be wanted
 
 
 def may_fetch():
@@ -1604,16 +1777,11 @@ def may_fetch():
 
 
 for plugin in wanted:
-    libs = libraries(os.path.join(cache, plugin['key']))
+    libs = entry(plugin)
     if libs:
         outcome[plugin['name']] = ('cached', None, libs)
         continue
-    if plugin['hosted'] and (fetcher is not None or may_fetch()):
-        if release is False:
-            release = release_plugins()
-        archived = release is None or plugin['version'] in release
-    else:
-        archived = False
+    archived = plugin['hosted'] and (fetcher is not None or may_fetch()) and in_release(plugin)
     if archived:
         if fetcher is None:
             sweep_staging()
@@ -1629,7 +1797,7 @@ def to_build(plugin):
     """None when [plugin] is to be built, else its outcome: the cache's
     (the archive's, once in) or why it isn't built."""
     global toolchain
-    libs = libraries(os.path.join(cache, plugin['key']))
+    libs = entry(plugin)
     if libs:
         return 'cached', None, libs
     if cached_only:
@@ -1654,6 +1822,7 @@ for group in (now, later):
             continue
         if pool is None:
             toolchain_identity()  # read once, before the threads keep failures
+            recipe()
             plugin_tree()  # once, before the threads share it
             import concurrent.futures
             pool = concurrent.futures.ThreadPoolExecutor(WORKERS)
@@ -1670,15 +1839,24 @@ if unmet and fetcher is None and may_fetch():
     sweep_staging()
     fetch_prebuilt()
     for plugin in unmet:
-        if libs := libraries(os.path.join(cache, plugin['key'])):
+        if libs := entry(plugin):
             outcome[plugin['name']] = ('cached', None, libs)
 for plugin in wanted:
     name = plugin['name']
     state, why, libs = outcome[name]
+    said = name
+    # One an older helper made, not built again (no toolchain, cached only,
+    # or its build failed now): better than none, as it was (#380).
+    if state not in ('cached', 'built') and name in stale and (
+            older := libraries(os.path.join(cache, plugin['key']))):
+        said = "%s (an older helper's build; not built again: %s)" % (name, why)
+        state, why, libs = 'cached', None, older
+    elif state == 'built' and name in stale:
+        said = "%s (again: its cached build was an older helper's)" % name
     if state == 'cached':
-        from_cache.append(name)
+        from_cache.append(said)
     elif state == 'built':
-        built.append(name)
+        built.append(said)
     elif state == 'skipped':
         skipped.append(name)
     elif state == 'built_nothing':
@@ -3454,6 +3632,9 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
     if [ -d "$stage/cache" ]; then
       # No AppleDouble ._ files for extended attributes: macOS's tar adds
       # them, and they are no frameworks.
+      # Without the Linux half's .recipe stamps: an install says an
+      # archive's entries are the release's itself (#380).
+      find "$stage/cache" -name '.recipe*' -delete
       COPYFILE_DISABLE=1 tar -C "$stage/cache" -czf "$archive" .
       echo "🦝 $(find "$stage/cache" \( -name '*.so' -o -name '*.framework' \) -prune | wc -l | tr -d ' ') libraries in $archive"
     else

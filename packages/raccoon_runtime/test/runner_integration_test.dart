@@ -3242,9 +3242,14 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
       ).listSync().whereType<Directory>().singleWhere(
         (folder) => p.basename(folder.path).startsWith('plugin_l-'),
       );
-      expect(entry.listSync().map((file) => p.basename(file.path)), [
-        'libplugin_l.so',
-      ]);
+      // Its files, not the stamp of the build that made them (#380).
+      expect(
+        entry
+            .listSync()
+            .map((file) => p.basename(file.path))
+            .where((name) => name != '.recipe'),
+        ['libplugin_l.so'],
+      );
     },
     skip: switch ((binary != null && sdk != null, Platform.isLinux)) {
       (false, _) => 'build the runner first, with a Flutter SDK on PATH',
@@ -3324,9 +3329,13 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
       ).listSync().whereType<Directory>().singleWhere(
         (folder) => p.basename(folder.path).startsWith('plugin_r-'),
       );
-      expect(entry.listSync().map((file) => p.basename(file.path)), [
-        'libplugin_r.so',
-      ]);
+      expect(
+        entry
+            .listSync()
+            .map((file) => p.basename(file.path))
+            .where((name) => name != '.recipe'),
+        ['libplugin_r.so'],
+      );
       expect(
         Directory(
           p.join(data, 'raccoon', 'apps', 'app', 'plugins', 'lib'),
@@ -3416,10 +3425,14 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
       ).listSync().whereType<Directory>().singleWhere(
         (folder) => p.basename(folder.path).startsWith('plugin_q-'),
       );
-      expect(entry.listSync().map((file) => p.basename(file.path)).toSet(), {
-        'libplugin_q.so',
-        'libplugin_q_bridge.so',
-      });
+      expect(
+        entry
+            .listSync()
+            .map((file) => p.basename(file.path))
+            .where((name) => name != '.recipe')
+            .toSet(),
+        {'libplugin_q.so', 'libplugin_q_bridge.so'},
+      );
       final lib = p.join(data, 'raccoon', 'apps', 'app', 'plugins', 'lib');
       expect(
         File(p.join(lib, 'libplugin_q_bridge.so')).readAsStringSync(),
@@ -3597,6 +3610,137 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
       final again = await install(rust: true);
       expect(again, contains('needs Rust (rustup)'));
       expect(again, isNot(contains('kept from')));
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isLinux)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'the Linux half of the helper',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 4)),
+  );
+  // raccoon#380: an entry was keyed by the plugin and the runner's version,
+  // not by how the helper builds, so flutter_js's and serious_python's
+  // entries from before #376 and #377 were kept, without what those add.
+  test(
+    'on Linux an entry an older helper built is built again, its own kept',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_recipe');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      void plugin(String root, String name, String source) {
+        write(
+          '$root/pubspec.yaml',
+          'name: $name\nversion: 1.0.0\nflutter:\n  plugin:\n    platforms:\n'
+              '      linux:\n        ffiPlugin: true\n',
+        );
+        write(
+          '$root/linux/CMakeLists.txt',
+          'cmake_minimum_required(VERSION 3.14)\n'
+              'add_library($name SHARED $name.cc)\n',
+        );
+        write('$root/linux/$name.cc', source);
+      }
+
+      // A path plugin the helper builds, and a hosted one the release's
+      // archive had, whose own sources don't compile: built again, it
+      // would fail.
+      plugin('plugin_r', 'plugin_r', 'int plugin_r_value() { return 1; }\n');
+      const hosted = 'pub/.pub-cache/hosted/pub.dev/plugin_h-1.0.0';
+      plugin(hosted, 'plugin_h', 'not code;\n');
+      write('app/pubspec.yaml', 'name: app\n');
+      write(
+        'app/.dart_tool/package_config.json',
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+            for (final (package, root) in [
+              ('plugin_r', 'plugin_r'),
+              ('plugin_h', hosted),
+            ])
+              {
+                'name': package,
+                'rootUri': Uri.directory(p.join(temp.path, root)).toString(),
+                'packageUri': 'lib/',
+              },
+          ],
+        }),
+      );
+      final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+        ..createSync(recursive: true);
+      final cache = p.join(temp.path, 'cache');
+      // plugin_h's entry as an install before #380 fetched it: no stamp.
+      final version =
+          File(p.join(runnerDir, 'VERSION')).readAsStringSync().trim();
+      final arch = '${Process.runSync('uname', ['-m']).stdout}'.trim();
+      final prebuilt = p.join(cache, 'plugin_h-1.0.0-$version-$arch');
+      write(p.join(prebuilt, 'libplugin_h.so'), 'prebuilt');
+      Future<String> install({String plugins = 'build'}) async {
+        final result = await Process.run(
+          p.join(runnerDir, 'tool', 'raccoon-device'),
+          ['install', bundle.path, 'app'],
+          environment: {
+            'RACCOON_RUNNER': binary!,
+            if (sdk != null) 'FLUTTER_ROOT': sdk,
+            'XDG_DATA_HOME': p.join(temp.path, 'data'),
+            'RACCOON_PLUGIN_CACHE': cache,
+            'RACCOON_NO_PREBUILT': '1',
+            // An archive of another's: any hosted plugin may be in it.
+            'RACCOON_PREBUILT_PLUGINS':
+                Uri.file(p.join(temp.path, 'none.tar.gz')).toString(),
+            'RACCOON_PLUGINS': plugins,
+          },
+        );
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        return '${result.stderr}';
+      }
+
+      File recipe() => File(
+        p.join(
+          Directory(cache)
+              .listSync()
+              .whereType<Directory>()
+              .singleWhere(
+                (entry) => p.basename(entry.path).startsWith('plugin_r-path-'),
+              )
+              .path,
+          '.recipe',
+        ),
+      );
+      const again = "plugin_r (again: its cached build was an older helper's)";
+
+      final first = await install();
+      expect(first, contains('1 built: plugin_r;'));
+      expect(first, contains('1 from the cache: plugin_h'));
+      // Its own build is kept...
+      expect(await install(), contains('2 from the cache'));
+      // ...an older helper's is built again, stamped or from before stamps...
+      recipe().writeAsStringSync('0123456789abcdef\n');
+      expect(await install(), contains('1 built: $again'));
+      final current = recipe().readAsStringSync();
+      expect(current, matches(RegExp(r'^[0-9a-f]{16}\n$')));
+      recipe().deleteSync();
+      expect(await install(), contains('1 built: $again'));
+      expect(recipe().readAsStringSync(), current);
+      // ...or kept, when nothing may be built.
+      recipe().writeAsStringSync('0123456789abcdef\n');
+      expect(
+        await install(plugins: 'cached'),
+        contains(
+          "2 from the cache: plugin_r (an older helper's build; "
+          'not built again: not built: native plugins are cached only',
+        ),
+      );
+      expect(await install(), contains('1 built: $again'));
+      expect(await install(), contains('2 from the cache'));
+      // The release's entry stays its own, and says so.
+      expect(
+        File(p.join(prebuilt, '.recipe')).readAsStringSync(),
+        'prebuilt\n',
+      );
     },
     skip: switch ((binary != null && sdk != null, Platform.isLinux)) {
       (false, _) => 'build the runner first, with a Flutter SDK on PATH',
