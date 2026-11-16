@@ -193,7 +193,12 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   (`.dart_tool/package_config.json`, every package with a Linux
   `pluginClass` or `ffiPlugin`), each in a CMake project of its own with
   what the desktop template gives a plugin, a few at once, and `run`
-  passes it. What a plugin's build gives the app goes beside its library,
+  passes it. The project's source is a desktop app's `linux/` folder as a
+  plugin sees it, made in the app's `.dart_tool` for the build and removed
+  after: the plugin reached as `flutter/ephemeral/.plugin_symlinks/<name>/linux`,
+  `generated_config.cmake` beside it as `flutter build linux` writes it,
+  and `${CMAKE_SOURCE_DIR}/..` the app's folder, where a plugin's
+  `dart run <plugin>:setup` resolves it (#364). What a plugin's build gives the app goes beside its library,
   as the template installs it: what its targets made (`.so.N` too), what
   `<name>_bundled_libraries` names, every name of a link's chain
   (`libonnxruntime.so`, `.so.1`, `.so.1.28.3`), a library's SONAME, and
@@ -248,8 +253,12 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   2026-11-16), these answer, built here: sqlite3_flutter_libs,
   isar_community_flutter_libs, objectbox_flutter_libs,
   flutter_libserialport, flutter_onnxruntime, fvp, and pdfrx and
-  sqlite3 through their build hooks. realm and rive_native don't build
-  yet: their CMake expects the app's own `linux/` folder. As on desktop,
+  sqlite3 through their build hooks; since #364 realm (20.2.0: a realm
+  opened, an object written and read back) and rive_native (0.1.11, under
+  `rive` 0.14: a `.riv` drawn through `Factory.flutter`). Both download
+  their native half at configure, into the pub cache, as on desktop.
+  `Factory.rive`, rive's own GPU renderer, makes its GL context from the
+  view's GdkWindow, which the registrar doesn't hand out (#365). As on desktop,
   sqlcipher_flutter_libs needs OpenSSL's development files, media_kit
   libmpv's, and tflite_flutter its library under `blobs/` beside the
   executable.

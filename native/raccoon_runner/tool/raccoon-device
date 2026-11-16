@@ -548,7 +548,9 @@ build_plugins_windows() {
 # comes from its archive, fetched once, on a thread beside the builds of
 # what it can't hold (tool/plugins' lock says what it was built from); the
 # rest builds here, each plugin in its own CMake project with what the
-# desktop template gives a plugin, so one that fails sinks nothing else. Every library lands flat in
+# desktop template gives a plugin, so one that fails sinks nothing else.
+# Their source is a desktop app's linux/ folder as a plugin sees it, in the
+# app's own .dart_tool (#364). Every library lands flat in
 # |out|/lib, which run puts on the runner's library path for the FFI ones. A
 # machine without a toolchain still gets the cached and prebuilt ones.
 # Not by engine: a Linux plugin builds against the runner's own library and
@@ -566,7 +568,7 @@ build_plugins_linux() {
   python3 - "$config" "$out" "$lib" "$headers" "$VIRTUAL_PLUGINS_LINUX" \
     "$cache" "$version" "$UNAME_M" \
     "${RACCOON_PREBUILT_PLUGINS:-https://github.com/SoFluffyOS/raccoon/releases/download/runner-v$version/plugins-linux-$UNAME_M.tar.gz}" \
-    "$ROOT/tool/plugins/pubspec.lock" <<'PY'
+    "$ROOT/tool/plugins/pubspec.lock" "$project" <<'PY'
 # What only a build or a fetch needs is imported there: tarfile, tempfile
 # and concurrent.futures cost a cached install ~6 ms (#315).
 import hashlib, importlib, json, os, re, sys, time
@@ -618,7 +620,7 @@ def clone(source, target):
     else:
         shutil.copy2(source, target)
 
-config, out, lib, headers, virtual, cache, runner_version, arch, prebuilt_url, prebuilt_lock = sys.argv[1:11]
+config, out, lib, headers, virtual, cache, runner_version, arch, prebuilt_url, prebuilt_lock, project_dir = sys.argv[1:12]
 # What an install that may only take the cache says of the rest (#214).
 SKIPPED = 'not built: native plugins are cached only (RACCOON_PLUGINS=cached)'
 virtual = set(virtual.split())
@@ -641,6 +643,16 @@ add_library(flutter INTERFACE)
 target_include_directories(flutter INTERFACE "%s")
 target_link_libraries(flutter INTERFACE "%s" PkgConfig::GTK PkgConfig::GLIB PkgConfig::GIO)
 set(FLUTTER_TARGET_PLATFORM %s)
+# What the Flutter tool's flutter/CMakeLists.txt takes from it: the version
+# into this scope, FLUTTER_ROOT and the rest kept to the include's.
+function(raccoon_generated_config)
+  include("${CMAKE_CURRENT_SOURCE_DIR}/flutter/ephemeral/generated_config.cmake")
+endfunction()
+raccoon_generated_config()
+add_subdirectory("flutter/ephemeral/.plugin_symlinks/${RACCOON_PLUGIN}/linux" "plugin")
+# As the list it is, ;-separated: a $<JOIN> would take a comma in a path for
+# its own and fail on a >.
+file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/bundled.txt" CONTENT "${${RACCOON_PLUGIN}_bundled_libraries}")
 """ % (headers, lib, {'aarch64': 'linux-arm64', 'arm64': 'linux-arm64'}.get(arch, 'linux-x64'))
 
 # A library is a .so, versioned or not: what a plugin bundles is often
@@ -1216,30 +1228,149 @@ def missing_packages(log):
     return found
 
 
+def sdk_root():
+    """The Flutter SDK in use, as the helper's sdk_root finds it."""
+    root = os.environ.get('FLUTTER_ROOT', '')
+    if root and os.path.isdir(os.path.join(root, 'bin', 'cache')):
+        return root
+    flutter = shutil.which('flutter')
+    return os.path.dirname(os.path.dirname(os.path.realpath(flutter))) if flutter else ''
+
+
+def generated_config():
+    """generated_config.cmake as `flutter build linux` writes it: the SDK,
+    the project, its version and the tool's environment. The defines are the
+    tool's own; a run's --dart-define is not known at install."""
+    import base64
+    flutter_root = sdk_root()
+    version = ''
+    try:
+        with open(os.path.join(project_dir, 'pubspec.yaml'), errors='replace') as f:
+            for line in f:
+                if line.startswith('version:'):
+                    version = re.sub(r'[^A-Za-z0-9.+-]', '', line[len('version:'):].split('#')[0])
+                    break
+    except OSError:
+        pass
+    parts = re.match(r'^(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?(?:\+([0-9A-Za-z.-]+))?$', version)
+    if parts is None:
+        version, parts = '1.0.0', re.match(r'^(\d+)\.(\d+)\.(\d+)()()$', '1.0.0')
+    build_id = parts.group(5) or ''
+    defines = [('FLUTTER_BUILD_NAME', version.split('+')[0]), ('FLUTTER_BUILD_NUMBER', build_id or None)]
+    try:
+        with open(os.path.join(flutter_root, 'bin', 'cache', 'flutter.version.json')) as f:
+            sdk = json.load(f)
+        defines += [('FLUTTER_VERSION', sdk.get('frameworkVersion')), ('FLUTTER_CHANNEL', sdk.get('channel')),
+                    ('FLUTTER_GIT_URL', sdk.get('repositoryUrl')),
+                    ('FLUTTER_FRAMEWORK_REVISION', (sdk.get('frameworkRevision') or '')[:10] or None),
+                    ('FLUTTER_ENGINE_REVISION', (sdk.get('engineRevision') or '')[:10] or None),
+                    ('FLUTTER_DART_VERSION', sdk.get('dartSdkVersion'))]
+    except (OSError, ValueError, AttributeError):
+        pass
+    encoded = ','.join(base64.b64encode(('%s=%s' % (k, v)).encode()).decode() for k, v in defines if v)
+    environment = [('FLUTTER_ROOT', flutter_root), ('PROJECT_DIR', project_dir), ('DART_DEFINES', encoded),
+                   ('DART_OBFUSCATION', 'false'), ('TRACK_WIDGET_CREATION', 'true'),
+                   ('TREE_SHAKE_ICONS', 'false'),
+                   ('PACKAGE_CONFIG', os.path.join(project_dir, '.dart_tool', 'package_config.json')),
+                   ('FLUTTER_TARGET', 'lib/main.dart')]
+    return ('# Generated code do not commit.\n'
+            'file(TO_CMAKE_PATH "%s" FLUTTER_ROOT)\n'
+            'file(TO_CMAKE_PATH "%s" PROJECT_DIR)\n\n'
+            'set(FLUTTER_VERSION "%s" PARENT_SCOPE)\n'
+            'set(FLUTTER_VERSION_MAJOR %s PARENT_SCOPE)\n'
+            'set(FLUTTER_VERSION_MINOR %s PARENT_SCOPE)\n'
+            'set(FLUTTER_VERSION_PATCH %s PARENT_SCOPE)\n'
+            'set(FLUTTER_VERSION_BUILD %s PARENT_SCOPE)\n\n'
+            '# Environment variables to pass to tool_backend.sh\n'
+            'list(APPEND FLUTTER_TOOL_ENVIRONMENT\n%s)\n') % (
+        flutter_root, project_dir, version, parts.group(1), parts.group(2), parts.group(3),
+        build_id if build_id.isdigit() else 0,
+        ''.join('  "%s=%s"\n' % pair for pair in environment))
+
+
+# Where plugins build from: a desktop app's linux/ folder as a plugin sees
+# it, made once an install, when one is to be built, and gone after. Its
+# CMakeLists.txt is the template's part a plugin relies on; beside it
+# flutter/ephemeral/generated_config.cmake, and each plugin reached as
+# flutter/ephemeral/.plugin_symlinks/<name>/linux. It is the app's
+# .dart_tool, tools' scratch no repository keeps, so ${CMAKE_SOURCE_DIR}/..
+# is the app's folder, as in a desktop build. CMake hands that path to
+# chdir, which takes .. on the disk: a tree elsewhere linking back can't be
+# the app. rive_native runs `dart run rive_native:setup` there, realm
+# includes ../../../../ephemeral/generated_config.cmake from where it is
+# reached, reads the app's pubspec six levels up and runs `dart run realm
+# install` there (#364). An app that can't take it (read-only) builds in a
+# tree of the install's own, as before.
+tree = None
+
+
+def plugin_tree():
+    global tree
+    if tree is not None:
+        return tree
+    for tree in (os.path.join(project_dir, '.dart_tool'), os.path.join(out, 'build', '.linux')):
+        ephemeral = os.path.join(tree, 'flutter', 'ephemeral')
+        try:
+            shutil.rmtree(ephemeral, ignore_errors=True)
+            os.makedirs(os.path.join(ephemeral, '.plugin_symlinks'))
+            with open(os.path.join(ephemeral, 'generated_config.cmake'), 'w') as f:
+                f.write(generated_config())
+            for plugin in wanted:
+                os.symlink(plugin['root'], os.path.join(ephemeral, '.plugin_symlinks', plugin['name']))
+            with open(os.path.join(tree, 'CMakeLists.txt'), 'w') as f:
+                f.write(TREE_MARK + PREAMBLE)
+            break
+        except OSError:
+            # Neither: each plugin's configure says what it misses.
+            continue
+    return tree
+
+
+TREE_MARK = '# raccoon-device: a desktop linux/ folder as a plugin sees it (#364).\n'
+
+
+def remove_tree():
+    """The tree, once every plugin is built: nothing of it stays in the app."""
+    if tree is None:
+        return
+    shutil.rmtree(os.path.join(tree, 'flutter', 'ephemeral'), ignore_errors=True)
+    try:
+        os.rmdir(os.path.join(tree, 'flutter'))
+    except OSError:
+        pass
+    listing = os.path.join(tree, 'CMakeLists.txt')
+    try:
+        with open(listing) as f:
+            ours = f.read(len(TREE_MARK)) == TREE_MARK
+        if ours:
+            os.remove(listing)
+    except OSError:
+        pass
+
+
 def build(plugin):
-    """Configures and builds [plugin] in a CMake project of its own, and
-    caches what it made: its state ('built', 'failed' or
+    """Configures and builds [plugin] in a CMake project of its own, from the
+    tree, and caches what it made: its state ('built', 'failed' or
     'built_nothing'), why, and its cached libraries."""
     name = plugin['name']
     cached = os.path.join(cache, plugin['key'])
     project = os.path.join(out, 'build', name)
     os.makedirs(project, exist_ok=True)
-    with open(os.path.join(project, 'CMakeLists.txt'), 'w') as f:
-        f.write(PREAMBLE)
-        f.write('add_subdirectory("%s" "plugin")\n' % os.path.join(plugin['root'], 'linux'))
-        # As the list it is, ;-separated: a $<JOIN> would take a comma in a
-        # path for its own and fail on a >.
-        f.write('file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/bundled.txt" '
-                'CONTENT "${%s_bundled_libraries}")\n' % name)
     log = os.path.join(project, 'build.log')
     cc, cxx = compilers()
+    # The SDK's dart first on the PATH: what a plugin's CMake runs with
+    # `dart` is the SDK the app resolved with.
+    flutter_root = sdk_root()
+    env = dict(os.environ, CC=cc, CXX=cxx)
+    if flutter_root:
+        env['PATH'] = os.path.join(flutter_root, 'bin') + os.pathsep + env.get('PATH', '')
     with open(log, 'w') as written:
-        configured = subprocess.run(['cmake', '-S', project, '-B', os.path.join(project, 'out'), '-G', 'Ninja'],
-                                    stdout=written, stderr=subprocess.STDOUT,
-                                    env=dict(os.environ, CC=cc, CXX=cxx)).returncode == 0
+        configured = subprocess.run(['cmake', '-S', plugin_tree(), '-B', os.path.join(project, 'out'), '-G', 'Ninja',
+                                     '-DRACCOON_PLUGIN=' + name],
+                                    stdout=written, stderr=subprocess.STDOUT, env=env).returncode == 0
         ok = configured and subprocess.run(['cmake', '--build', os.path.join(project, 'out'),
                                             '--parallel', str(JOBS)],
-                                           stdout=written, stderr=subprocess.STDOUT).returncode == 0
+                                           stdout=written, stderr=subprocess.STDOUT, env=env).returncode == 0
     if not ok:
         why = 'did not build; see ' + log
         # Not one CMake stopped configuring: that is a missing package
@@ -1342,6 +1473,7 @@ for group in (now, later):
             continue
         if pool is None:
             toolchain_identity()  # read once, before the threads keep failures
+            plugin_tree()  # once, before the threads share it
             import concurrent.futures
             pool = concurrent.futures.ThreadPoolExecutor(WORKERS)
         running[plugin['name']] = pool.submit(build, plugin)
@@ -1349,6 +1481,7 @@ for name, future in running.items():
     outcome[name] = future.result()
 if pool is not None:
     pool.shutdown()
+remove_tree()
 # A hosted plugin that got no library may still be in the archive: in a
 # checkout the lock can be a release ahead of it.
 unmet = [p for p in wanted if p['hosted'] and outcome[p['name']][0] not in ('cached', 'built')]
