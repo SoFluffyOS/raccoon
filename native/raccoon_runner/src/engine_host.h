@@ -338,6 +338,24 @@ class EngineHost {
   // frame for a hold, or for every such view when the frame waited the
   // hold for want of room (|held|). Loop thread, as a frame goes.
   void GrantReadbacks(uint64_t now, bool held);
+#if RACCOON_HAS_GL
+  // The first frame's readback target, to be made on the raster thread
+  // once the root isolate is up (#395).
+  struct ReadbackPrep {
+    std::shared_ptr<View> own;
+    GlRenderer* gl = nullptr;
+    SoftwareFrame* frame = nullptr;
+    size_t width = 0;
+    size_t height = 0;
+  };
+  static void OnRootIsolate(void* user_data);
+  // Posts |prep| to the raster thread, unless its view takes GPU buffers.
+  // readback_prep_mutex_ held.
+  void PostReadbackPrep(const ReadbackPrep& prep);
+  std::mutex readback_prep_mutex_;
+  ReadbackPrep readback_prep_;
+  bool root_isolate_up_ = false;
+#endif
   // |view|'s GPU target, null on the software renderer or for a view not
   // there. Loop thread.
   GpuRenderer* GpuOf(FlutterViewId view) const;

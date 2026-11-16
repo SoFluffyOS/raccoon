@@ -152,6 +152,9 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
   args.vsync_callback = OnVsync;
   args.update_semantics_callback2 = OnSemanticsUpdate;
   if (views_mode_) args.compositor = &compositor_;
+#if RACCOON_HAS_GL
+  args.root_isolate_create_callback = OnRootIsolate;
+#endif
 
   started_ = std::chrono::steady_clock::now();
   const FlutterEngineResult result =
@@ -192,29 +195,22 @@ bool EngineHost::Start(const EngineOptions& options, LogCallback on_log,
 #if RACCOON_HAS_GL
   // The first frame's readback target and the memory its pixels are kept
   // in, made on the raster thread while the app starts rather than as that
-  // frame is drawn and read back, where they held it up (#387). In views
-  // mode, the app's own view's. A first frame of another size makes its own
+  // frame is drawn and read back, where they held it up (#387). Made once
+  // the root isolate is up: by then a client that takes GPU buffers has
+  // said so, and the first frame goes into its ring (#395). In views mode,
+  // the app's own view's. A first frame of another size makes its own
   // then, as before.
   {
     const std::shared_ptr<View> own = views_mode_ ? ViewOf(0) : nullptr;
-    GlRenderer* gl = own ? own->gl : gl_;
-    SoftwareFrame* frame = own ? &own->frame : &frame_;
-    const size_t width = metrics_.width;
-    const size_t height = metrics_.height;
-    if (gl != nullptr) {
-      auto* task = new std::function<void()>([own, gl, frame, width, height] {
-        gl->PrepareReadback(width, height);
-        frame->Reserve(width * height * 4);
-      });
-      const bool posted = procs.PostRenderThreadTask(
-                              engine_,
-                              [](void* data) {
-                                auto* run = static_cast<std::function<void()>*>(data);
-                                (*run)();
-                                delete run;
-                              },
-                              task) == kSuccess;
-      if (!posted) delete task;
+    ReadbackPrep prep{own, own ? own->gl : gl_, own ? &own->frame : &frame_,
+                      metrics_.width, metrics_.height};
+    if (prep.gl != nullptr) {
+      std::lock_guard<std::mutex> lock(readback_prep_mutex_);
+      if (root_isolate_up_) {
+        PostReadbackPrep(prep);
+      } else {
+        readback_prep_ = std::move(prep);
+      }
     }
   }
 #endif
@@ -981,6 +977,41 @@ void EngineHost::OnVsync(void* user_data, intptr_t baton) {
   }
   if (host->on_wake_) host->on_wake_();
 }
+
+#if RACCOON_HAS_GL
+void EngineHost::OnRootIsolate(void* user_data) {
+  auto* host = static_cast<EngineHost*>(user_data);
+  std::lock_guard<std::mutex> lock(host->readback_prep_mutex_);
+  // Once: a hot restart makes another.
+  if (host->root_isolate_up_) return;
+  host->root_isolate_up_ = true;
+  if (host->readback_prep_.gl == nullptr) return;
+  host->PostReadbackPrep(host->readback_prep_);
+  host->readback_prep_ = ReadbackPrep{};
+}
+
+void EngineHost::PostReadbackPrep(const ReadbackPrep& prep) {
+  // A client on GPU buffers takes the first frame from the ring: the
+  // target would be let go unused and sit in the driver's cache, 12 MB of
+  // VRAM at phone size (#395).
+  if (prep.gl->pool_wanted()) return;
+  auto* task = new std::function<void()>(
+      [own = prep.own, gl = prep.gl, frame = prep.frame, width = prep.width,
+       height = prep.height] {
+        gl->PrepareReadback(width, height);
+        frame->Reserve(width * height * 4);
+      });
+  const bool posted = loader_.procs().PostRenderThreadTask(
+                          engine_,
+                          [](void* data) {
+                            auto* run = static_cast<std::function<void()>*>(data);
+                            (*run)();
+                            delete run;
+                          },
+                          task) == kSuccess;
+  if (!posted) delete task;
+}
+#endif
 
 void EngineHost::ServiceVsync() {
   intptr_t baton = 0;

@@ -81,6 +81,12 @@ class GlRenderer : public GpuRenderer {
   bool can_export() const { return can_export_; }
   // Whether frames leave with a native fence rather than a glFinish.
   bool has_fences() const { return has_fences_; }
+  // Whether a client asked for the ring: its frames go there, not by
+  // readback.
+  bool pool_wanted() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return pool_wanted_;
+  }
 
   // The pool is a ring of dmabufs; false, with why, when the display cannot
   // export.
