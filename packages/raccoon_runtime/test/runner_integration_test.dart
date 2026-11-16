@@ -1545,16 +1545,27 @@ void main() {
           'XDG_RUNTIME_DIR': temp.path,
           'TMPDIR': '${temp.path}/',
         };
+        // When each step was done, for a failure's message: three times on
+        // CI's x64 Mac no first frame came in 15 s, and nothing said why
+        // (#383).
+        final clock = Stopwatch()..start();
+        final epoch = DateTime.now().millisecondsSinceEpoch;
+        final steps = <String>[];
+        void done(String step) =>
+            steps.add('$step at ${clock.elapsedMilliseconds} ms');
         final install = await Process.run(helper, [
           'install',
           assets,
           name,
         ], environment: environment);
+        done('installed');
         expect(install.exitCode, 0, reason: '${install.stderr}');
+        final watch = await _HeldWatch.start();
         final run = await Process.start(helper, [
           'run',
           name,
         ], environment: environment);
+        done('run started');
         final output = <String>[];
         run.stderr.transform(utf8.decoder).listen(output.add);
         run.stdout.drain<void>().ignore();
@@ -1566,6 +1577,7 @@ void main() {
             await Future<void>.delayed(const Duration(milliseconds: 100));
           }
           final found = discovery.list();
+          done('listed');
           expect(found, hasLength(1), reason: output.join());
           expect(RunnerDiscovery.appNameOf(found.single), name);
           expect(
@@ -1574,13 +1586,25 @@ void main() {
             reason: 'the helper leaves its socket directory rwx------',
           );
           final client = await RunnerClient.connect(found.single);
+          done('connected');
           try {
             await client.frames.first.timeout(const Duration(seconds: 15));
+            done('first frame');
           } finally {
             client.shutdown();
             await client.close();
           }
         } finally {
+          done('given up or done');
+          final longest = await watch.stop();
+          final said = output.join().trimRight().split('\n');
+          printOnFailure(
+            '${steps.join(', ')}. This process was held up for $longest ms '
+            'at the longest; held up at all (ms at): '
+            '${watch.describe(epoch)}. The helper and the runner last '
+            'said:\n'
+            '${said.skip(max(0, said.length - 30)).join('\n')}',
+          );
           run.kill();
           await run.exitCode;
           temp.deleteSync(recursive: true);
@@ -8033,6 +8057,7 @@ void main() => runApp(
       final clients = [await RunnerClient.connect(endpoint, gpuBuffers: true)];
       final users = <_RingUser>[];
       final gpuSockets = <Socket>[];
+      _HeldWatch? watch;
       try {
         final first = clients.first;
         final firstGpu = await first.frames
@@ -8051,8 +8076,11 @@ void main() => runApp(
           await view.hello.timeout(const Duration(seconds: 10));
           view.resize(320, 240, 1);
         }
+        // One clock for the frames' arrivals, the hold and the counts.
+        final clock = Stopwatch()..start();
+        final epoch = DateTime.now().millisecondsSinceEpoch;
         for (final client in clients) {
-          users.add(_RingUser(client));
+          users.add(_RingUser(client, clock: clock));
           final set = await client.gpuBufferSets.first.timeout(
             const Duration(seconds: 10),
           );
@@ -8064,27 +8092,66 @@ void main() => runApp(
           );
         }
         await Future<void>.delayed(const Duration(milliseconds: 500));
+        watch = await _HeldWatch.start();
+        final from = clock.elapsedMilliseconds;
         final before = await _framesOver(users, const Duration(seconds: 1));
 
         // The last view stops giving its buffers back.
         final holder = users.last;
+        final holdFrom = clock.elapsedMilliseconds;
         holder.releasing = false;
         await Future<void>.delayed(const Duration(milliseconds: 500));
+        final heldFrom = clock.elapsedMilliseconds;
         final held = await _framesOver(users, const Duration(seconds: 1));
+        final heldTo = clock.elapsedMilliseconds;
 
         holder.resume();
         await Future<void>.delayed(const Duration(milliseconds: 300));
         final after = await _framesOver(users, const Duration(seconds: 1));
+        final to = clock.elapsedMilliseconds;
+        final longest = await watch.stop();
 
+        // How long this process was held up within the second counted with
+        // the ring held.
+        var heldUp = 0;
+        for (final (at, millis) in watch.holds) {
+          final start = at - epoch;
+          heldUp += max(0, min(start + millis, heldTo) - max(start, heldFrom));
+        }
+        const bin = 250;
+        String binned(_RingUser user, int at) {
+          final inBin = user.arrivals.where(
+            (arrival) => arrival.$1 >= at && arrival.$1 < at + bin,
+          );
+          final gpu = inBin.where((arrival) => arrival.$2).length;
+          return '$gpu+${inBin.length - gpu}'.padLeft(7);
+        }
+
+        final timeline = [
+          for (var at = from; at < to; at += bin)
+            '${'${at - from}'.padLeft(6)} ms'
+                '${users.map((user) => binned(user, at)).join()}',
+        ];
         printOnFailure(
           '(GPU, read back) frames a second for views 0, 1, 2: $before '
           'before, $held with view 2 holding its ring, $after once it gave '
-          'it back; the runner last said:\n${runner.lastLines.join('\n')}',
+          'it back.\n'
+          'View 2 held its ring from ${holdFrom - from} ms to '
+          '${heldTo - from} ms; the second counted with it held began at '
+          '${heldFrom - from} ms, and this process was held up for '
+          '$heldUp ms of it. Held up at all (ms at): '
+          '${watch.describe(epoch + from)}; the longest $longest ms.\n'
+          'GPU+read back frames per $bin ms, views 0, 1, 2:\n'
+          '${timeline.join('\n')}\n'
+          'The runner last said:\n${runner.lastLines.join('\n')}',
         );
+        // While this process is held up the client gives nothing back: two
+        // frames fill each view's ring and the rest are dropped. So the
+        // pace is kept over the time this process ran (#383).
         for (final view in [0, 1]) {
           expect(
             held[view].$1,
-            greaterThanOrEqualTo(before[view].$1 * 3 ~/ 4),
+            greaterThanOrEqualTo(before[view].$1 * 3 * (1000 - heldUp) ~/ 4000),
             reason: 'view $view kept its pace',
           );
         }
@@ -8095,6 +8162,7 @@ void main() => runApp(
         // Given back, it is drawn into again.
         expect(after[2].$1, greaterThanOrEqualTo(before[2].$1 ~/ 2));
       } finally {
+        await watch?.stop();
         for (final user in users) {
           await user.cancel();
         }
@@ -11237,9 +11305,17 @@ class _HeldWatch {
 
   static const _tick = Duration(milliseconds: 2);
 
+  /// A hold this long or longer, past the tick, is kept in [holds].
+  static const _noted = 20;
+
   final Isolate _isolate;
   final StreamIterator<Object?> _replies;
   final SendPort _stop;
+  Future<int>? _stopped;
+
+  /// The holds of [_noted] ms or more, once stopped: when each started, in
+  /// milliseconds since the epoch, and how long it was.
+  var holds = const <(int, int)>[];
 
   static Future<_HeldWatch> start() async {
     final port = ReceivePort();
@@ -11250,29 +11326,52 @@ class _HeldWatch {
   }
 
   /// The longest time the watch went without a tick, past its own tick.
-  Future<int> stop() async {
+  /// Again, the same answer.
+  Future<int> stop() => _stopped ??= _stopOnce();
+
+  Future<int> _stopOnce() async {
     _stop.send(null);
     await _replies.moveNext();
-    final longest = _replies.current! as int;
+    final [longest as int, ...noted] = _replies.current! as List<Object?>;
     await _replies.cancel();
     _isolate.kill();
+    holds = [
+      for (var i = 0; i < noted.length; i += 2)
+        (noted[i]! as int, noted[i + 1]! as int),
+    ];
     return max(0, longest - _tick.inMilliseconds);
   }
+
+  /// [holds] for a failure's message, from [since] (since the epoch).
+  String describe(int since) =>
+      holds.isEmpty
+          ? 'none of $_noted ms or more'
+          : holds
+              .map((hold) => '${hold.$2} ms at ${hold.$1 - since}')
+              .join(', ');
 
   static void _watch(SendPort out) {
     final control = ReceivePort();
     out.send(control.sendPort);
     final clock = Stopwatch()..start();
+    final epoch = DateTime.now().millisecondsSinceEpoch;
     var last = 0;
     var longest = 0;
-    final ticks = Timer.periodic(_tick, (_) {
+    final noted = <int>[];
+    void tick() {
       final now = clock.elapsedMilliseconds;
-      longest = max(longest, now - last);
+      final gap = now - last;
+      longest = max(longest, gap);
+      final held = gap - _tick.inMilliseconds;
+      if (held >= _noted) noted.addAll([epoch + last, held]);
       last = now;
-    });
+    }
+
+    final ticks = Timer.periodic(_tick, (_) => tick());
     control.first.then((_) {
       ticks.cancel();
-      out.send(max(longest, clock.elapsedMilliseconds - last));
+      tick();
+      out.send([longest, ...noted]);
       control.close();
     });
   }
@@ -11360,7 +11459,7 @@ Future<Process> _startHelper(
 /// each frame shown gives the one before back, unless [releasing] is off
 /// (a frame off screen, a tab hidden), when it keeps every one it gets.
 class _RingUser {
-  _RingUser(this.client) {
+  _RingUser(this.client, {this.clock}) {
     _frames = client.frames.listen(_onFrame);
   }
 
@@ -11371,7 +11470,15 @@ class _RingUser {
   var gpuFrames = 0;
   var pixelFrames = 0;
 
+  /// With a [clock], when each frame came on it, and whether in a GPU
+  /// buffer.
+  final Stopwatch? clock;
+  final arrivals = <(int, bool)>[];
+
   void _onFrame(Frame frame) {
+    if (clock case final clock?) {
+      arrivals.add((clock.elapsedMilliseconds, frame.inGpuBuffer));
+    }
     if (!frame.inGpuBuffer) {
       pixelFrames++;
       return;
