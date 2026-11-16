@@ -122,7 +122,7 @@ void Usage(FILE* to) {
                "       raccoon_runner --version | --help\n"
                "       render takes [--view WxH@DPR] for each view beside the first\n"
                "common: [--width N] [--height N] [--dpr X] [--data-dir DIR] [--renderer auto|gl|metal|vulkan|software]"
-               " [--views]"
+               " [--views] [--impeller] [--flutter-gpu]"
                " [--plugins MANIFEST] [--camera-source PNG|JPEG]"
                " [-- engine switches...]\n");
 }
@@ -146,6 +146,8 @@ void Help() {
                "  RACCOON_HEADLESS=1   --headless, for a run through the Flutter tool\n"
                "  RACCOON_RENDERER     --renderer\n"
                "  RACCOON_VIEWS=1      --views\n"
+               "  RACCOON_IMPELLER=1   rasterizes with Impeller on the GL renderer\n"
+               "  RACCOON_FLUTTER_GPU=1  Flutter GPU (flutter_scene), Impeller with it\n"
                "  RACCOON_PARENT_PID   a process whose end stops the run, as the parent's does\n"
                "  RACCOON_TRACE=1      prints what the client sends\n");
 }
@@ -169,6 +171,14 @@ bool ParseOptions(int argc, char** argv, Options* options) {
     }
     if (arg == "--headless") {
       options->headless = true;
+      continue;
+    }
+    if (arg == "--impeller") {
+      options->engine.impeller = true;
+      continue;
+    }
+    if (arg == "--flutter-gpu") {
+      options->engine.flutter_gpu = true;
       continue;
     }
     if (i + 1 >= argc) return false;
@@ -445,6 +455,15 @@ raccoon::EngineOptions EngineOptionsFromEnvironment(raccoon::EngineOptions engin
   }
   if (const char* env = std::getenv("RACCOON_VIEWS"); env != nullptr && std::strcmp(env, "1") == 0) {
     engine.views = true;
+  }
+  // The Flutter tool hands a custom device neither --enable-impeller nor
+  // --enable-flutter-gpu: these ask for them through it (#379).
+  if (const char* env = std::getenv("RACCOON_IMPELLER"); env != nullptr && std::strcmp(env, "1") == 0) {
+    engine.impeller = true;
+  }
+  if (const char* env = std::getenv("RACCOON_FLUTTER_GPU");
+      env != nullptr && std::strcmp(env, "1") == 0) {
+    engine.flutter_gpu = true;
   }
   return engine;
 }

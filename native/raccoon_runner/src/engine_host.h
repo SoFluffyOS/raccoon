@@ -59,6 +59,13 @@ struct EngineOptions {
   // the app more views than its own (#182). Off, the engine draws its one
   // view as it always did.
   bool views = false;
+  // Rasterizes with Impeller where the GPU renderer is GL (#379): the
+  // embedder's GL ES path, as Flutter's Linux desktop draws by default.
+  // Off, Skia. The software renderer is always Skia: Impeller has none.
+  bool impeller = false;
+  // Flutter GPU (--enable-flutter-gpu) for apps built on it, flutter_scene
+  // among them; implies Impeller.
+  bool flutter_gpu = false;
 };
 
 // What covers a view's edges (an on-screen keyboard), physical pixels.
@@ -344,6 +351,8 @@ class EngineHost {
   static void OnViewAdded(const FlutterAddViewResult* result);
   static void OnViewRemoved(const FlutterRemoveViewResult* result);
   bool views_mode_ = false;
+  // The engine rasterizes with Impeller (#379).
+  bool impeller_ = false;
   FlutterCompositor compositor_{};
   // The views beyond view 0, and the ones removed, kept until the raster
   // thread lets their targets go (a GL target needs the context current).
