@@ -31,6 +31,23 @@ jobs:
       - run: dart analyze
       - run: dart test
 
+  # The MCP server's tools, its bridge to a host's endpoint and its stdio
+  # transport; the device sessions skip without a simulator or
+  # RACCOON_MCP_HEADLESS (Device tests runs them headless).
+  raccoon_mcp:
+    name: raccoon_mcp
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: packages/raccoon_mcp
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dart-lang/setup-dart@v1
+      - run: dart pub get
+      - run: dart analyze
+      - run: dart test
+
   raccoon_view:
     name: raccoon_view
     runs-on: ubuntu-latest

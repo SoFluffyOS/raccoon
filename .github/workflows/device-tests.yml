@@ -3,7 +3,7 @@
 # proof is the runner's examples: example/hello's integration test through
 # flutter test and flutter drive, and example/harness_test, plain dart test
 # with raccoon_runtime's RaccoonTestDevice on a phone, a tablet and a
-# desktop at once.
+# desktop at once, and raccoon_mcp's tools driving hello headless.
 name: Device tests
 
 # Only when asked for: from the Actions tab, or
@@ -77,6 +77,18 @@ jobs:
         run: |
           dart pub get
           dart test --reporter expanded
+
+      # An agent's session over MCP with no simulator: raccoon_mcp runs hello
+      # on the phone and the tablet itself, screenshots, taps, resizes,
+      # reads the runner's lines, reloads.
+      - name: raccoon_mcp headless over stdio
+        timeout-minutes: 10
+        working-directory: packages/raccoon_mcp
+        env:
+          RACCOON_MCP_HEADLESS: '1'
+        run: |
+          dart pub get
+          dart test test/devices_test.dart --reporter expanded
 
       # What each run's runner said, timestamped, for one that went wrong.
       - name: The runners' logs
