@@ -372,7 +372,6 @@ bool GlRenderer::EnsureSize(size_t width, size_t height) {
   width_ = width;
   height_ = height;
   readback_.resize(width * height * 4);
-  frame_.resize(width * height * 4);
   return true;
 }
 
@@ -847,13 +846,19 @@ bool GlRenderer::Present(const FrameCallback& callback) {
                reads_bgra_ ? GL_BGRA_EXT : GL_RGBA, GL_UNSIGNED_BYTE,
                readback_.data());
   // GL's rows come bottom first; the frame path wants the top row first.
-  // The byte order stays as read: the frame says which it is.
+  // They are turned over in place: a second buffer of the frame's size cost
+  // its pages on the first frame and a copy on every one (#387). The byte
+  // order stays as read: the frame says which it is.
   const size_t row_bytes = width_ * 4;
-  for (size_t row = 0; row < height_; ++row) {
-    std::memcpy(frame_.data() + row * row_bytes,
-                readback_.data() + (height_ - 1 - row) * row_bytes, row_bytes);
+  row_.resize(row_bytes);
+  for (size_t top = 0; top < height_ / 2; ++top) {
+    uint8_t* const upper = readback_.data() + top * row_bytes;
+    uint8_t* const lower = readback_.data() + (height_ - 1 - top) * row_bytes;
+    std::memcpy(row_.data(), upper, row_bytes);
+    std::memcpy(upper, lower, row_bytes);
+    std::memcpy(lower, row_.data(), row_bytes);
   }
-  callback(frame_.data(), row_bytes, height_, reads_bgra_);
+  callback(readback_.data(), row_bytes, height_, reads_bgra_);
   return true;
 }
 

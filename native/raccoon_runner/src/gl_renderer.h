@@ -146,7 +146,8 @@ class GlRenderer : public GpuRenderer {
   size_t height_ = 0;
   bool reads_bgra_ = false;
   std::vector<uint8_t> readback_;
-  std::vector<uint8_t> frame_;
+  // One row, for turning the readback over in place.
+  std::vector<uint8_t> row_;
   std::string description_;
 
   bool can_export_ = false;
