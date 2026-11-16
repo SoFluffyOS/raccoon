@@ -42,6 +42,13 @@ class GlRenderer : public GpuRenderer {
   // A sibling's goes with the context current, made so if it is not.
   void Shutdown() override;
 
+  // The engine asks for the next frame's framebuffer as it presents this
+  // one (fbo_reset_after_present). A pool buffer is then chosen when that
+  // frame starts, at the engine's make-current, not a frame ahead: taken at
+  // the present, it sat unused a whole frame, and a vsync waited on the
+  // ring for the frame after (#123). The root renderer of a single view.
+  void ChooseAtFrameStart(bool at_start) { choose_at_start_ = at_start; }
+
   // The engine's callbacks, on its raster thread.
   bool MakeCurrent();
   // Makes the context current on this thread unless it is: the compositor's
@@ -114,6 +121,13 @@ class GlRenderer : public GpuRenderer {
   // Context current, mutex held.
   bool BuildPool(size_t width, size_t height);
   void DestroyPool();
+  // Takes a free pool buffer and attaches it to the pool's framebuffer;
+  // false when every one is taken. |*fence| is the client's fence for it,
+  // to wait on, -1 for none. Context current, mutex held.
+  bool TakeFreeBuffer(int* fence);
+  // The frame starts: the buffer Fbo left to choose is chosen. Context
+  // current.
+  void ChooseBuffer();
 
   EGLDisplay display_ = EGL_NO_DISPLAY;
   // A sibling's context is its renderer's: it never makes or ends one.
@@ -185,6 +199,14 @@ class GlRenderer : public GpuRenderer {
   int current_ = -1;
   // A frame went by readback with every pool buffer taken; mutex_.
   bool missed_ = false;
+  bool choose_at_start_ = false;
+  // Fbo gave the pool's framebuffer with no buffer chosen yet; mutex_.
+  bool choose_ = false;
+  // Between the engine's make-current and the frame's present, where an
+  // Fbo (a resize) chooses at once; mutex_.
+  bool in_frame_ = false;
+  // The pool buffer taken last; mutex_.
+  int last_taken_ = -1;
   GpuFrameCallback gpu_frame_;
 };
 

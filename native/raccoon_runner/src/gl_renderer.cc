@@ -212,8 +212,12 @@ void GlRenderer::Shutdown() {
 }
 
 bool GlRenderer::MakeCurrent() {
-  return eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, context_) ==
-         EGL_TRUE;
+  if (eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, context_) != EGL_TRUE) {
+    return false;
+  }
+  // The engine makes the context current as each frame starts.
+  if (choose_at_start_) ChooseBuffer();
+  return true;
 }
 
 bool GlRenderer::EnsureCurrent() {
@@ -528,6 +532,7 @@ void GlRenderer::DestroyPool() {
   }
   pool_.clear();
   pool_width_ = pool_height_ = 0;
+  last_taken_ = -1;
 }
 
 bool GlRenderer::BuildPool(size_t width, size_t height) {
@@ -598,6 +603,52 @@ void GlRenderer::CountFrame() {
   DeleteForgotten();
 }
 
+bool GlRenderer::TakeFreeBuffer(int* fence) {
+  *fence = -1;
+  // Round the ring from the one taken last: chosen as a frame starts, the
+  // first free one is often the one given back just now.
+  for (size_t n = 1; n <= pool_.size(); ++n) {
+    const size_t i = (static_cast<size_t>(last_taken_ + 1) + n - 1) % pool_.size();
+    if (pool_[i].busy) continue;
+    last_taken_ = static_cast<int>(i);
+    pool_[i].busy = true;
+    current_ = static_cast<int>(i);
+    *fence = pool_[i].fence;
+    pool_[i].fence = -1;
+    glBindFramebuffer(GL_FRAMEBUFFER, pool_fbo_);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           pool_[i].texture, 0);
+    if (kTrace) std::fprintf(stderr, "🦝 gl fbo -> pool %zu\n", i);
+    return true;
+  }
+  return false;
+}
+
+void GlRenderer::ChooseBuffer() {
+  int fence = -1;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    in_frame_ = true;
+    if (!choose_) return;
+    choose_ = false;
+    if (pool_fbo_ == 0) return;
+    BindingsKept kept;
+    if (!pool_wanted_ || !TakeFreeBuffer(&fence)) {
+      // Every buffer is with the client, or the pool went off: the frame
+      // draws into the readback texture, through the framebuffer the engine
+      // holds, and goes by readback.
+      if (kTrace && pool_wanted_) std::fprintf(stderr, "🦝 gl fbo -> readback\n");
+      if (EnsureSize(pool_width_, pool_height_)) {
+        glBindFramebuffer(GL_FRAMEBUFFER, pool_fbo_);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture_,
+                               0);
+      }
+    }
+  }
+  // The client may still be reading the buffer: draw after that.
+  if (fence >= 0) WaitFence(fence);
+}
+
 uint32_t GlRenderer::Fbo(size_t width, size_t height) {
   if (width == 0 || height == 0) return 0;
   CountFrame();
@@ -611,6 +662,7 @@ uint32_t GlRenderer::Fbo(size_t width, size_t height) {
       pool_[current_].busy = false;
     }
     current_ = -1;
+    choose_ = false;
     if (!pool_wanted_ && !pool_.empty()) DestroyPool();
     if (pool_wanted_ && can_export_) {
       const bool stale = pool_.empty() || pool_width_ != width || pool_height_ != height;
@@ -630,18 +682,16 @@ uint32_t GlRenderer::Fbo(size_t width, size_t height) {
                        width, height);
         }
       }
-      for (size_t i = 0; i < pool_.size(); ++i) {
-        if (pool_[i].busy) continue;
-        pool_[i].busy = true;
-        current_ = static_cast<int>(i);
-        fence = pool_[i].fence;
-        pool_[i].fence = -1;
+      if (!pool_.empty() && choose_at_start_ && !in_frame_) {
+        // Asked at the present before: the frame starts later, and takes
+        // whichever buffer is free then. Nothing is attached till then.
+        BindingsKept kept;
         glBindFramebuffer(GL_FRAMEBUFFER, pool_fbo_);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                               GL_TEXTURE_2D, pool_[i].texture, 0);
-        if (kTrace) std::fprintf(stderr, "🦝 gl fbo -> pool %zu\n", i);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+        choose_ = true;
         fbo = pool_fbo_;
-        break;
+      } else if (TakeFreeBuffer(&fence)) {
+        fbo = pool_fbo_;
       }
       // Every buffer is with the client: this frame goes by readback.
     }
@@ -670,6 +720,7 @@ bool GlRenderer::Present(const FrameCallback& callback) {
     height = pool_height_;
     pooled = pool_wanted_;
     current_ = -1;
+    in_frame_ = false;
     presenting_ = pooled ? index : -1;
     // A frame going by readback while a client takes the ring: it never
     // sees it. Marked here, where it goes, not where Skia took the

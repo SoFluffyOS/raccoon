@@ -7243,6 +7243,95 @@ void main() => runApp(
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
+  // #123: on GL the engine takes the next frame's framebuffer as it
+  // presents a frame. Its ring buffer was chosen then, so a vsync that
+  // asked for a free one looked a frame ahead: with the client holding all
+  // but one, the next frame waited the whole hold for a buffer it had.
+  test(
+    'a GPU client holding all but one buffer gets the next frame without the ring\'s hold',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint, gpuBuffers: true);
+      try {
+        // Every buffer the client is sent stays with it.
+        final held = <Frame>[];
+        Completer<void>? next;
+        final frames = client.frames.listen((frame) {
+          if (!frame.inGpuBuffer) return;
+          held.add(frame);
+          next?.complete();
+          next = null;
+        });
+        await client.hello.timeout(const Duration(seconds: 10));
+        final ring = await client.gpuBufferSets.first
+            .then<GpuBuffers?>((set) => set)
+            .timeout(const Duration(seconds: 15), onTimeout: () => null);
+        // Without a GPU (a CI machine) there is no ring to hold.
+        if (ring == null) {
+          await frames.cancel();
+          printOnFailure('no GPU ring on this host');
+          return;
+        }
+        // One frame a tap: the box changes colour.
+        Future<Duration> tap() async {
+          final arrived = next = Completer<void>();
+          final clock = Stopwatch()..start();
+          for (final (phase, buttons) in [
+            (PointerPhase.POINTER_PHASE_DOWN, 1),
+            (PointerPhase.POINTER_PHASE_UP, 0),
+          ]) {
+            client.sendPointer(
+              PointerEvent(
+                phase: phase,
+                x: 400,
+                y: 300,
+                buttons: Int64(buttons),
+                device: PointerDevice.POINTER_DEVICE_MOUSE,
+                pointerId: 1,
+              ),
+            );
+          }
+          await arrived.future.timeout(const Duration(seconds: 5));
+          final took = clock.elapsed;
+          // Nothing else in flight before the next tap.
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+          return took;
+        }
+
+        while (held.length < ring.count - 1) {
+          await tap();
+        }
+        // All but one buffer held: the last one is free for this frame.
+        final took = await tap();
+        expect(held, hasLength(ring.count));
+        expect(
+          held.map((frame) => frame.bufferIndex).toSet(),
+          hasLength(ring.count),
+        );
+        // The ring's hold is 100 ms.
+        expect(took, lessThan(const Duration(milliseconds: 90)));
+        await frames.cancel();
+      } finally {
+        client.shutdown();
+        await client.close();
+        await _expectExit(runner);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   test(
     'a view that comes back to a running app gets GPU frames again',
     () async {

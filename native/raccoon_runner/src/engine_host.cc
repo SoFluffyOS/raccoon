@@ -715,6 +715,9 @@ bool EngineHost::ConfigureRenderer(const std::string& asked,
       // Ask for the framebuffer every frame: with a pool it is a different
       // buffer each time.
       config.fbo_reset_after_present = true;
+      // Which buffer is chosen as the frame starts. In views mode each
+      // view's backing store is asked for then already.
+      if (!views_mode_) gl_->ChooseAtFrameStart(true);
       renderer_ = "gl (" + gl_->description() + ")";
       return true;
     }
