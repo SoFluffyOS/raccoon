@@ -3341,6 +3341,98 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
     },
     timeout: const Timeout(Duration(minutes: 4)),
   );
+  // raccoon#376: flutter_js puts its prebuilt QuickJS bridge in the bundle
+  // with an install rule of its own, which a desktop build's install step
+  // runs; built on its own, the plugin's install rules never ran.
+  test(
+    'on Linux what a plugin installs in the bundle\'s lib/ goes with it',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_installed');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      write(
+        'plugin_q/pubspec.yaml',
+        'name: plugin_q\nversion: 1.0.0\n'
+            'flutter:\n  plugin:\n    platforms:\n'
+            '      linux:\n        ffiPlugin: true\n',
+      );
+      // flutter_js's own lines: the prefix taken for its build folder's
+      // while CMake calls it the default, the bridge installed beneath it.
+      write(
+        'plugin_q/linux/CMakeLists.txt',
+        'cmake_minimum_required(VERSION 3.14)\n'
+            'project(plugin_q LANGUAGES CXX)\n'
+            'add_library(plugin_q SHARED q.cc)\n'
+            'if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)\n'
+            '  set(CMAKE_INSTALL_PREFIX "\${PROJECT_BINARY_DIR}/bundle" '
+            'CACHE PATH "..." FORCE)\n'
+            'endif()\n'
+            'install(FILES "\${CMAKE_CURRENT_SOURCE_DIR}/shared/'
+            'libplugin_q_bridge.so" DESTINATION "\${CMAKE_INSTALL_PREFIX}/lib")\n',
+      );
+      write('plugin_q/linux/q.cc', 'int plugin_q_value() { return 7; }\n');
+      write('plugin_q/linux/shared/libplugin_q_bridge.so', 'prebuilt\n');
+      write('app/pubspec.yaml', 'name: app\ndependencies:\n  plugin_q:\n');
+      write(
+        'app/.dart_tool/package_config.json',
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+            {
+              'name': 'plugin_q',
+              'rootUri': '../../plugin_q',
+              'packageUri': 'lib/',
+            },
+          ],
+        }),
+      );
+      final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+        ..createSync(recursive: true);
+      final data = p.join(temp.path, 'data');
+      final cache = p.join(temp.path, 'cache');
+      final result = await Process.run(
+        p.join(runnerDir, 'tool', 'raccoon-device'),
+        ['install', bundle.path, 'app'],
+        environment: {
+          'RACCOON_RUNNER': binary!,
+          if (sdk != null) 'FLUTTER_ROOT': sdk,
+          'XDG_DATA_HOME': data,
+          'RACCOON_PLUGIN_CACHE': cache,
+          'RACCOON_NO_PREBUILT': '1',
+        },
+      );
+      expect(result.exitCode, 0, reason: '${result.stderr}');
+      expect(
+        '${result.stderr}',
+        contains('1 built: plugin_q'),
+        reason: '${result.stderr}',
+      );
+      final entry = Directory(
+        cache,
+      ).listSync().whereType<Directory>().singleWhere(
+        (folder) => p.basename(folder.path).startsWith('plugin_q-'),
+      );
+      expect(entry.listSync().map((file) => p.basename(file.path)).toSet(), {
+        'libplugin_q.so',
+        'libplugin_q_bridge.so',
+      });
+      final lib = p.join(data, 'raccoon', 'apps', 'app', 'plugins', 'lib');
+      expect(
+        File(p.join(lib, 'libplugin_q_bridge.so')).readAsStringSync(),
+        'prebuilt\n',
+      );
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isLinux)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'the Linux half of the helper',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 4)),
+  );
   // raccoon#16: flutter_secure_storage_linux without libsecret-1's
   // development files said only "did not build; see <log>".
   test(

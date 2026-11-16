@@ -227,6 +227,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   (`libonnxruntime.so`, `.so.1`, `.so.1.28.3`), a library's SONAME, and
   what those need from elsewhere in the build tree (a FetchContent
   library), which a desktop build finds through the build tree's RUNPATH.
+  Its own install rules run after it builds, into a bundle in its build
+  folder, as a desktop build's install step runs them: what they put in
+  `lib/` goes with its libraries (flutter_js's QuickJS bridge, #376).
   Plugins are opened globally, as an app's executable links them, so
   sqlite3 finds `sqlite3_flutter_libs`' build in the process. The app gets
   a `lib/` beside its executable, as Flutter's bundle has, with links to

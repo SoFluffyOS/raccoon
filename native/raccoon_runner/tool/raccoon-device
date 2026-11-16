@@ -794,7 +794,7 @@ def gather(project):
             if need in everywhere:
                 take(everywhere[need])
 
-    for path in sorted(shared_libraries(os.path.join(tree, 'plugin'), cargo=False).values()) + bundled(project):
+    for path in sorted(shared_libraries(os.path.join(tree, 'plugin'), cargo=False).values()) + bundled(project) + installed(project):
         take(path)
     return libs
 
@@ -863,6 +863,19 @@ def bundled(project):
     try:
         with open(os.path.join(project, 'out', 'bundled.txt')) as f:
             return [path for path in f.read().split(';') if path and os.path.isfile(path)]
+    except OSError:
+        return []
+
+
+def installed(project):
+    """What the plugin's own install rules put in the bundle's lib/, as a
+    desktop build's install step leaves it beside the app: flutter_js
+    installs its prebuilt QuickJS bridge so, and names it in no
+    <name>_bundled_libraries (#376)."""
+    folder = os.path.join(project, 'out', 'bundle', 'lib')
+    try:
+        return [os.path.join(folder, f) for f in sorted(os.listdir(folder))
+                if os.path.isfile(os.path.join(folder, f))]
     except OSError:
         return []
 
@@ -1463,13 +1476,23 @@ def build(plugin):
     if flutter_root:
         env['PATH'] = os.path.join(flutter_root, 'bin') + os.pathsep + env.get('PATH', '')
     with open(log, 'w') as written:
+        # The install prefix a desktop build gives its plugins, its bundle
+        # in the build folder: a plugin's install rules aim there (#376).
         configured = subprocess.run(['cmake', '-S', plugin_tree(), '-B', os.path.join(project, 'out'), '-G', 'Ninja',
                                      '-DRACCOON_PLUGIN=' + name,
-                                     '-DRACCOON_LINKED_PLUGINS=' + ';'.join(plugin['linked'])],
+                                     '-DRACCOON_LINKED_PLUGINS=' + ';'.join(plugin['linked']),
+                                     '-DCMAKE_INSTALL_PREFIX=' + os.path.join(project, 'out', 'bundle')],
                                     stdout=written, stderr=subprocess.STDOUT, env=env).returncode == 0
         ok = configured and subprocess.run(['cmake', '--build', os.path.join(project, 'out'),
                                             '--parallel', str(JOBS)],
                                            stdout=written, stderr=subprocess.STDOUT, env=env).returncode == 0
+        # Then the plugin's own install rules, as a desktop build's install
+        # step runs them: what they put in the bundle's lib/ goes with its
+        # libraries. A rule that fails costs only what it would have added;
+        # the log says which.
+        if ok:
+            subprocess.run(['cmake', '--install', os.path.join(project, 'out')],
+                           stdout=written, stderr=subprocess.STDOUT, env=env)
     if not ok:
         why = 'did not build; see ' + log
         # Not one CMake stopped configuring: that is a missing package
