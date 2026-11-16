@@ -62,8 +62,34 @@ elif [ -x "$ROOT/build/raccoon_runner$EXE" ]; then
 else
   RUNNER="$ROOT/raccoon_runner$EXE"
 fi
-# The ping needs nothing more.
-if [ "${1:-}" = ping ]; then test -x "$RUNNER"; exit; fi
+# The ping needs nothing more, but for one thing: the SDK's engine, when it
+# isn't there yet, starts downloading. The tool pings as a run starts,
+# seconds before it installs, so the download overlaps the tool's compile
+# instead of following it (#368). A stamp read and a file test, no
+# process, while the engine is there; started once per engine revision, so
+# an offline machine's pings don't start one each. Linux and macOS.
+if [ "${1:-}" = ping ]; then
+  test -x "$RUNNER" || exit 1
+  engine=""
+  case "${OSTYPE:-}:${HOSTTYPE:-}" in
+    linux*:x86_64) engine=linux-x64/libflutter_engine.so ;;
+    linux*:aarch64|linux*:arm64) engine=linux-arm64/libflutter_engine.so ;;
+    darwin*) engine=darwin/FlutterEmbedder.framework/FlutterEmbedder ;;
+  esac
+  stamp="${FLUTTER_ROOT:-}/bin/cache/engine.stamp"
+  if [ -n "$engine" ] && [ -n "${FLUTTER_ROOT:-}" ] && [ -f "$stamp" ]; then
+    rev=""
+    IFS= read -r rev < "$stamp" || true
+    rev="${rev//[[:space:]]/}"
+    engines="${RACCOON_ENGINE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/raccoon/engines}/$rev"
+    if [ -n "$rev" ] && [ ! -e "$engines/$engine" ] && [ ! -e "$engines/.prefetch" ]; then
+      # Nothing of the tool's held open: it reads the ping to its end.
+      { mkdir -p "$engines" && : > "$engines/.prefetch" &&
+        "$ROOT/tool/engine_dir.sh"; } < /dev/null > /dev/null 2>&1 &
+    fi
+  fi
+  exit 0
+fi
 APPS="$(native_path "${XDG_DATA_HOME:-$HOME/.local/share}")/raccoon/apps"
 # What an app keeps across runs (its shared preferences); install replaces the
 # app's bundle but leaves this.

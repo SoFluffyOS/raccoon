@@ -455,6 +455,83 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  // #368: the tool pings the device as a run starts, seconds before it
+  // installs; the ping starts the engine's download so it overlaps the
+  // tool's compile, and an install that finds it going waits for it.
+  test(
+    'a ping starts the engine download, and install waits for it',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_prefetch');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final library = p.basename(
+        RuntimeStore.engineLibraryOf(RuntimeStore.hostPlatform),
+      );
+      final zip = ZipEncoder().encodeBytes(
+        Archive()..addFile(ArchiveFile.bytes(library, [1, 2, 3])),
+      );
+      var downloads = 0;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((request) async {
+        downloads++;
+        // Long enough for the install to find it going.
+        await Future<void>.delayed(const Duration(seconds: 2));
+        request.response.add(zip);
+        await request.response.close();
+      });
+      addTearDown(server.close);
+      final engines = p.join(temp.path, 'engines');
+      final environment = {
+        'FLUTTER_ROOT': sdk!,
+        'XDG_DATA_HOME': p.join(temp.path, 'data'),
+        'XDG_RUNTIME_DIR': temp.path,
+        'TMPDIR': '${temp.path}/',
+        'RACCOON_PLUGINS': 'off',
+        'RACCOON_RUNNER': binary!,
+        'RACCOON_ENGINE_CACHE': engines,
+        'FLUTTER_STORAGE_BASE_URL': 'http://127.0.0.1:${server.port}',
+      };
+
+      final watch = Stopwatch()..start();
+      final ping = await _runHelper(runnerDir, ['ping'], environment);
+      expect(ping.exitCode, 0, reason: '${ping.stderr}');
+      // Back at once: nothing of the download holds the tool's pipes.
+      expect(watch.elapsed, lessThan(const Duration(seconds: 1)));
+      final deadline = DateTime.now().add(const Duration(seconds: 10));
+      while (downloads == 0 && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(downloads, 1);
+      // Another ping starts no second one.
+      expect((await _runHelper(runnerDir, ['ping'], environment)).exitCode, 0);
+
+      final install = await _runHelper(runnerDir, [
+        'install',
+        assets,
+        'app',
+      ], environment);
+      expect(install.exitCode, 0, reason: '${install.stderr}');
+      expect(downloads, 1);
+      // The ping's download, waited for: the install downloaded nothing.
+      expect('${install.stderr}', isNot(contains('downloaded')));
+      final installed =
+          RuntimeStore(cacheDirectory: engines).installed(revision!)!;
+      expect(File(installed.engineLibrary).readAsBytesSync(), [1, 2, 3]);
+      // The ping's download lets go of its lock as it ends, just after.
+      final lock = File('${installed.directory}.downloading');
+      final gone = DateTime.now().add(const Duration(seconds: 5));
+      while (lock.existsSync() && DateTime.now().isBefore(gone)) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(lock.existsSync(), isFalse);
+    },
+    skip: switch ((ready && revision != null, Platform.isWindows)) {
+      (false, _) => 'build the runner and example first',
+      (_, true) => 'the ping starts it on Linux and macOS',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   // #120: pub encodes a relative rootUri (my%20libs); the helper looked for
   // the encoded folder and skipped the package without a word.
   test(

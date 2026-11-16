@@ -10,9 +10,12 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
 - Loads the prebuilt debug embedder for the active SDK's engine revision at
   run time (`tool/engine_dir.sh` downloads it: `libflutter_engine.so` on
   Linux, `FlutterEmbedder.framework` on macOS, `flutter_engine.dll` on
-  Windows), so one runner binary serves several runtimes. `tool/raccoon-device
-  install` downloads it while the plugins build, once per engine revision,
-  and `run` when install didn't (#352).
+  Windows), so one runner binary serves several runtimes. Once per engine
+  revision: on Linux and macOS the device's ping starts the download when
+  the engine is missing, so on a first run it overlaps the tool's compile
+  (#368); `tool/raccoon-device install` waits for that download, or makes
+  its own while the plugins build, and `run` when install didn't (#352).
+  One download of an engine goes at a time.
 - Runs an app bundle (`build/flutter_assets`, no native build needed) with a
   GPU renderer where the host has one, else the software renderer, on a
   pumped platform task runner.

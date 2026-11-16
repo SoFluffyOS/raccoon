@@ -86,16 +86,45 @@ esac
 # An engine is there once its library is, unless a download that wrote in
 # place, before #136, was cut short: its dl folder is left behind.
 installed() { [ -e "$LIBRARY" ] && [ ! -d "$DIR/dl" ]; }
-if ! installed; then
+
+# One download of an engine at a time. One already going, a ping's (the
+# helper's ping starts it as a run begins) or another run's, is waited for
+# rather than doubled, which split the bandwidth between the two and held
+# the install for both (#368). The lock holds its download's process id;
+# one whose process is gone is taken over, as is one that never got an id.
+# Returns 1 when the engine came while waiting.
+LOCK="$DIR.downloading"
+take_lock() {
+  local holder waited=0
+  set -C
+  until { echo "$$" > "$LOCK"; } 2>/dev/null; do
+    if installed; then
+      set +C
+      return 1
+    fi
+    holder=""
+    IFS= read -r holder 2>/dev/null < "$LOCK" || true
+    if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; } ||
+      { [ -z "$holder" ] && [ "$waited" -ge 50 ]; }; then
+      rm -f "$LOCK"
+      continue
+    fi
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  set +C
+}
+
+if ! installed; then mkdir -p "$CACHE"; fi
+if ! installed && take_lock && ! installed; then
   # Downloaded and unpacked aside, then renamed into place, as RuntimeStore
   # does: an interrupted download, or two at once, never leaves half an
   # engine that counts as there (#136).
-  mkdir -p "$CACHE"
   # Timed for the log, by perl as the helper times: bash 3.2 has no clock
   # finer than a second.
   STARTED="$(perl -MTime::HiRes=time -e 'printf "%.6f", time' 2>/dev/null || true)"
   STAGE="$(mktemp -d "$DIR.partial.XXXXXX")"
-  trap 'rm -rf "$STAGE"' EXIT
+  trap 'rm -rf "$STAGE"; rm -f "$LOCK"' EXIT
   mkdir -p "$STAGE/dir${UNZIP_INTO#"$DIR"}"
   # Said plainly: offline, a first run with a new SDK fails here (#119).
   # A connection that stalls fails rather than hold the launch silent.
@@ -115,5 +144,11 @@ if ! installed; then
     perl -MTime::HiRes=time -e 'printf STDERR "🦝 Flutter engine %s downloaded in %.1f s\n", $ARGV[0], time - $ARGV[1]' \
       "$REV" "$STARTED" || true
   fi
+fi
+# Taken, and the engine was there by then: let go.
+if [ -f "$LOCK" ]; then
+  holder=""
+  IFS= read -r holder 2>/dev/null < "$LOCK" || true
+  [ "$holder" != "$$" ] || rm -f "$LOCK"
 fi
 if command -v cygpath >/dev/null; then cygpath -m "$DIR"; else echo "$DIR"; fi
