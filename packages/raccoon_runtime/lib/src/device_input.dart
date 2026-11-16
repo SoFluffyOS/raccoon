@@ -134,11 +134,21 @@ final class RaccoonInput {
     RaccoonKey key, {
     List<RaccoonKey> modifiers = const [],
   }) async {
+    // With shift held a letter types its capital, as on a keyboard.
+    final shifted =
+        key.character.length == 1 &&
+        modifiers.any(
+          (modifier) => modifier.physical == RaccoonKey.shift.physical,
+        );
+    final pressed =
+        shifted
+            ? RaccoonKey(key.physical, key.logical, key.character.toUpperCase())
+            : key;
     for (final modifier in modifiers) {
       _key(modifier, KeyKind.KEY_KIND_DOWN);
     }
-    _key(key, KeyKind.KEY_KIND_DOWN);
-    _key(key, KeyKind.KEY_KIND_UP);
+    _key(pressed, KeyKind.KEY_KIND_DOWN);
+    _key(pressed, KeyKind.KEY_KIND_UP);
     for (final modifier in modifiers.reversed) {
       _key(modifier, KeyKind.KEY_KIND_UP);
     }

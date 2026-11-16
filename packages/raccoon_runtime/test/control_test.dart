@@ -305,6 +305,20 @@ void main() {
     ]);
   });
 
+  test('with shift held, a letter types its capital', () async {
+    await control.call('press_key', {
+      'key': 'a',
+      'modifiers': ['shift'],
+    });
+    await settle();
+    final typed = [
+      for (final message in runner.received)
+        if (message.hasKey() && message.key.character.isNotEmpty)
+          message.key.character,
+    ];
+    expect(typed, ['A']);
+  });
+
   test(
     'a screenshot is the settled frame as a PNG, scaled on request',
     () async {
