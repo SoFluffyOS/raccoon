@@ -3433,6 +3433,97 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
     },
     timeout: const Timeout(Duration(minutes: 4)),
   );
+  // raccoon#377: serious_python_linux installs Python's standard library
+  // at the bundle's root, beside the executable, where its Dart side looks;
+  // the cache kept libraries only, all of them for lib/.
+  test(
+    'on Linux what a plugin installs beside the executable is there',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_beside');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      write(
+        'plugin_y/pubspec.yaml',
+        'name: plugin_y\nversion: 1.0.0\n'
+            'flutter:\n  plugin:\n    platforms:\n'
+            '      linux:\n        ffiPlugin: true\n',
+      );
+      write(
+        'plugin_y/linux/CMakeLists.txt',
+        'cmake_minimum_required(VERSION 3.14)\n'
+            'add_library(plugin_y SHARED y.cc)\n'
+            'install(DIRECTORY "\${CMAKE_CURRENT_SOURCE_DIR}/python3.99" '
+            'DESTINATION "\${CMAKE_BINARY_DIR}/bundle")\n',
+      );
+      write('plugin_y/linux/y.cc', 'int plugin_y_value() { return 7; }\n');
+      write('plugin_y/linux/python3.99/os.py', 'sep = "/"\n');
+      write('app/pubspec.yaml', 'name: app\ndependencies:\n  plugin_y:\n');
+      write(
+        'app/.dart_tool/package_config.json',
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+            {
+              'name': 'plugin_y',
+              'rootUri': '../../plugin_y',
+              'packageUri': 'lib/',
+            },
+          ],
+        }),
+      );
+      final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+        ..createSync(recursive: true);
+      final data = p.join(temp.path, 'data');
+      final cache = p.join(temp.path, 'cache');
+      final bin = p.join(data, 'raccoon', 'apps', 'app', 'bin');
+      // Built, then from the cache: both put it beside the executable.
+      for (final step in ['1 built: plugin_y', '1 from the cache: plugin_y']) {
+        final result = await Process.run(
+          p.join(runnerDir, 'tool', 'raccoon-device'),
+          ['install', bundle.path, 'app'],
+          environment: {
+            'RACCOON_RUNNER': binary!,
+            if (sdk != null) 'FLUTTER_ROOT': sdk,
+            'XDG_DATA_HOME': data,
+            'RACCOON_PLUGIN_CACHE': cache,
+            'RACCOON_NO_PREBUILT': '1',
+          },
+        );
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        expect('${result.stderr}', contains(step), reason: '${result.stderr}');
+        expect(
+          File(p.join(bin, 'python3.99', 'os.py')).readAsStringSync(),
+          'sep = "/"\n',
+        );
+      }
+      final entry = Directory(
+        cache,
+      ).listSync().whereType<Directory>().singleWhere(
+        (folder) => p.basename(folder.path).startsWith('plugin_y-'),
+      );
+      expect(
+        File(p.join(entry.path, 'bundle', 'python3.99', 'os.py')).existsSync(),
+        isTrue,
+      );
+      // Its libraries go to lib/ as before, the folder not among them.
+      expect(
+        Directory(
+          p.join(data, 'raccoon', 'apps', 'app', 'plugins', 'lib'),
+        ).listSync().map((file) => p.basename(file.path)),
+        ['libplugin_y.so'],
+      );
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isLinux)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'the Linux half of the helper',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 4)),
+  );
   // raccoon#16: flutter_secure_storage_linux without libsecret-1's
   // development files said only "did not build; see <log>".
   test(

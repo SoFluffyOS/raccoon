@@ -229,7 +229,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   library), which a desktop build finds through the build tree's RUNPATH.
   Its own install rules run after it builds, into a bundle in its build
   folder, as a desktop build's install step runs them: what they put in
-  `lib/` goes with its libraries (flutter_js's QuickJS bridge, #376).
+  `lib/` goes with its libraries (flutter_js's QuickJS bridge, #376), and
+  what they put beside the executable is cached with them and linked
+  beside the app's (serious_python's Python standard library, #377).
   Plugins are opened globally, as an app's executable links them, so
   sqlite3 finds `sqlite3_flutter_libs`' build in the process. The app gets
   a `lib/` beside its executable, as Flutter's bundle has, with links to

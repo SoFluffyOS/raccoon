@@ -386,6 +386,7 @@ linux_app_executable() {
 # native asset of the same name. No process for an app with neither (#363).
 linux_app_lib() {
   local key="$1" f name names=" " links=()
+  linux_app_beside "$key"
   for f in "$APPS/$key/plugins/lib/"* "$APPS/$key/native_assets/"*; do
     [ -e "$f" ] || continue
     name="${f##*/}"
@@ -397,6 +398,27 @@ linux_app_lib() {
   [ ${#links[@]} -gt 0 ] && [ -d "$APPS/$key/bin" ] || return 0
   rm -rf "$APPS/$key/bin/lib"
   mkdir "$APPS/$key/bin/lib" && ln -s "${links[@]}" "$APPS/$key/bin/lib/"
+}
+
+# Beside the app's executable, as a desktop bundle has them, a link to
+# each thing a plugin's install rules put at the bundle's root: Python's
+# standard library for serious_python (#377). Not over the executable,
+# lib/, data/ or the engine's library; an earlier install's links go.
+# No process for an app with none.
+linux_app_beside() {
+  local key="$1" dir="$APPS/$1/bin" f name
+  [ -d "$dir" ] || return 0
+  for f in "$dir/"*; do
+    [ -L "$f" ] || continue
+    case "${f##*/}" in libflutter_linux_gtk.so) continue ;; esac
+    case "$(readlink "$f")" in ../plugins/bundle/*) rm -f "$f" ;; esac
+  done
+  for f in "$APPS/$key/plugins/bundle/"*; do
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    name="${f##*/}"
+    case "$name" in lib|data|libflutter_linux_gtk.so|"${key%%@*}") continue ;; esac
+    [ -e "$dir/$name" ] || [ -L "$dir/$name" ] || ln -s "../plugins/bundle/$name" "$dir/$name"
+  done
 }
 
 # Sets the variable [$1] to the word in file [$2] (a version, a stamp, a
@@ -832,6 +854,25 @@ def stage_libraries(libs, staging):
         soname = elf_dynamic(target)[0]
         if soname and '/' not in soname and not os.path.lexists(os.path.join(staging, soname)):
             os.symlink(name, os.path.join(staging, soname))
+
+
+def stage_bundle(project, staging):
+    """What the plugin's install rules put at the bundle's root, beside the
+    executable rather than in lib/ or data/, into [staging]/bundle:
+    serious_python_linux installs Python's standard library there and
+    finds it by the executable's place (#377)."""
+    root = os.path.join(project, 'out', 'bundle')
+    try:
+        names = [n for n in sorted(os.listdir(root)) if n not in ('lib', 'data')]
+    except OSError:
+        return
+    for name in names:
+        source, target = os.path.join(root, name), os.path.join(staging, 'bundle', name)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        if os.path.isdir(source) and not os.path.islink(source):
+            shutil.copytree(source, target, symlinks=True)
+        else:
+            shutil.copy2(source, target, follow_symlinks=False)
 
 
 def defines(path, symbol):
@@ -1516,6 +1557,7 @@ def build(plugin):
     import tempfile
     staging = tempfile.mkdtemp(prefix=os.path.basename(cached) + '.partial-', dir=cache)
     stage_libraries(libs, staging)
+    stage_bundle(project, staging)
     settle(staging, cached, lambda: libraries(cached))
     # Its build tree, once cached: the next install starts afresh.
     shutil.rmtree(project, ignore_errors=True)
@@ -1630,6 +1672,14 @@ for plugin in wanted:
         status.append({'name': name, 'state': state, 'detail': why})
     for so in libs:
         clone(so, os.path.join(out, 'lib'))
+    # What it installs beside the executable, which the app's bin/ links
+    # to: the first plugin to give a name keeps it (#377).
+    beside = os.path.join(os.path.dirname(libs[0]), 'bundle') if libs else None
+    if beside and os.path.isdir(beside):
+        os.makedirs(os.path.join(out, 'bundle'), exist_ok=True)
+        for item in sorted(os.listdir(beside)):
+            if not os.path.lexists(os.path.join(out, 'bundle', item)):
+                clone(os.path.join(beside, item), os.path.join(out, 'bundle', item))
     if plugin['symbol'] is not None and libs:
         # The plugin's own library is the one named after it, else the one
         # that defines its symbol: fvp's is libfvp.so, beside libc++.so.1.
