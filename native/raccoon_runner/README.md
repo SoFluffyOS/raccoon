@@ -333,6 +333,26 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   fullscreen_window's screen size is garbage under `flutter run -d linux`
   too, and its fullscreen wants the view (#365). flutter_scene needs
   Flutter GPU, which needs Impeller; the runner draws with Skia (#379).
+  Tier 4 (#384, 2026-11-16: the 47 that declare Linux with 10k to 30k
+  downloads a month): these answer, Dart only, built here or through a
+  build hook: sodium, flutter_doc_scanner, system_date_time_format,
+  unifiedpush_linux, flutter_edge_ai, dartcv4, lib_llama_cpp,
+  onnxruntime, flutter_litert, cryptography_flutter_plus, device_region,
+  window_size (the runner's own), realm, forge2d, opentype_shaper,
+  audio_service_mpris, flutter_midi_command, platform_device_id_linux,
+  bluetooth_low_energy, fast_rsa, spine_flutter, maps_launcher,
+  ditto_live, uri_content, dotlottie_flutter, universal_gamepad,
+  flutter_pty, flutter_platform_alert, dart_smb2, flutter_avif,
+  google_places_sdk_plus and awesome_notifications_core. As on desktop,
+  the four ffmpeg_kit_flutter_new variants need json-glib's development
+  files, webview_all, webview_win_floating (named since #385) and
+  crisp_chat's desktop_webview_window WebKitGTK's, desktop_updater
+  OpenSSL's, camera_desktop GStreamer's app and video libraries', and
+  system_tray AppIndicator's. The window plugins want the view (#365):
+  flutter_window_close's `closeWindow`, bitsdojo_window's size and
+  yaru_window's state go through the window the registrar doesn't hand
+  out and kill the runner; flutter_acrylic and handy_window load and
+  have no window to change.
 - Loads the project's native plugins on macOS too. A plugin framework links
   against `FlutterMacOS.framework` and uses its channel and codec classes;
   the runner opens the Flutter SDK's copy at run time, before the plugins,
