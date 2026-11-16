@@ -33,6 +33,11 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
+      # The runner links EGL, which a hosted runner's image lacks; Mesa
+      # draws without a GPU, through its surfaceless platform.
+      - name: Install EGL
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libegl-mesa0 libgles2
+
       # The ICU data the device helper hands the runner.
       - name: Precache the Linux artifacts
         run: flutter precache --linux
