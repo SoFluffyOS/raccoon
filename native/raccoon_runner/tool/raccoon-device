@@ -3119,6 +3119,128 @@ PY
 
 # The hook packages a cached-only install built no native assets for
 # (NATIVE_ASSETS_SKIPPED), added to |app|'s plugins manifest as skipped.
+# The assets the app or its packages give this host alone (`platforms:
+# [linux]` on an entry of flutter: assets:), into the installed bundle. The
+# tool builds a custom device's bundle with Android's asset filter, whatever
+# the device's platform, so it leaves them out and takes Android's in:
+# quill_native_bridge_linux's xclip, which it loads with rootBundle (#370).
+# Each lands at its key, packages/<name>/<path> or the app's <path>, as the
+# tool would have bundled it; loading by key needs no entry in the asset
+# manifest. Not on Windows, which has no python3 here.
+platform_assets() {
+  local project="$1" assets="$2" config="$3" host
+  [ -n "$config" ] && [ -z "$WINDOWS" ] || return 0
+  command -v python3 >/dev/null || return 0
+  case "$UNAME_S" in Darwin) host=macos ;; *) host=linux ;; esac
+  python3 - "$config" "$project" "$assets" "$host" <<'PY'
+import json, os, re, shutil, sys
+from urllib.parse import unquote, urlparse
+config, project, assets, host = sys.argv[1:5]
+dart_tool = os.path.dirname(os.path.abspath(config))
+try:
+    entries = json.load(open(config)).get('packages', [])
+except (OSError, ValueError, AttributeError):
+    sys.exit(0)
+app = os.path.realpath(project)
+
+
+def block(lines, start, indent):
+    """The lines under lines[start], indented deeper than [indent]."""
+    found = []
+    for line in lines[start + 1:]:
+        if line.strip() and not line.lstrip().startswith('#'):
+            if len(line) - len(line.lstrip()) <= indent:
+                break
+        found.append(line)
+    return found
+
+
+def listed(value, lines):
+    """A YAML list given inline ([a, b]) or as the - lines after it."""
+    value = value.split('#')[0].strip()
+    if value.startswith('['):
+        return [v.strip().strip('\'"') for v in value.strip('[]').split(',') if v.strip()]
+    return [l.strip()[1:].strip().strip('\'"') for l in lines if l.strip().startswith('-')]
+
+
+def gated(pubspec):
+    """The paths of flutter: assets: entries whose platforms name the host."""
+    lines = pubspec.splitlines()
+    top = next((i for i, l in enumerate(lines) if re.match(r'flutter:\s*(#.*)?$', l)), None)
+    if top is None:
+        return []
+    flutter = block(lines, top, 0)
+    at = next((i for i, l in enumerate(flutter) if re.match(r'\s+assets:\s*(#.*)?$', l)), None)
+    if at is None:
+        return []
+    indent = len(flutter[at]) - len(flutter[at].lstrip())
+    items, item = [], None
+    for line in block(flutter, at, indent):
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            if item is not None:
+                item.append(line)
+            continue
+        if stripped.startswith('- ') and (item is None or len(line) - len(line.lstrip()) <= item_indent):
+            item, item_indent = [' ' * (len(line) - len(line.lstrip()) + 2) + stripped[2:]], len(line) - len(line.lstrip())
+            items.append(item)
+        elif item is not None:
+            item.append(line)
+    paths = []
+    for item in items:
+        fields, path, platforms = {}, None, None
+        for i, line in enumerate(item):
+            match = re.match(r'\s*(path|platforms|flavors):\s*(.*)$', line)
+            if match:
+                key, value = match.groups()
+                if key == 'path':
+                    path = value.split('#')[0].strip().strip('\'"')
+                elif key == 'platforms':
+                    platforms = listed(value, block(item, i, len(line) - len(line.lstrip())))
+                else:
+                    fields['flavors'] = True
+        # A flavored one is the tool's to choose; a plain one it bundled.
+        if path and platforms and host in platforms and 'flavors' not in fields:
+            paths.append(path)
+    return paths
+
+
+copied = []
+for entry in entries:
+    if not isinstance(entry, dict) or not isinstance(entry.get('name'), str):
+        continue
+    uri = entry.get('rootUri', '')
+    if not isinstance(uri, str):
+        continue
+    root = unquote(urlparse(uri).path) if uri.startswith('file://') else os.path.normpath(os.path.join(dart_tool, unquote(uri)))
+    try:
+        with open(os.path.join(root, 'pubspec.yaml'), errors='replace') as f:
+            pubspec = f.read()
+    except OSError:
+        continue
+    if 'platforms:' not in pubspec or 'assets:' not in pubspec:
+        continue
+    prefix = '' if os.path.realpath(root) == app else 'packages/%s/' % entry['name']
+    for path in gated(pubspec):
+        source = os.path.join(root, path)
+        # A folder is the files right in it, as the tool takes it.
+        files = ([os.path.join(path, f) for f in sorted(os.listdir(source))
+                  if os.path.isfile(os.path.join(source, f))]
+                 if path.endswith('/') and os.path.isdir(source) else [path])
+        for name in files:
+            key = prefix + name.rstrip('/')
+            target = os.path.join(assets, key)
+            if os.path.exists(target) or not os.path.isfile(os.path.join(root, name)):
+                continue
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.copy2(os.path.join(root, name), target)
+            copied.append(key)
+if copied:
+    print('🦝 %d %s asset%s the tool left out of the bundle: %s' % (
+        len(copied), host, '' if len(copied) == 1 else 's', ', '.join(copied)), file=sys.stderr)
+PY
+}
+
 report_skipped_native_assets() {
   [ -n "${NATIVE_ASSETS_SKIPPED:-}" ] || return 0
   # shellcheck disable=SC2086
@@ -3251,12 +3373,16 @@ print(" ".join(s.get("name", "?") for s in status if s.get("state") == "failed")
       # The plugins and the native assets at once: the tool's build of the
       # assets compiles the app's kernel again, often for longer than the
       # plugins take (#352). A plugin pass that fails fails the install.
+      # Beside them, the assets the tool left out of the bundle (#370).
+      platform_assets "$project" "$APPS/$key/flutter_assets" "$config" &
+      assets_job=$!
       build_plugins "$project" "$APPS/$key/plugins" "$config" &
       plugins_job=$!
       build_native_assets "$project" "$APPS/$key" "$config"
       plugins_status=0
       wait "$plugins_job" || plugins_status=$?
       [ "$plugins_status" -eq 0 ] || exit "$plugins_status"
+      wait "$assets_job" || true
       report_skipped_native_assets "$APPS/$key"
       [ "$UNAME_S" != Linux ] || linux_app_lib "$key" || true
     fi

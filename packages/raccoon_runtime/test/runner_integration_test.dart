@@ -2886,6 +2886,94 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );
+  // raccoon#370: the tool bundles a custom device's assets as for Android,
+  // and left out quill_native_bridge_linux's xclip (`platforms: [linux]`).
+  test(
+    'an install adds the assets the app and its packages give this host',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_assets');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      final host = Platform.isMacOS ? 'macos' : 'linux';
+      final other = Platform.isMacOS ? 'linux' : 'macos';
+      write(
+        'pkg/pubspec.yaml',
+        'name: pkg\nversion: 1.0.0\nflutter:\n  assets:\n'
+            '    - path: assets/tool\n      platforms: [$host]\n'
+            '    - path: assets/elsewhere\n      platforms: [$other]\n',
+      );
+      write('pkg/assets/tool', 'for this host\n');
+      write('pkg/assets/elsewhere', 'for another\n');
+      write(
+        'app/pubspec.yaml',
+        'name: app\ndependencies:\n  pkg:\nflutter:\n  assets:\n'
+            '    - assets/plain.txt\n'
+            '    - path: assets/host/\n      platforms:\n        - android\n'
+            '        - $host\n',
+      );
+      write('app/assets/plain.txt', 'bundled by the tool\n');
+      write('app/assets/host/one.txt', 'one\n');
+      write('app/assets/host/two.txt', 'two\n');
+      write(
+        'app/.dart_tool/package_config.json',
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+            {'name': 'pkg', 'rootUri': '../../pkg', 'packageUri': 'lib/'},
+          ],
+        }),
+      );
+      // What the tool bundled: an Android asset, as it filters them.
+      write('app/build/flutter_assets/assets/host/one.txt', 'bundled\n');
+      final data = p.join(temp.path, 'data');
+      final result = await Process.run(
+        p.join(runnerDir, 'tool', 'raccoon-device'),
+        ['install', p.join(temp.path, 'app', 'build', 'flutter_assets'), 'app'],
+        environment: {
+          'RACCOON_RUNNER': binary!,
+          if (sdk != null) 'FLUTTER_ROOT': sdk,
+          'XDG_DATA_HOME': data,
+          'RACCOON_PLUGIN_CACHE': p.join(temp.path, 'cache'),
+          'RACCOON_NO_PREBUILT': '1',
+        },
+      );
+      expect(result.exitCode, 0, reason: '${result.stderr}');
+      final installed = p.join(
+        data,
+        'raccoon',
+        'apps',
+        'app',
+        'flutter_assets',
+      );
+      String? read(String key) {
+        final file = File(p.join(installed, key));
+        return file.existsSync() ? file.readAsStringSync() : null;
+      }
+
+      expect(read('packages/pkg/assets/tool'), 'for this host\n');
+      expect(read('packages/pkg/assets/elsewhere'), isNull);
+      expect(read('assets/host/two.txt'), 'two\n');
+      // What the tool bundled stays as it is.
+      expect(read('assets/host/one.txt'), 'bundled\n');
+      expect(
+        '${result.stderr}',
+        contains(
+          '🦝 2 $host assets the tool left out of the bundle: '
+          'assets/host/two.txt, packages/pkg/assets/tool',
+        ),
+      );
+    },
+    skip: switch ((binary != null, Platform.isWindows)) {
+      (false, _) => 'build the runner first',
+      (_, true) => 'Windows has no python3 for it',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
   // raccoon#16: flutter_secure_storage_linux without libsecret-1's
   // development files said only "did not build; see <log>".
   test(

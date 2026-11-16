@@ -427,6 +427,14 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   after an install cut short. `example/native_assets_app`
   calls a C function from a hook (`example/native_add`) and prints
   `NATIVE:42`.
+- Adds to the installed bundle the assets the app and its packages give
+  this host alone (`platforms: [linux]` or `[macos]` on an entry of
+  `flutter: assets:`). The tool filters a custom device's assets as for
+  Android, whatever its platform, and left them out:
+  quill_native_bridge_linux's `xclip`, which it loads with `rootBundle`
+  (#370). Each lands at its key (`packages/<name>/<path>`); the step runs
+  beside the plugins' build, and a cached install of `example/plugins_app`
+  took 61 ms, 60 ms without it. Not on Windows, which has no python3 here.
 - Never leaves the app waiting on a plugin nobody serves. A channel no one
   answers gets an empty reply, which the app sees as
   `MissingPluginException` (Pigeon's `channel-error`), as on a desktop the
