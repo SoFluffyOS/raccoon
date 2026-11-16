@@ -270,6 +270,26 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   sqlcipher_flutter_libs needs OpenSSL's development files, media_kit
   libmpv's, and tflite_flutter its library under `blobs/` beside the
   executable.
+  Tier 2 (#16, 2026-11-16: 44 more that declare Linux, most with 100k to
+  300k downloads a month): these answer, Dart only, built here or through
+  a build hook: window_to_front, flutter_web_auth_2,
+  flutter_keyboard_visibility_temp_fork, posthog_flutter,
+  quill_native_bridge (since #370), file_saver, background_downloader,
+  emoji_picker_flutter, livekit_client (since #371),
+  sqlite3_connection_pool, syncfusion_flutter_pdfviewer, pasteboard,
+  cross_file, map_launcher, restart_app, flutter_soloud,
+  irondash_engine_context, super_native_extensions (under
+  super_clipboard), flutter_email_sender, amplify_db_common,
+  serverpod_argon2, flutter_udid, devicelocale, no_screenshot,
+  universal_ble, awesome_notifications, sherpa_onnx, bonsoir,
+  hotkey_manager, flutter_zxing, large_file_handler and llamadart. As on
+  desktop, desktop_webview_window needs WebKitGTK's development files,
+  flutter_inappwebview_linux WPE WebKit's, volume_controller and
+  flutter_volume_controller ALSA's, media_kit_video libmpv, and the
+  amplify packages libsecret's (`libsecret-1.so`); location waits on
+  GeoClue, here as under `flutter run -d linux`. desktop_drop loads since
+  #369, but drops and dynamic_color's accent from the theme want the view
+  (#365); desktop_multi_window makes windows of its own and doesn't load.
 - Loads the project's native plugins on macOS too. A plugin framework links
   against `FlutterMacOS.framework` and uses its channel and codec classes;
   the runner opens the Flutter SDK's copy at run time, before the plugins,
