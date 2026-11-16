@@ -66,7 +66,8 @@ class GlRenderer : public GpuRenderer {
   void CountFrame();
   // Makes the readback target for frames of |width| x |height| before the
   // first asks for it, on the raster thread between frames: the context is
-  // left as it was found, current or not.
+  // left as it was found, current or not. A first frame that goes into a
+  // pool buffer lets it go; one read back later makes it again.
   void PrepareReadback(size_t width, size_t height);
   // Hands the drawn frame on: to |gpu| when it is in a pool buffer, else read
   // back through |callback|; an empty |callback| drops a frame that would
@@ -121,7 +122,14 @@ class GlRenderer : public GpuRenderer {
   // software; on a failure, why, with nothing left started.
   bool InitDisplay(EGLDisplay display, const std::string& how, bool* software,
                    std::string* error);
+  // The readback target at |width| x |height|, made or remade, for a frame
+  // that draws into it or is read back. Context current, on the raster
+  // thread.
   bool EnsureSize(size_t width, size_t height);
+  // Lets the readback target go: its texture and framebuffer deleted, its
+  // buffer moved into |memory| to be freed outside the lock. The next
+  // EnsureSize makes it again. Context current, mutex held.
+  void DropTarget(std::vector<uint8_t>* memory);
   // A native fence for the drawing issued so far, -1 when there is none.
   // Context current.
   int ExportFence();
@@ -150,6 +158,9 @@ class GlRenderer : public GpuRenderer {
   size_t height_ = 0;
   bool reads_bgra_ = false;
   std::vector<uint8_t> readback_;
+  // The target was made by PrepareReadback and no frame has had it yet: a
+  // first frame that goes into a pool buffer lets it go (#388).
+  bool prepared_ = false;
   // One row, for turning the readback over in place.
   std::vector<uint8_t> row_;
   std::string description_;

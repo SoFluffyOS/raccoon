@@ -350,6 +350,8 @@ bool FitsTexture(size_t width, size_t height) {
 }  // namespace
 
 bool GlRenderer::EnsureSize(size_t width, size_t height) {
+  // A frame has it now: PrepareReadback marks its own afterwards.
+  prepared_ = false;
   if (fbo_ != 0 && width == width_ && height == height_) return true;
   if (!FitsTexture(width, height)) return false;
   BindingsKept kept;
@@ -373,6 +375,17 @@ bool GlRenderer::EnsureSize(size_t width, size_t height) {
   height_ = height;
   readback_.resize(width * height * 4);
   return true;
+}
+
+void GlRenderer::DropTarget(std::vector<uint8_t>* memory) {
+  prepared_ = false;
+  // Neither is bound: EnsureSize binds back what was.
+  if (fbo_ != 0) glDeleteFramebuffers(1, &fbo_);
+  if (texture_ != 0) glDeleteTextures(1, &texture_);
+  fbo_ = texture_ = 0;
+  width_ = height_ = 0;
+  readback_.swap(*memory);
+  if (kTrace) std::fprintf(stderr, "🦝 gl readback target let go\n");
 }
 
 bool GlRenderer::PixelTexture(int64_t texture_id, size_t width, size_t height, uint64_t number,
@@ -800,12 +813,15 @@ void GlRenderer::PrepareReadback(size_t width, size_t height) {
   }
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    EnsureSize(width, height);
+    // Made for a frame already: that frame's, not a spare.
+    if (fbo_ == 0 && EnsureSize(width, height)) prepared_ = true;
   }
   if (!current) ClearCurrent();
 }
 
 bool GlRenderer::Present(const FrameCallback& callback) {
+  // What DropTarget let go, freed after the lock.
+  std::vector<uint8_t> unused;
   int index = -1;
   uint32_t generation = 0;
   size_t width = 0;
@@ -843,6 +859,11 @@ bool GlRenderer::Present(const FrameCallback& callback) {
     {
       std::lock_guard<std::mutex> lock(mutex_);
       presenting_ = -1;
+      // The target made for a first frame read back, and this one went
+      // into the ring instead: a client on GPU buffers may never read
+      // back, and the target is 24 MB at phone size. Let go once the frame
+      // is on its way; a readback later makes it again (#388).
+      if (prepared_) DropTarget(&unused);
     }
     return true;
   }
