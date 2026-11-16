@@ -15,46 +15,63 @@ namespace {
 
 const bool kTrace = std::getenv("RACCOON_TRACE") != nullptr;
 
-EGLDisplay OpenDisplay(std::string* how) {
+// A display to try, and how it was reached: "surfaceless", or a device's
+// render node, "device" for one without.
+struct Candidate {
+  EGLDisplay display = EGL_NO_DISPLAY;
+  std::string how;
+};
+
+// The displays to try, in order. RACCOON_GL_DEVICE narrows them:
+// "surfaceless", "device" (EGL devices only, render nodes first), or a
+// render node's path; otherwise the surfaceless platform, then each device
+// with a render node, then those without (software GL).
+std::vector<Candidate> Candidates() {
+  std::vector<Candidate> out;
   const auto get_platform_display =
       reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
           eglGetProcAddress("eglGetPlatformDisplayEXT"));
-  if (get_platform_display == nullptr) return EGL_NO_DISPLAY;
+  if (get_platform_display == nullptr) return out;
+  const char* asked = std::getenv("RACCOON_GL_DEVICE");
+  const std::string wanted = asked == nullptr ? "" : asked;
   const char* extensions = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
-  if (extensions != nullptr &&
+  if ((wanted.empty() || wanted == "auto" || wanted == "surfaceless") &&
+      extensions != nullptr &&
       std::strstr(extensions, "EGL_MESA_platform_surfaceless") != nullptr) {
     const EGLDisplay display = get_platform_display(
         EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
-    if (display != EGL_NO_DISPLAY) {
-      *how = "surfaceless";
-      return display;
-    }
+    if (display != EGL_NO_DISPLAY) out.push_back({display, "surfaceless"});
   }
+  if (wanted == "surfaceless") return out;
   const auto query_devices = reinterpret_cast<PFNEGLQUERYDEVICESEXTPROC>(
       eglGetProcAddress("eglQueryDevicesEXT"));
   const auto query_device_string =
       reinterpret_cast<PFNEGLQUERYDEVICESTRINGEXTPROC>(
           eglGetProcAddress("eglQueryDeviceStringEXT"));
-  if (query_devices == nullptr) return EGL_NO_DISPLAY;
-  EGLDeviceEXT devices[8];
+  if (query_devices == nullptr) return out;
+  EGLDeviceEXT devices[16];
   EGLint count = 0;
-  if (!query_devices(8, devices, &count) || count == 0) return EGL_NO_DISPLAY;
-  // A device with a render node is a GPU; the rest is software GL.
+  if (!query_devices(16, devices, &count)) return out;
+  const bool named = !wanted.empty() && wanted != "auto" && wanted != "device";
+  std::vector<Candidate> software;
   for (EGLint i = 0; i < count; ++i) {
     const char* node =
         query_device_string == nullptr
             ? nullptr
             : query_device_string(devices[i], EGL_DRM_RENDER_NODE_FILE_EXT);
-    if (node == nullptr) continue;
+    if (named && (node == nullptr || wanted != node)) continue;
     const EGLDisplay display =
         get_platform_display(EGL_PLATFORM_DEVICE_EXT, devices[i], nullptr);
-    if (display != EGL_NO_DISPLAY) {
-      *how = node;
-      return display;
+    if (display == EGL_NO_DISPLAY) continue;
+    // A device with a render node is a GPU; the rest is software GL.
+    if (node != nullptr) {
+      out.push_back({display, node});
+    } else {
+      software.push_back({display, "device"});
     }
   }
-  *how = "device";
-  return get_platform_display(EGL_PLATFORM_DEVICE_EXT, devices[0], nullptr);
+  out.insert(out.end(), software.begin(), software.end());
+  return out;
 }
 
 bool Has(const char* extensions, const char* name) {
@@ -64,16 +81,54 @@ bool Has(const char* extensions, const char* name) {
 }  // namespace
 
 bool GlRenderer::Init(std::string* error) {
-  std::string how;
-  display_ = OpenDisplay(&how);
-  if (display_ == EGL_NO_DISPLAY) {
-    *error = "no EGL display without a window";
-    return false;
+  const std::vector<Candidate> candidates = Candidates();
+  // The first that rasterizes on a GPU. Mesa's surfaceless platform falls
+  // to software GL when no driver of its own takes the GPU (NVIDIA's,
+  // beside Mesa), where the GPU's own EGL device would draw; a display
+  // that fails to start leaves the next to try (#123). Software GL when no
+  // GPU's display starts.
+  const auto is_gpu = [](const Candidate& candidate) { return candidate.how[0] == '/'; };
+  std::string failed;
+  int fallback = -1;
+  for (size_t i = 0; i < candidates.size(); ++i) {
+    const Candidate& candidate = candidates[i];
+    bool software = false;
+    std::string why;
+    if (!InitDisplay(candidate.display, candidate.how, &software, &why)) {
+      std::fprintf(stderr, "🦝 EGL %s: %s\n", candidate.how.c_str(), why.c_str());
+      failed += (failed.empty() ? "" : "; ") + candidate.how + ": " + why;
+      continue;
+    }
+    if (!software ||
+        std::none_of(candidates.begin() + static_cast<std::ptrdiff_t>(i) + 1,
+                     candidates.end(), is_gpu)) {
+      return true;
+    }
+    std::fprintf(stderr, "🦝 EGL %s draws in software (%s); trying the GPU's devices\n",
+                 candidate.how.c_str(), description_.c_str());
+    if (fallback < 0) fallback = static_cast<int>(i);
+    Shutdown();
   }
+  if (fallback >= 0) {
+    bool software = false;
+    std::string why;
+    if (InitDisplay(candidates[fallback].display, candidates[fallback].how, &software, &why)) {
+      return true;
+    }
+    failed += (failed.empty() ? "" : "; ") + candidates[fallback].how + ": " + why;
+  }
+  *error = failed.empty() ? "no EGL display without a window" : failed;
+  return false;
+}
+
+bool GlRenderer::InitDisplay(EGLDisplay display, const std::string& how, bool* software,
+                             std::string* error) {
+  display_ = display;
   EGLint major = 0;
   EGLint minor = 0;
   if (!eglInitialize(display_, &major, &minor)) {
     *error = "eglInitialize failed";
+    display_ = EGL_NO_DISPLAY;
     return false;
   }
   eglBindAPI(EGL_OPENGL_ES_API);
@@ -95,6 +150,7 @@ bool GlRenderer::Init(std::string* error) {
       (!eglChooseConfig(display_, any_surface, &config_, 1, &configs) ||
        configs == 0)) {
     *error = "no EGL config for OpenGL ES 2";
+    Shutdown();
     return false;
   }
   const EGLint context_attributes[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
@@ -102,12 +158,14 @@ bool GlRenderer::Init(std::string* error) {
       eglCreateContext(display_, config_, EGL_NO_CONTEXT, context_attributes);
   if (context_ == EGL_NO_CONTEXT) {
     *error = "eglCreateContext failed";
+    Shutdown();
     return false;
   }
   resource_context_ =
       eglCreateContext(display_, config_, context_, context_attributes);
   if (!MakeCurrent()) {
     *error = "eglMakeCurrent failed";
+    Shutdown();
     return false;
   }
   const char* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
@@ -143,6 +201,21 @@ bool GlRenderer::Init(std::string* error) {
                 create_sync_ != nullptr && destroy_sync_ != nullptr &&
                 client_wait_sync_ != nullptr && dup_fence_ != nullptr;
   has_wait_sync_ = Has(egl_extensions, "EGL_KHR_wait_sync") && wait_sync_ != nullptr;
+  // Mesa marks its software device; the renderer's name says it elsewhere.
+  *software = false;
+  const auto query_display = reinterpret_cast<PFNEGLQUERYDISPLAYATTRIBEXTPROC>(
+      eglGetProcAddress("eglQueryDisplayAttribEXT"));
+  const auto query_device_string = reinterpret_cast<PFNEGLQUERYDEVICESTRINGEXTPROC>(
+      eglGetProcAddress("eglQueryDeviceStringEXT"));
+  EGLAttrib device = 0;
+  if (query_display != nullptr && query_device_string != nullptr &&
+      query_display(display_, EGL_DEVICE_EXT, &device) && device != 0) {
+    *software = Has(query_device_string(reinterpret_cast<EGLDeviceEXT>(device), EGL_EXTENSIONS),
+                    "EGL_MESA_device_software");
+  }
+  for (const char* name : {"llvmpipe", "softpipe", "SwiftShader"}) {
+    if (Has(renderer, name)) *software = true;
+  }
   description_ = std::string(renderer == nullptr ? "?" : renderer) + ", " +
                  (version == nullptr ? "?" : version) + ", EGL " + how +
                  (can_export_ ? ", exports dmabufs" : "") +

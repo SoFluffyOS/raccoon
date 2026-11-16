@@ -184,7 +184,13 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   start-up log says which is in use, and
   `RACCOON_TRACE=1` traces every frame's buffer. On Linux, built when `egl`
   and `glesv2` are found by pkg-config (`libegl1-mesa-dev
-  libgles2-mesa-dev` on Debian).
+  libgles2-mesa-dev` on Debian). The GL renderer takes Mesa's surfaceless
+  platform when it draws on a GPU, else the first EGL device with a render
+  node that starts (a GPU with no Mesa driver, NVIDIA's, leaves the
+  surfaceless platform on software GL), else software GL. A display that
+  fails to start is said in the log, and the next is tried.
+  `RACCOON_GL_DEVICE` narrows the choice: `surfaceless`, `device` (EGL
+  devices only) or a render node, such as `/dev/dri/renderD128`.
 - Loads the project's native plugins on Linux, instead of answering their
   channels itself. A plugin binary links against `libflutter_linux_gtk.so`;
   the runner ships one of its own with the plugin-facing half of Flutter's

@@ -1,7 +1,8 @@
 #pragma once
 // Rasterizes the app on the GPU, through EGL without a window: the
-// surfaceless platform, else the first device with a render node. The engine
-// draws into a framebuffer here.
+// surfaceless platform where it draws on a GPU, else the first device with
+// a render node that starts, else software GL (RACCOON_GL_DEVICE narrows
+// the choice). The engine draws into a framebuffer here.
 //
 // Two ways out. By default each presented frame is read back as BGRA rows,
 // top row first, and handed to the frame path, so clients see no difference
@@ -112,6 +113,10 @@ class GlRenderer : public GpuRenderer {
     int fence = -1;
   };
 
+  // Starts |display|, reached as |how|, and says whether it rasterizes in
+  // software; on a failure, why, with nothing left started.
+  bool InitDisplay(EGLDisplay display, const std::string& how, bool* software,
+                   std::string* error);
   bool EnsureSize(size_t width, size_t height);
   // A native fence for the drawing issued so far, -1 when there is none.
   // Context current.

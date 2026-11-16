@@ -783,6 +783,73 @@ void main() {
     skip: ready ? false : 'build the runner and example first',
   );
 
+  // #123: the GL renderer took the first EGL display there was. A device
+  // whose eglInitialize failed left the runner on the software renderer
+  // with a working EGL device beside it, and Mesa's surfaceless platform,
+  // tried first, can be software GL where the GPU's own device is not.
+  test(
+    'on Linux the GL renderer goes on to the next EGL device when one fails to start',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_egl');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      Future<String> renderer(Map<String, String> environment) async {
+        final result = await Process.run(binary!, [
+          'render',
+          '--engine-dir',
+          engineDir!,
+          '--assets',
+          assets,
+          '--icu',
+          icu!,
+          '--renderer',
+          'auto',
+          '--out',
+          p.join(temp.path, 'frame.ppm'),
+        ], environment: environment);
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        return '${result.stdout}\n${result.stderr}'
+            .split('\n')
+            .firstWhere(
+              (line) => line.contains('🦝 renderer '),
+              orElse: () => '',
+            );
+      }
+
+      final usual = await renderer({});
+      if (!usual.contains('renderer gl ')) {
+        printOnFailure('no GL here: $usual');
+        return;
+      }
+      // EGL devices only: the GPU's render node where GL is the GPU's,
+      // else software GL's device.
+      final devices = await renderer({'RACCOON_GL_DEVICE': 'device'});
+      expect(devices, contains('renderer gl '));
+      expect(devices, isNot(contains('EGL surfaceless')));
+      if (!usual.contains('llvmpipe')) {
+        expect(devices, contains('EGL /dev/dri/render'));
+      }
+      // No driver loads for the GPU: its device fails eglInitialize, and the
+      // software device beside it draws.
+      final failing = await renderer({
+        'RACCOON_GL_DEVICE': 'device',
+        'MESA_LOADER_DRIVER_OVERRIDE': 'raccoon_no_such_driver',
+      });
+      expect(failing, contains('renderer gl '));
+      expect(failing, isNot(contains('EGL surfaceless')));
+      // A render node that isn't there leaves no EGL display.
+      final missing = await renderer({
+        'RACCOON_GL_DEVICE': '/dev/dri/renderD255',
+      });
+      expect(missing, contains('renderer software (no GL'));
+    },
+    skip:
+        !Platform.isLinux
+            ? 'EGL is Linux'
+            : ready
+            ? false
+            : 'build the runner and example first',
+  );
+
   test(
     'a pixel ratio that is no number, or none above 0, renders at 1',
     () async {
