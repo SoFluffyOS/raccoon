@@ -99,8 +99,14 @@ bool PluginHost::HandleMessage(const std::string& channel, const uint8_t* data, 
 
 bool PluginHost::PopulateTexture(int64_t texture_id, size_t width, size_t height,
                                  FlutterOpenGLTexture* out) {
-  FlTexture* texture = fl_texture_registrar_lookup_texture(textures_, texture_id);
-  if (texture == nullptr) return false;
+  // A reference of the populate's own: the plugin may let the texture go
+  // on its thread meanwhile. Until it is taken the registrar's holds, as
+  // an unregister takes one of ours before the registrar drops its own
+  // (UnregisterExternalTexture), so the pointer the lookup gave stays good
+  // (#123).
+  FlTexture* found = fl_texture_registrar_lookup_texture(textures_, texture_id);
+  if (found == nullptr) return false;
+  g_autoptr(FlTexture) texture = FL_TEXTURE(g_object_ref(found));
   g_autoptr(GError) error = nullptr;
   gboolean ok = FALSE;
   if (FL_IS_TEXTURE_GL(texture)) {
@@ -147,7 +153,24 @@ gboolean PluginHost::MarkTextureFrameAvailable(gpointer user_data, int64_t textu
 }
 
 gboolean PluginHost::UnregisterExternalTexture(gpointer user_data, int64_t texture_id) {
-  return static_cast<PluginHost*>(user_data)->bridge_.unregister_texture(texture_id);
+  auto* self = static_cast<PluginHost*>(user_data);
+  // Still the registrar's here: it drops its reference once this returns.
+  // One of ours keeps the texture to the raster thread, after what the
+  // engine has queued there: a populate under way finishes with it, and
+  // the texture goes there, the GL context current, so a pixel-buffer
+  // texture's GL name is deleted in it rather than wherever the plugin
+  // let go (#123). fl_texture_registrar_unregister_texture calls this
+  // before it takes the texture out of its table.
+  FlTexture* texture = fl_texture_registrar_lookup_texture(self->textures_, texture_id);
+  if (texture != nullptr) g_object_ref(texture);
+  const gboolean ok = self->bridge_.unregister_texture(texture_id);
+  if (texture != nullptr &&
+      !(self->bridge_.post_render_task &&
+        self->bridge_.post_render_task([texture] { g_object_unref(texture); }))) {
+    // No engine to run it, and none to draw the texture either.
+    g_object_unref(texture);
+  }
+  return ok;
 }
 
 }  // namespace raccoon

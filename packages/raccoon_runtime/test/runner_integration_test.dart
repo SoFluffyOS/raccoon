@@ -8860,6 +8860,84 @@ void main() => runApp(
   );
 
   test(
+    'a texture let go while its frame draws is freed after that frame',
+    () async {
+      // #123: the runner populated a plugin's texture without a reference
+      // of its own, so a plugin letting it go on the platform thread
+      // meanwhile freed it under the raster thread, and a pixel-buffer
+      // texture's GL name went with no GL context current wherever its
+      // last reference did. The echo plugin lets each churn texture go
+      // from inside its second frame's copy, waits for that, and counts.
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final manifest = File(p.join(temp.path, 'plugins.json'))
+        ..writeAsStringSync(
+          jsonEncode({
+            'plugins': [
+              _pluginEntry('raccoon_echo', pluginLibrary, 'RaccoonEchoPlugin'),
+            ],
+          }),
+        );
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: pluginsAppAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          plugins: manifest.path,
+        ),
+      );
+      final output = <String>[];
+      runner.stdout.listen(output.add);
+      var exited = false;
+      unawaited(runner.exitCode.then((_) => exited = true));
+      final client = await RunnerClient.connect(endpoint);
+      final frames = client.frames.listen((_) {});
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        Future<void> waitFor(String prefix, Duration bound) async {
+          final deadline = DateTime.now().add(bound);
+          while (!output.any((line) => line.startsWith(prefix)) &&
+              !exited &&
+              DateTime.now().isBefore(deadline)) {
+            await Future<void>.delayed(const Duration(milliseconds: 50));
+          }
+        }
+
+        await waitFor('TEXTURE:', const Duration(seconds: 15));
+        if (runner.renderer != 'gl') {
+          printOnFailure('no GL renderer, no textures: ${output.join('\n')}');
+          return;
+        }
+        client.sendToApp('raccoon_echo_app', utf8.encode('churn:100'));
+        await waitFor('CHURN:', const Duration(seconds: 90));
+        printOnFailure(output.join('\n'));
+        final report = output.firstWhere((line) => line.startsWith('CHURN:'));
+        expect(report, contains('made=100 '));
+        expect(report, contains('finalized=100 '));
+        expect(report, contains('finalized_in_populate=0 '));
+        expect(report, endsWith('no_context=0'));
+      } finally {
+        await frames.cancel();
+        client.shutdown();
+        await client.close();
+        await _expectExit(runner);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip:
+        !Platform.isLinux
+            ? 'the churn textures are the Linux echo plugin\'s'
+            : ready &&
+                File(pluginLibrary).existsSync() &&
+                Directory(pluginsAppAssets).existsSync()
+            ? false
+            : 'build the runner with plugins and example/plugins_app first',
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
+
+  test(
     'a texture unregistered is told so on the raster thread',
     () async {
       // #231: FlutterMacOS tells a texture it was unregistered on the

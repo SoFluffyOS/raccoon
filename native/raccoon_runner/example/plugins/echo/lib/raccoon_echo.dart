@@ -19,6 +19,22 @@ abstract final class RaccoonEcho {
   static Future<String?> untexture() =>
       _channel.invokeMethod<String>('untexture');
 
+  /// A texture to be let go while a frame draws it, Linux only: registers
+  /// one, blue, and answers its id. Its second frame has the plugin
+  /// unregister it and drop it on the platform thread while the raster
+  /// thread waits for that (#123).
+  static Future<int?> churn() => _channel.invokeMethod<int>('churn');
+
+  /// Answers once the texture [churn] made last is let go.
+  static Future<String?> churned() => _channel.invokeMethod<String>('churned');
+
+  /// What became of the textures [churn] made: `made`, `populated`,
+  /// `finalized`, `finalized_in_populate` (freed while its frame was still
+  /// being populated) and `no_context` (disposed with no GL context
+  /// current, its GL name left behind).
+  static Future<String?> churnReport() =>
+      _channel.invokeMethod<String>('churn_report');
+
   /// The COM apartment of the thread the plugin is called on: Windows only.
   static Future<String?> apartment() =>
       _channel.invokeMethod<String>('apartment');

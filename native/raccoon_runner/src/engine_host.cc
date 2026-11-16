@@ -1472,6 +1472,16 @@ bool EngineHost::LoadPlugins(const std::string& manifest, std::string* error) {
     };
     bridge.post_render_task = [this](std::function<void()> task) {
       return PluginCall([&] {
+#if RACCOON_HAS_GL
+        // What a plugin lets go there may delete GL names, which belong to
+        // the context its textures were drawn in (#123).
+        if (gl_ != nullptr) {
+          task = [gl = gl_, run = std::move(task)] {
+            gl->EnsureCurrent();
+            run();
+          };
+        }
+#endif
         auto* baton = new std::function<void()>(std::move(task));
         const bool posted =
             loader_.procs().PostRenderThreadTask(
