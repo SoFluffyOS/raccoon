@@ -1591,11 +1591,56 @@ def keep_failure(plugin, why, log, state='failed'):
     os.replace(staging, record)
 
 
-# A few plugins build at once (CMake's configure is mostly one process),
-# each with its share of the cores and ninja's two more for the waits on
-# disk: ninja's own width is all of them.
-WORKERS = max(1, min(4, (os.cpu_count() or 2) // 2))
-JOBS = (os.cpu_count() or 2) // WORKERS + 2
+# A few plugins build at once (CMake's configure is mostly one process).
+# Their ninjas share the cores through one jobserver where ninja takes part
+# in one (1.13 on): a long build takes what the short ones leave (#393). An
+# older ninja gets its share of them and two more for the waits on disk;
+# ninja's own width is all of them (#254).
+CORES = os.cpu_count() or 2
+WORKERS = max(1, min(4, CORES // 2))
+JOBS = CORES // WORKERS + 2
+MAKEFLAGS = None  # the jobserver's, once share_cores() has one
+
+
+def share_cores():
+    """Sets how many plugins build at once and how wide: up to eight
+    sharing a jobserver, else WORKERS at JOBS each. RACCOON_PLUGIN_JOBS
+    says how many at once, 1 for one at a time."""
+    global WORKERS, JOBS, MAKEFLAGS
+
+    def version(tool):
+        try:
+            said = subprocess.run([tool, '--version'], capture_output=True, text=True).stdout
+        except OSError:
+            return None
+        found = re.search(r'(\d+)\.(\d+)', said)
+        return (int(found.group(1)), int(found.group(2))) if found else None
+
+    # ninja takes part in a jobserver's FIFO from 1.13 on; a make a plugin
+    # runs under it reads one from 4.4 on, and an older one stops at it.
+    fifo = os.path.join(out, 'build', '.jobserver')
+    make = version('make')
+    if ((version('ninja') or (0, 0)) >= (1, 13) and (make is None or make >= (4, 4))
+            and not re.search(r'\s', fifo)):
+        try:
+            os.makedirs(os.path.dirname(fifo), exist_ok=True)
+            if os.path.lexists(fifo):
+                os.remove(fifo)
+            os.mkfifo(fifo, 0o600)
+            # A token for every second core, each ninja's first job its
+            # own: a compile sharing its core with another's is slower,
+            # and eight plugins took 3.2 s so, 3.5 s with one per core.
+            # Held open for the install: the tokens outlive any one ninja.
+            tokens = max(1, CORES // 2)
+            os.write(os.open(fifo, os.O_RDWR), b'+' * tokens)
+            MAKEFLAGS = ' -j%d --jobserver-auth=fifo:%s' % (tokens, fifo)
+            WORKERS = max(1, min(8, CORES // 2))
+        except OSError:
+            pass
+    asked = os.environ.get('RACCOON_PLUGIN_JOBS', '')
+    if asked.isdigit() and int(asked) > 0:
+        WORKERS = int(asked)
+    JOBS = CORES // WORKERS + 2
 
 
 def needs_rust(log):
@@ -1774,9 +1819,13 @@ def build(plugin):
                                      '-DRACCOON_LINKED_PLUGINS=' + ';'.join(plugin['linked']),
                                      '-DCMAKE_INSTALL_PREFIX=' + os.path.join(project, 'out', 'bundle')],
                                     stdout=written, stderr=subprocess.STDOUT, env=env).returncode == 0
-        ok = configured and subprocess.run(['cmake', '--build', os.path.join(project, 'out'),
-                                            '--parallel', str(JOBS)],
-                                           stdout=written, stderr=subprocess.STDOUT, env=env).returncode == 0
+        # In the jobserver's pool, at no width of its own; else its share.
+        width, wide = ['--parallel', str(JOBS)], env
+        if MAKEFLAGS:
+            width, wide = [], dict(env, MAKEFLAGS=MAKEFLAGS)
+            wide.pop('CMAKE_BUILD_PARALLEL_LEVEL', None)
+        ok = configured and subprocess.run(['cmake', '--build', os.path.join(project, 'out')] + width,
+                                           stdout=written, stderr=subprocess.STDOUT, env=wide).returncode == 0
         # Then the plugin's own install rules, as a desktop build's install
         # step runs them: what they put in the bundle's lib/ goes with its
         # libraries. A rule that fails costs only what it would have added;
@@ -1888,6 +1937,7 @@ for group in (now, later):
             toolchain_identity()  # read once, before the threads keep failures
             recipe()
             plugin_tree()  # once, before the threads share it
+            share_cores()
             import concurrent.futures
             pool = concurrent.futures.ThreadPoolExecutor(WORKERS)
         running[plugin['name']] = pool.submit(build, plugin)
@@ -1895,6 +1945,11 @@ for name, future in running.items():
     outcome[name] = future.result()
 if pool is not None:
     pool.shutdown()
+    if MAKEFLAGS:
+        try:
+            os.remove(os.path.join(out, 'build', '.jobserver'))
+        except OSError:
+            pass
 remove_tree()
 # A hosted plugin that got no library may still be in the archive: in a
 # checkout the lock can be a release ahead of it.

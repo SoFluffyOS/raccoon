@@ -218,7 +218,8 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   (`.dart_tool/package_config.json`, every package with a Linux
   `pluginClass` or `ffiPlugin`), each in a CMake project of its own with
   what the desktop template gives a plugin, a few at once, and `run`
-  passes it. The project's source is a desktop app's `linux/` folder as a
+  passes it. Up to eight at once share half the cores through a jobserver
+  with ninja 1.13 (eight plugins cold: 3.1 s, 4.0 s before); `RACCOON_PLUGIN_JOBS=1` builds one at a time (#393). The project's source is a desktop app's `linux/` folder as a
   plugin sees it, made in the app's `.dart_tool` for the build and removed
   after: the plugin reached as `flutter/ephemeral/.plugin_symlinks/<name>/linux`,
   `generated_config.cmake` beside it as `flutter build linux` writes it,
