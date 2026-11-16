@@ -18,6 +18,8 @@ import 'package:path/path.dart' as p;
 import 'package:raccoon_runtime/raccoon_runtime.dart';
 import 'package:test/test.dart';
 
+import 'support/server.dart';
+
 const red = (0xE5, 0x39, 0x35);
 const green = (0x43, 0xA0, 0x47);
 
@@ -42,7 +44,7 @@ Future<McpClient> connect(String host) async {
     StdioClientTransport(
       StdioServerParameters(
         command: Platform.resolvedExecutable,
-        args: ['run', 'bin/raccoon_mcp.dart', '--host', host],
+        args: [...await serverCommand(), '--host', host],
       ),
     ),
   );

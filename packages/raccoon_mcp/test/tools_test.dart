@@ -7,6 +7,8 @@ import 'package:raccoon_mcp/raccoon_mcp.dart';
 import 'package:raccoon_runtime/raccoon_runtime.dart';
 import 'package:test/test.dart';
 
+import 'support/server.dart';
+
 /// A host with devices and no apps, whose run says what it was asked.
 final class _Host implements RaccoonControlHost {
   @override
@@ -189,7 +191,7 @@ void main() {
       StdioClientTransport(
         StdioServerParameters(
           command: Platform.resolvedExecutable,
-          args: ['run', 'bin/raccoon_mcp.dart', '--host', 'headless'],
+          args: [...await serverCommand(), '--host', 'headless'],
           environment: {'XDG_CONFIG_HOME': config.path},
         ),
       ),
