@@ -1,0 +1,21 @@
+name: raccoon_mcp
+description: An MCP server over stdio that lets coding agents drive apps on Raccoon devices.
+version: 0.1.0
+publish_to: "none"
+
+environment:
+  sdk: ^3.7.0
+
+executables:
+  raccoon_mcp:
+
+dependencies:
+  mcp_dart: ^2.4.4
+  path: ^1.9.1
+  raccoon_runtime:
+    path: ../raccoon_runtime
+
+dev_dependencies:
+  image: ^4.0.0
+  lints: ^6.0.0
+  test: ^1.25.0
