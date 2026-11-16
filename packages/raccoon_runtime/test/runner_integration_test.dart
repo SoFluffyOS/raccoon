@@ -2974,6 +2974,127 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );
+  // raccoon#371: livekit_client links flutter_webrtc_plugin, flutter_webrtc's
+  // target, for its include directories. A desktop build has every plugin's
+  // targets in one project; each built in its own, the target was missing.
+  test(
+    'on Linux a plugin that links another plugin\'s target builds against it',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_linked');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      void plugin(String name, String dependencies, String cmake) {
+        write(
+          '$name/pubspec.yaml',
+          'name: $name\nversion: 1.0.0\n$dependencies'
+              'flutter:\n  plugin:\n    platforms:\n'
+              '      linux:\n        ffiPlugin: true\n',
+        );
+        write('$name/linux/CMakeLists.txt', cmake);
+      }
+
+      plugin(
+        'plugin_w',
+        '',
+        'cmake_minimum_required(VERSION 3.14)\n'
+            'add_library(plugin_w_plugin SHARED w.cc)\n'
+            'target_include_directories(plugin_w_plugin INTERFACE '
+            '"\${CMAKE_CURRENT_SOURCE_DIR}/include")\n',
+      );
+      write('plugin_w/linux/include/plugin_w.h', 'int plugin_w_value();\n');
+      write(
+        'plugin_w/linux/w.cc',
+        '#include "include/plugin_w.h"\nint plugin_w_value() { return 7; }\n',
+      );
+      plugin(
+        'plugin_l',
+        'dependencies:\n  plugin_w:\n',
+        'cmake_minimum_required(VERSION 3.14)\n'
+            'add_library(plugin_l SHARED l.cc)\n'
+            'target_link_libraries(plugin_l PRIVATE plugin_w_plugin)\n',
+      );
+      write(
+        'plugin_l/linux/l.cc',
+        '#include <plugin_w.h>\n'
+            'int plugin_l_value() { return plugin_w_value() + 1; }\n',
+      );
+      write('app/pubspec.yaml', 'name: app\ndependencies:\n  plugin_l:\n');
+      write(
+        'app/.dart_tool/package_config.json',
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+            for (final name in ['plugin_l', 'plugin_w'])
+              {'name': name, 'rootUri': '../../$name', 'packageUri': 'lib/'},
+          ],
+        }),
+      );
+      write(
+        'app/.dart_tool/package_graph.json',
+        jsonEncode({
+          'roots': ['app'],
+          'packages': [
+            {
+              'name': 'app',
+              'dependencies': ['plugin_l'],
+            },
+            {
+              'name': 'plugin_l',
+              'dependencies': ['plugin_w'],
+            },
+            {'name': 'plugin_w', 'dependencies': <String>[]},
+          ],
+        }),
+      );
+      final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+        ..createSync(recursive: true);
+      final data = p.join(temp.path, 'data');
+      final cache = p.join(temp.path, 'cache');
+      final result = await Process.run(
+        p.join(runnerDir, 'tool', 'raccoon-device'),
+        ['install', bundle.path, 'app'],
+        environment: {
+          'RACCOON_RUNNER': binary!,
+          if (sdk != null) 'FLUTTER_ROOT': sdk,
+          'XDG_DATA_HOME': data,
+          'RACCOON_PLUGIN_CACHE': cache,
+          'RACCOON_NO_PREBUILT': '1',
+        },
+      );
+      expect(result.exitCode, 0, reason: '${result.stderr}');
+      expect(
+        '${result.stderr}',
+        contains('2 built: plugin_l, plugin_w'),
+        reason: '${result.stderr}',
+      );
+      final plugins = p.join(data, 'raccoon', 'apps', 'app', 'plugins');
+      expect(
+        Directory(
+          p.join(plugins, 'lib'),
+        ).listSync().map((file) => p.basename(file.path)),
+        containsAll(['libplugin_l.so', 'libplugin_w_plugin.so']),
+      );
+      // plugin_w's library comes with its own entry, not plugin_l's.
+      final entry = Directory(
+        cache,
+      ).listSync().whereType<Directory>().singleWhere(
+        (folder) => p.basename(folder.path).startsWith('plugin_l-'),
+      );
+      expect(entry.listSync().map((file) => p.basename(file.path)), [
+        'libplugin_l.so',
+      ]);
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isLinux)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'the Linux half of the helper',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 4)),
+  );
   // raccoon#16: flutter_secure_storage_linux without libsecret-1's
   // development files said only "did not build; see <log>".
   test(

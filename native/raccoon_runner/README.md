@@ -201,7 +201,10 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   after: the plugin reached as `flutter/ephemeral/.plugin_symlinks/<name>/linux`,
   `generated_config.cmake` beside it as `flutter build linux` writes it,
   and `${CMAKE_SOURCE_DIR}/..` the app's folder, where a plugin's
-  `dart run <plugin>:setup` resolves it (#364). What a plugin's build gives the app goes beside its library,
+  `dart run <plugin>:setup` resolves it (#364). A plugin that links another's
+  target by name (livekit_client links `flutter_webrtc_plugin` for its
+  headers) gets that plugin added to its project first, as a desktop
+  build has every plugin's targets in one (#371). What a plugin's build gives the app goes beside its library,
   as the template installs it: what its targets made (`.so.N` too), what
   `<name>_bundled_libraries` names, every name of a link's chain
   (`libonnxruntime.so`, `.so.1`, `.so.1.28.3`), a library's SONAME, and

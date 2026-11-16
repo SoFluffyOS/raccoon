@@ -675,6 +675,12 @@ function(raccoon_generated_config)
   include("${CMAKE_CURRENT_SOURCE_DIR}/flutter/ephemeral/generated_config.cmake")
 endfunction()
 raccoon_generated_config()
+# The plugins this one links by their targets, before it, as in a desktop
+# build, whose one project has every plugin's: livekit_client links
+# flutter_webrtc_plugin and gets its include directories from it (#371).
+foreach(linked IN LISTS RACCOON_LINKED_PLUGINS)
+  add_subdirectory("flutter/ephemeral/.plugin_symlinks/${linked}/linux" "plugins/${linked}")
+endforeach()
 add_subdirectory("flutter/ephemeral/.plugin_symlinks/${RACCOON_PLUGIN}/linux" "plugin")
 # As the list it is, ;-separated: a $<JOIN> would take a comma in a path for
 # its own and fail on a >.
@@ -762,9 +768,12 @@ def gather(project):
     (libonnxruntime.so, .so.1, .so.1.28.3), and what those need that the
     build left elsewhere in its tree, as a FetchContent library. A desktop
     build finds the last through its build tree's RUNPATH, which the cache
-    has not (#363)."""
+    has not (#363). Not what a plugin it links built beside it: that
+    one's own entry brings it (#371)."""
     tree = os.path.join(project, 'out')
-    everywhere = shared_libraries(tree)
+    linked = os.path.join(tree, 'plugins') + os.sep
+    everywhere = {name: path for name, path in shared_libraries(tree).items()
+                  if not path.startswith(linked)}
     libs = {}
 
     def take(path):
@@ -1069,6 +1078,7 @@ def reached():
         roots = list(graph['roots'])
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return None
+    graph_edges.update(edges)
     # One a pub without it left behind lacks what was resolved since.
     if any(name not in edges for name, _, _ in packages):
         return None
@@ -1093,6 +1103,7 @@ def reached():
     return seen
 
 
+graph_edges = {}  # each package's dependencies, from pub's graph
 ours = reached()
 for name, root, pubspec in packages:
     if ours is not None and name not in ours:
@@ -1132,6 +1143,61 @@ for name, root, pubspec in packages:
     hosted = version == os.path.basename(os.path.realpath(root).rstrip(os.sep))
     wanted.append({'name': name, 'root': root, 'symbol': symbol, 'hosted': hosted,
                    'version': version, 'key': '%s-%s-%s' % (version, lib_stamp, arch)})
+
+
+def cmake_text(plugin):
+    """A plugin's linux/ CMake files, as one text."""
+    folder = os.path.join(plugin['root'], 'linux')
+    text = []
+    for f in sorted(os.listdir(folder)):
+        if f == 'CMakeLists.txt' or f.endswith('.cmake'):
+            try:
+                with open(os.path.join(folder, f), errors='replace') as opened:
+                    text.append(opened.read())
+            except OSError:
+                pass
+    return '\n'.join(text)
+
+
+# The plugins each one links by their targets: those it depends on, through
+# pub's graph, whose names its CMake files hold, as livekit_client's
+# flutter_webrtc_plugin. Each builds in a project of its own, so they are
+# added to it, as a desktop build has every plugin in one (#371).
+by_name = {plugin['name']: plugin for plugin in wanted}
+links = {}
+
+
+def direct_links(plugin):
+    if plugin['name'] not in links:
+        seen, todo = set(), list(graph_edges.get(plugin['name'], []))
+        while todo:
+            name = todo.pop()
+            if name in seen or name == plugin['name']:
+                continue
+            seen.add(name)
+            todo.extend(graph_edges.get(name, []))
+        candidates = sorted(name for name in seen if name in by_name)
+        text = cmake_text(plugin) if candidates else ''
+        links[plugin['name']] = [name for name in candidates
+                                 if re.search(r'(?<![A-Za-z0-9_])%s(?![A-Za-z0-9])' % re.escape(name), text)]
+    return links[plugin['name']]
+
+
+for plugin in wanted:
+    # And what those link, each before what links it.
+    order, visiting = [], set()
+
+    def visit(name):
+        if name in order or name in visiting or name == plugin['name']:
+            return
+        visiting.add(name)
+        for linked in direct_links(by_name[name]):
+            visit(linked)
+        order.append(name)
+
+    for name in direct_links(plugin):
+        visit(name)
+    plugin['linked'] = order
 
 if not wanted and not status:
     sys.exit(0)
@@ -1392,7 +1458,8 @@ def build(plugin):
         env['PATH'] = os.path.join(flutter_root, 'bin') + os.pathsep + env.get('PATH', '')
     with open(log, 'w') as written:
         configured = subprocess.run(['cmake', '-S', plugin_tree(), '-B', os.path.join(project, 'out'), '-G', 'Ninja',
-                                     '-DRACCOON_PLUGIN=' + name],
+                                     '-DRACCOON_PLUGIN=' + name,
+                                     '-DRACCOON_LINKED_PLUGINS=' + ';'.join(plugin['linked'])],
                                     stdout=written, stderr=subprocess.STDOUT, env=env).returncode == 0
         ok = configured and subprocess.run(['cmake', '--build', os.path.join(project, 'out'),
                                             '--parallel', str(JOBS)],
