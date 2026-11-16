@@ -107,7 +107,10 @@ final class StartupFailure {
   /// .initializeCore`, after the federated package that declares it. So a
   /// plugin matches when a segment of the channel, split at `.`, `/` and
   /// `:`, is its name, or its name and one of the federated packages'
-  /// suffixes ([federatedSuffixes]). The longest name that matches wins.
+  /// suffixes ([federatedSuffixes]), or, for a host's own package such as
+  /// `yaru_window_linux`, its name without that host's suffix
+  /// ([hostSuffixes]): its channel is `yaru_window`. The longest name that
+  /// matches wins.
   /// Failing that, a segment that is its [stemOf], as
   /// permission_handler's `flutter.baseflow.com/permissions/methods` and
   /// google_maps_flutter's `plugins.flutter.io/google_maps_1` are named.
@@ -123,9 +126,11 @@ final class StartupFailure {
       if (!_cannotWork(report)) continue;
       final name = report.name;
       if (name.isEmpty) continue;
+      final bare = _withoutHostSuffix(name);
       final matches = segments.any(
         (segment) =>
             segment == name ||
+            segment == bare ||
             federatedSuffixes.any((suffix) => segment == '$name$suffix'),
       );
       if (matches) {
@@ -182,6 +187,21 @@ final class StartupFailure {
     '_windows',
     '_web',
   ];
+
+  /// The suffixes of a host's own package of a federated plugin, the one a
+  /// runner on that host reports: `yaru_window_linux`, `url_launcher_macos`.
+  static const hostSuffixes = ['_linux', '_macos', '_windows'];
+
+  /// [name] without its [hostSuffixes] one; null when it has none, or
+  /// nothing is left.
+  static String? _withoutHostSuffix(String name) {
+    for (final suffix in hostSuffixes) {
+      if (name.endsWith(suffix) && name.length > suffix.length) {
+        return name.substring(0, name.length - suffix.length);
+      }
+    }
+    return null;
+  }
 
   /// A line for [plugin]: `firebase_core has no Linux implementation`, with
   /// the report's own words for the host where it has them.

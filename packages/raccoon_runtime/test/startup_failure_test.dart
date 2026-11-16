@@ -267,6 +267,84 @@ void main() {
     );
   });
 
+  // raccoon#394: a plugin that wants the view is reported under its Linux
+  // package's name (#386), its channel carries the app-facing one.
+  test('a host\'s own package matches a channel without its suffix', () {
+    final reports =
+        _report([
+          (
+            'yaru_window_linux',
+            PluginState.PLUGIN_STATE_NO_HOST,
+            "no implementation on Raccoon: it wants the view's GTK window, "
+                'and there is no view yet (#365)',
+          ),
+          ('desktop_drop_windows', PluginState.PLUGIN_STATE_FAILED, ''),
+          ('url_launcher_macos', PluginState.PLUGIN_STATE_SKIPPED, ''),
+          ('window_size', PluginState.PLUGIN_STATE_NO_HOST, ''),
+        ]).plugins;
+    String? of(String channel) =>
+        StartupFailure.pluginOf(channel, reports)?.name;
+
+    expect(of('yaru_window'), 'yaru_window_linux');
+    expect(of('desktop_drop'), 'desktop_drop_windows');
+    expect(of('plugins.flutter.io/url_launcher'), 'url_launcher_macos');
+    // Still a whole segment, never part of one.
+    expect(of('yaru'), isNull);
+    expect(of('yaru_window_plus'), isNull);
+    expect(of('yaru/window'), isNull);
+    expect(
+      StartupFailure.pluginOf('yaru_window', [
+        for (final report in reports)
+          if (report.name == 'window_size') report,
+      ]),
+      isNull,
+      reason: 'window_size is not yaru_window',
+    );
+  });
+
+  test('a channel a plugin and its host package match goes to the longer', () {
+    final reports =
+        _report([
+          ('yaru_window', PluginState.PLUGIN_STATE_FAILED, ''),
+          ('yaru_window_linux', PluginState.PLUGIN_STATE_NO_HOST, ''),
+        ]).plugins;
+
+    expect(
+      StartupFailure.pluginOf('yaru_window', reports)?.name,
+      'yaru_window_linux',
+    );
+    expect(
+      StartupFailure.pluginOf('yaru_window', reports.reversed)?.name,
+      'yaru_window_linux',
+    );
+  });
+
+  test('an app stopped on yaru_window is told of yaru_window_linux', () {
+    final failure = StartupFailure.fromLog(
+      [
+        '🦝 nothing answered yaru_window (no plugin); the app sees no plugin',
+        '[ERROR:flutter/runtime/dart_vm_initializer.cc(40)] Unhandled '
+            'Exception: MissingPluginException(No implementation found for '
+            'method state on channel yaru_window)',
+        '#0      MethodChannel._invokeMethod (package:flutter/x.dart:1:2)',
+      ],
+      plugins: _report([
+        (
+          'yaru_window_linux',
+          PluginState.PLUGIN_STATE_NO_HOST,
+          "no implementation on Raccoon: it wants the view's GTK window, "
+              'and there is no view yet (#365)',
+        ),
+      ]),
+    );
+
+    expect(failure?.channels, ['yaru_window']);
+    expect(failure?.hints, [
+      'yaru_window_linux has no implementation on Raccoon: it wants the '
+          "view's GTK window, and there is no view yet (#365)",
+    ]);
+  });
+
   test('the device the entry asks for, unanswered, is no failure', () {
     // raccoon#235: a client with no profile answers nothing there, which
     // is the host, and an app slow to its first frame was reported failing.
