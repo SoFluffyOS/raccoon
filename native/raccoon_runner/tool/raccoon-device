@@ -1675,6 +1675,203 @@ def missing_packages(log):
     return found
 
 
+# The distro package with a pkg-config module's development files, by the
+# package manager /etc/os-release's ID or ID_LIKE says the box has: what a
+# failure names to install (#392). Debian's apt-file is rarely there and
+# Arch's pacman -F wants a synced file list, hence the table; dnf and zypper
+# install a module by its own name, pkgconfig(NAME), and need none. A
+# CMake find module's name (Could NOT find CURL) gives all four. A module
+# not here is named as the package that provides pkgconfig(NAME).
+DEV_PACKAGES = {
+    # What the plugin sweeps met (#16, #375, #384), and its kin.
+    'json-glib-1.0': {'apt': 'libjson-glib-dev', 'pacman': 'json-glib'},
+    'webkit2gtk-4.1': {'apt': 'libwebkit2gtk-4.1-dev', 'pacman': 'webkit2gtk-4.1'},
+    'webkit2gtk-4.0': {'apt': 'libwebkit2gtk-4.0-dev'},
+    'javascriptcoregtk-4.1': {'apt': 'libjavascriptcoregtk-4.1-dev', 'pacman': 'webkit2gtk-4.1'},
+    'javascriptcoregtk-4.0': {'apt': 'libjavascriptcoregtk-4.0-dev'},
+    'webkitgtk-6.0': {'apt': 'libwebkitgtk-6.0-dev', 'pacman': 'webkitgtk-6.0'},
+    'wpe-webkit-1.1': {'apt': 'libwpewebkit-1.1-dev'},
+    'wpe-webkit-2.0': {'apt': 'libwpewebkit-2.0-dev', 'pacman': 'wpewebkit'},
+    'openssl': {'apt': 'libssl-dev', 'pacman': 'openssl'},
+    'libssl': {'apt': 'libssl-dev', 'pacman': 'openssl'},
+    'libcrypto': {'apt': 'libssl-dev', 'pacman': 'openssl'},
+    'gstreamer-1.0': {'apt': 'libgstreamer1.0-dev', 'pacman': 'gstreamer'},
+    'gstreamer-base-1.0': {'apt': 'libgstreamer1.0-dev', 'pacman': 'gstreamer'},
+    'gstreamer-app-1.0': {'apt': 'libgstreamer-plugins-base1.0-dev', 'pacman': 'gst-plugins-base-libs'},
+    'gstreamer-video-1.0': {'apt': 'libgstreamer-plugins-base1.0-dev', 'pacman': 'gst-plugins-base-libs'},
+    'gstreamer-audio-1.0': {'apt': 'libgstreamer-plugins-base1.0-dev', 'pacman': 'gst-plugins-base-libs'},
+    'gstreamer-pbutils-1.0': {'apt': 'libgstreamer-plugins-base1.0-dev', 'pacman': 'gst-plugins-base-libs'},
+    'gstreamer-gl-1.0': {'apt': 'libgstreamer-plugins-base1.0-dev', 'pacman': 'gst-plugins-base-libs'},
+    'gstreamer-webrtc-1.0': {'apt': 'libgstreamer-plugins-bad1.0-dev', 'pacman': 'gst-plugins-bad-libs'},
+    'appindicator3-0.1': {'apt': 'libappindicator3-dev', 'pacman': 'libappindicator'},
+    'ayatana-appindicator3-0.1': {'apt': 'libayatana-appindicator3-dev', 'pacman': 'libayatana-appindicator'},
+    'libavcodec': {'apt': 'libavcodec-dev', 'pacman': 'ffmpeg'},
+    'libavformat': {'apt': 'libavformat-dev', 'pacman': 'ffmpeg'},
+    'libavutil': {'apt': 'libavutil-dev', 'pacman': 'ffmpeg'},
+    'libavfilter': {'apt': 'libavfilter-dev', 'pacman': 'ffmpeg'},
+    'libavdevice': {'apt': 'libavdevice-dev', 'pacman': 'ffmpeg'},
+    'libswscale': {'apt': 'libswscale-dev', 'pacman': 'ffmpeg'},
+    'libswresample': {'apt': 'libswresample-dev', 'pacman': 'ffmpeg'},
+    'libwebp': {'apt': 'libwebp-dev', 'pacman': 'libwebp'},
+    'mpv': {'apt': 'libmpv-dev', 'pacman': 'mpv'},
+    'libsecret-1': {'apt': 'libsecret-1-dev', 'pacman': 'libsecret'},
+    'libnotify': {'apt': 'libnotify-dev', 'pacman': 'libnotify'},
+    'keybinder-3.0': {'apt': 'libkeybinder-3.0-dev', 'pacman': 'libkeybinder3'},
+    'gtk-layer-shell-0': {'apt': 'libgtk-layer-shell-dev', 'pacman': 'gtk-layer-shell'},
+    'libpulse': {'apt': 'libpulse-dev', 'pacman': 'libpulse'},
+    'libpulse-simple': {'apt': 'libpulse-dev', 'pacman': 'libpulse'},
+    'alsa': {'apt': 'libasound2-dev', 'pacman': 'alsa-lib'},
+    'libusb-1.0': {'apt': 'libusb-1.0-0-dev', 'pacman': 'libusb'},
+    'bluez': {'apt': 'libbluetooth-dev', 'pacman': 'bluez-libs'},
+    'libudev': {'apt': 'libudev-dev', 'pacman': 'systemd-libs'},
+    'libcurl': {'apt': 'libcurl4-openssl-dev', 'pacman': 'curl'},
+    'jsoncpp': {'apt': 'libjsoncpp-dev', 'pacman': 'jsoncpp'},
+    'x11': {'apt': 'libx11-dev', 'pacman': 'libx11'},
+    'xrandr': {'apt': 'libxrandr-dev', 'pacman': 'libxrandr'},
+    'xi': {'apt': 'libxi-dev', 'pacman': 'libxi'},
+    'xtst': {'apt': 'libxtst-dev', 'pacman': 'libxtst'},
+    'xext': {'apt': 'libxext-dev', 'pacman': 'libxext'},
+    'xfixes': {'apt': 'libxfixes-dev', 'pacman': 'libxfixes'},
+    'xcursor': {'apt': 'libxcursor-dev', 'pacman': 'libxcursor'},
+    'xinerama': {'apt': 'libxinerama-dev', 'pacman': 'libxinerama'},
+    'xscrnsaver': {'apt': 'libxss-dev', 'pacman': 'libxss'},
+    'xcomposite': {'apt': 'libxcomposite-dev', 'pacman': 'libxcomposite'},
+    'xdamage': {'apt': 'libxdamage-dev', 'pacman': 'libxdamage'},
+    # Common in plugins' CMake.
+    'gtk+-3.0': {'apt': 'libgtk-3-dev', 'pacman': 'gtk3'},
+    'gtk4': {'apt': 'libgtk-4-dev', 'pacman': 'gtk4'},
+    'glib-2.0': {'apt': 'libglib2.0-dev', 'pacman': 'glib2'},
+    'gio-2.0': {'apt': 'libglib2.0-dev', 'pacman': 'glib2'},
+    'gobject-2.0': {'apt': 'libglib2.0-dev', 'pacman': 'glib2'},
+    'gio-unix-2.0': {'apt': 'libglib2.0-dev', 'pacman': 'glib2'},
+    'libsoup-3.0': {'apt': 'libsoup-3.0-dev', 'pacman': 'libsoup3'},
+    'libsoup-2.4': {'apt': 'libsoup2.4-dev'},
+    'dbus-1': {'apt': 'libdbus-1-dev', 'pacman': 'dbus'},
+    'libsystemd': {'apt': 'libsystemd-dev', 'pacman': 'systemd-libs'},
+    'uuid': {'apt': 'uuid-dev', 'pacman': 'util-linux-libs'},
+    'sqlite3': {'apt': 'libsqlite3-dev', 'pacman': 'sqlite'},
+    'zlib': {'apt': 'zlib1g-dev', 'pacman': 'zlib'},
+    'libpng': {'apt': 'libpng-dev', 'pacman': 'libpng'},
+    'libjpeg': {'apt': 'libjpeg-dev', 'pacman': 'libjpeg-turbo'},
+    'epoxy': {'apt': 'libepoxy-dev', 'pacman': 'libepoxy'},
+    'egl': {'apt': 'libegl-dev', 'pacman': 'libglvnd'},
+    'gl': {'apt': 'libgl-dev', 'pacman': 'libglvnd'},
+    'glesv2': {'apt': 'libgles-dev', 'pacman': 'libglvnd'},
+    'gbm': {'apt': 'libgbm-dev', 'pacman': 'mesa'},
+    'libdrm': {'apt': 'libdrm-dev', 'pacman': 'libdrm'},
+    'xkbcommon': {'apt': 'libxkbcommon-dev', 'pacman': 'libxkbcommon'},
+    'libpipewire-0.3': {'apt': 'libpipewire-0.3-dev', 'pacman': 'libpipewire'},
+    'libv4l2': {'apt': 'libv4l-dev', 'pacman': 'v4l-utils'},
+    'hidapi-hidraw': {'apt': 'libhidapi-dev', 'pacman': 'hidapi'},
+    'hidapi-libusb': {'apt': 'libhidapi-dev', 'pacman': 'hidapi'},
+    'gudev-1.0': {'apt': 'libgudev-1.0-dev', 'pacman': 'libgudev'},
+    'libpcsclite': {'apt': 'libpcsclite-dev', 'pacman': 'pcsclite'},
+    'libportal': {'apt': 'libportal-dev', 'pacman': 'libportal'},
+    'libportal-gtk3': {'apt': 'libportal-gtk3-dev', 'pacman': 'libportal-gtk3'},
+    'poppler-glib': {'apt': 'libpoppler-glib-dev', 'pacman': 'poppler-glib'},
+    'vte-2.91': {'apt': 'libvte-2.91-dev', 'pacman': 'vte3'},
+    'libnm': {'apt': 'libnm-dev', 'pacman': 'libnm'},
+    'upower-glib': {'apt': 'libupower-glib-dev', 'pacman': 'upower'},
+    'libgeoclue-2.0': {'apt': 'libgeoclue-2-dev', 'pacman': 'geoclue'},
+    # CMake's find modules.
+    'CURL': {'apt': 'libcurl4-openssl-dev', 'dnf': 'libcurl-devel', 'pacman': 'curl', 'zypper': 'libcurl-devel'},
+    'OpenSSL': {'apt': 'libssl-dev', 'dnf': 'openssl-devel', 'pacman': 'openssl', 'zypper': 'libopenssl-devel'},
+    'ALSA': {'apt': 'libasound2-dev', 'dnf': 'alsa-lib-devel', 'pacman': 'alsa-lib', 'zypper': 'alsa-devel'},
+    'X11': {'apt': 'libx11-dev', 'dnf': 'libX11-devel', 'pacman': 'libx11', 'zypper': 'libX11-devel'},
+    'ZLIB': {'apt': 'zlib1g-dev', 'dnf': 'zlib-devel', 'pacman': 'zlib', 'zypper': 'zlib-devel'},
+    'SQLite3': {'apt': 'libsqlite3-dev', 'dnf': 'sqlite-devel', 'pacman': 'sqlite', 'zypper': 'sqlite3-devel'},
+}
+INSTALL = {'apt': 'sudo apt install', 'dnf': 'sudo dnf install', 'pacman': 'sudo pacman -S',
+           'zypper': 'sudo zypper install'}
+
+
+def package_manager():
+    """apt, dnf, pacman or zypper, as /etc/os-release's ID, then ID_LIKE,
+    names the distro; None for another."""
+    for path in ('/etc/os-release', '/usr/lib/os-release'):
+        try:
+            text = open(path, errors='replace').read()
+        except OSError:
+            continue
+        fields = dict(re.findall(r'^(ID|ID_LIKE)=["\']?([^"\'\n]*)', text, re.M))
+        for word in (fields.get('ID', '') + ' ' + fields.get('ID_LIKE', '')).split():
+            if word in ('debian', 'ubuntu'):
+                return 'apt'
+            if word in ('fedora', 'rhel', 'centos'):
+                return 'dnf'
+            if word == 'arch':
+                return 'pacman'
+            if word in ('suse', 'sles') or word.startswith('opensuse'):
+                return 'zypper'
+        return None
+    return None
+
+
+def apt_knows(packages):
+    """The ones of [packages] apt has a candidate for, read offline from its
+    lists; all of them when it can't tell (no apt-cache, no lists: no
+    candidate for dpkg itself)."""
+    try:
+        said = subprocess.run(['apt-cache', 'policy', 'dpkg'] + packages, capture_output=True, text=True,
+                              timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return packages
+    known = {name for name, candidate in re.findall(r'^(\S+):\n(?:  .*\n)*?  Candidate: (\S+)', said, re.M)
+             if candidate != '(none)'}
+    return [p for p in packages if p in known] if 'dpkg' in known else packages
+
+
+def install_line(needs):
+    """What to run for the modules [needs] names (missing_packages'), in
+    a few words: `sudo apt install libjson-glib-dev`."""
+    manager = package_manager()
+    found, others = [], []
+    for need in needs:
+        # pkg_search_module's first choice, of `a (or b, c)`.
+        name = need.split(' (or ')[0]
+        package = DEV_PACKAGES.get(name, {}).get(manager)
+        if package is None and manager in ('dnf', 'zypper') and not name[:1].isupper():
+            package = "'pkgconfig(%s)'" % name
+        if package is None:
+            others.append(name)
+        else:
+            found.append((name, package))
+    # A table's package this release of the distro has not (WebKitGTK 4.0
+    # on Ubuntu 24.04 and later) is not one to run apt with.
+    missing = []
+    if manager == 'apt' and found:
+        known = apt_knows([package for _, package in found])
+        missing = [name for name, package in found if package not in known]
+        found = [(name, package) for name, package in found if package in known]
+    packages = list(dict.fromkeys(package for _, package in found))
+    said = ['%s %s' % (INSTALL[manager], ' '.join(packages))] if packages else []
+    if others:
+        plural, verb = ('s', '') if len(others) > 1 else ('', 's')
+        said.append('the package%s that provide%s %s' % (
+            plural, verb,
+            ', '.join("%s's development files" % name if name[:1].isupper() else 'pkgconfig(%s)' % name
+                      for name in others)))
+    line = ' and '.join(said)
+    if missing:
+        none = 'apt has none for %s' % ', '.join(missing)
+        line = '%s (%s)' % (line, none) if line else none
+    return line
+
+
+def with_install(why):
+    """[why] with what to install, when it names -dev packages, and that a
+    desktop build wants them too: `... of json-glib-1.0, as flutter run -d
+    linux does: sudo apt install libjson-glib-dev; see <log>`. Not in
+    build(): what a build makes, and its recipe, stay the same."""
+    head, see, log = why.rpartition('; see ')
+    if not see or not head.startswith('did not build: needs the development files of '):
+        return why
+    needs = missing_packages(log)
+    if not needs:
+        return why
+    return '%s, as flutter run -d linux does: %s; see %s' % (head, install_line(needs), log)
+
+
 def sdk_root():
     """The Flutter SDK in use, as the helper's sdk_root finds it."""
     root = os.environ.get('FLUTTER_ROOT', '')
@@ -1963,6 +2160,8 @@ if unmet and fetcher is None and may_fetch():
 for plugin in wanted:
     name = plugin['name']
     state, why, libs = outcome[name]
+    if state == 'failed':
+        why = with_install(why)
     said = name
     # One an older helper made, not built again (no toolchain, cached only,
     # or its build failed now): better than none, as it was (#380).

@@ -262,7 +262,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   fetches nothing (#352). Without a toolchain for the rest, or when a
   plugin fails to build, it says so and the app sees no plugin; one a
   `-dev` package is missing for names it, any of `pkg_search_module`'s
-  list too (#385); one that
+  list too (#385), with the distro's package to install, as `/etc/os-release`
+  says (`sudo apt install libjson-glib-dev`; apt, dnf, pacman, zypper), which
+  `flutter run -d linux` needs too (#392); one that
   wants Rust (cargokit's, with no precompiled library) says that, and
   builds again once rustup is on the PATH (#378). A
   loaded plugin's channels are answered before a client sees them, GLib's

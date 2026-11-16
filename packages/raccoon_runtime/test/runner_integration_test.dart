@@ -3919,9 +3919,13 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
       final detail = (manifest['status'] as List).cast<Map>().single['detail'];
       expect(
         detail,
-        startsWith(
-          'did not build: needs the development files of raccoon-missing-1; '
-          'see ',
+        matches(
+          RegExp(
+            r'^did not build: needs the development files of '
+            r'raccoon-missing-1, as flutter run -d linux does: (the package '
+            r'that provides pkgconfig\(raccoon-missing-1\)|sudo (dnf|zypper) '
+            r"install 'pkgconfig\(raccoon-missing-1\)'); see ",
+          ),
         ),
       );
     },
@@ -3996,13 +4000,124 @@ with tarfile.open(sys.argv[1], 'w:gz') as tar:
               )
               as Map;
       final detail = (manifest['status'] as List).cast<Map>().single['detail'];
+      // Not in the table: named by its module, which dnf and zypper
+      // install by (#392).
       expect(
         detail,
-        startsWith(
-          'did not build: needs the development files of raccoon-missing-4.1 '
-          '(or raccoon-missing-4.2); see ',
+        matches(
+          RegExp(
+            r'^did not build: needs the development files of '
+            r'raccoon-missing-4\.1 \(or raccoon-missing-4\.2\), as flutter run '
+            r'-d linux does: (the package that provides '
+            r'pkgconfig\(raccoon-missing-4\.1\)|sudo (dnf|zypper) install '
+            r"'pkgconfig\(raccoon-missing-4\.1\)'); see ",
+          ),
         ),
       );
+    },
+    skip: switch ((binary != null && sdk != null, Platform.isLinux)) {
+      (false, _) => 'build the runner first, with a Flutter SDK on PATH',
+      (_, false) => 'the Linux half of the helper',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+  // raccoon#392: a missing module was named, not the package to install.
+  // Its words are pkg-config's; CMake stops on them as on a desktop build.
+  test(
+    'on Linux a plugin missing a -dev package says which one to install',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_dev_install');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      void write(String path, String text) =>
+          File(p.join(temp.path, path))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(text);
+      write(
+        'plugin_j/pubspec.yaml',
+        'name: plugin_j\nversion: 1.0.0\nflutter:\n  plugin:\n    platforms:\n'
+            '      linux:\n        ffiPlugin: true\n',
+      );
+      write(
+        'plugin_j/linux/CMakeLists.txt',
+        'cmake_minimum_required(VERSION 3.14)\n'
+            'message(FATAL_ERROR "Package \'json-glib-1.0\', required by '
+            '\'virtual:world\', not found")\n',
+      );
+      write('app/pubspec.yaml', 'name: app\ndependencies:\n  plugin_j:\n');
+      write(
+        'app/.dart_tool/package_config.json',
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {'name': 'app', 'rootUri': '../', 'packageUri': 'lib/'},
+            {'name': 'plugin_j', 'rootUri': '../../plugin_j'},
+          ],
+        }),
+      );
+      final bundle = Directory(p.join(temp.path, 'app', 'build', 'assets'))
+        ..createSync(recursive: true);
+      final data = p.join(temp.path, 'data');
+      final result = await Process.run(
+        p.join(runnerDir, 'tool', 'raccoon-device'),
+        ['install', bundle.path, 'app'],
+        environment: {
+          'RACCOON_RUNNER': binary!,
+          if (sdk != null) 'FLUTTER_ROOT': sdk,
+          'XDG_DATA_HOME': data,
+          'RACCOON_PLUGIN_CACHE': p.join(temp.path, 'cache'),
+          'RACCOON_NO_PREBUILT': '1',
+        },
+      );
+      expect(result.exitCode, 0, reason: '${result.stderr}');
+      final manifest =
+          jsonDecode(
+                File(
+                  p.join(
+                    data,
+                    'raccoon',
+                    'apps',
+                    'app',
+                    'plugins',
+                    'manifest.json',
+                  ),
+                ).readAsStringSync(),
+              )
+              as Map;
+      final detail =
+          (manifest['status'] as List).cast<Map>().single['detail'] as String;
+      const head =
+          'did not build: needs the development files of json-glib-1.0, '
+          'as flutter run -d linux does: ';
+      // By the distro this machine runs, as /etc/os-release names it.
+      final release =
+          File('/etc/os-release').existsSync()
+              ? File('/etc/os-release').readAsStringSync()
+              : '';
+      final words =
+          RegExp(
+            r'^(?:ID|ID_LIKE)="?([^"\n]*)',
+            multiLine: true,
+          ).allMatches(release).expand((m) => m[1]!.split(' ')).toSet();
+      if (words.contains('debian') || words.contains('ubuntu')) {
+        expect(
+          detail,
+          startsWith('${head}sudo apt install libjson-glib-dev; see '),
+        );
+      } else {
+        expect(
+          detail,
+          matches(
+            RegExp(
+              '^${RegExp.escape(head)}(sudo (apt install libjson-glib-dev|'
+              r"(dnf|zypper) install 'pkgconfig\(json-glib-1\.0\)'|pacman -S "
+              r'json-glib)|the package that provides pkgconfig\(json-glib-1\.0\))'
+              '; see ',
+            ),
+          ),
+        );
+      }
+      expect(result.stderr, contains(detail));
     },
     skip: switch ((binary != null && sdk != null, Platform.isLinux)) {
       (false, _) => 'build the runner first, with a Flutter SDK on PATH',
