@@ -1,0 +1,12 @@
+name: harness_test
+description: Tests example/hello on Raccoon devices with raccoon_runtime's RaccoonTestDevice, in plain dart test.
+publish_to: "none"
+
+environment:
+  sdk: ^3.7.0
+
+dev_dependencies:
+  path: ^1.9.1
+  raccoon_runtime:
+    path: ../../../../packages/raccoon_runtime
+  test: ^1.25.0

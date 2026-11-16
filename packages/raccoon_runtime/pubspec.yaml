@@ -10,6 +10,7 @@ dependencies:
   archive: ^4.0.8
   crypto: ^3.0.3
   fixnum: ^1.1.0
+  image: ^4.0.0
   path: ^1.9.1
   protobuf: ^6.1.0
   raccoon:
