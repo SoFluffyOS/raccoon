@@ -11853,23 +11853,33 @@ void main() => runApp(
       final stale = _otherFlutterBundle(assets, temp);
       final out = p.join(temp.path, 'frame.ppm');
       final clock = Stopwatch()..start();
-      final result = await Process.run(binary!, [
-        'render',
-        '--engine-dir',
-        engineDir!,
-        '--assets',
-        stale,
-        '--icu',
-        icu!,
-        '--timeout-ms',
-        '30000',
-        '--out',
-        out,
-      ]);
+      // UTF-8 whatever the host's code page, for the 🦝 on Windows.
+      final result = await Process.run(
+        binary!,
+        [
+          'render',
+          '--engine-dir',
+          engineDir!,
+          '--assets',
+          stale,
+          '--icu',
+          icu!,
+          '--timeout-ms',
+          '30000',
+          '--out',
+          out,
+        ],
+        stdoutEncoding: utf8,
+        stderrEncoding: utf8,
+      );
       clock.stop();
       final lines = '${result.stderr}'.split('\n').map((line) => line.trim());
       expect(result.exitCode, 1, reason: '${result.stderr}');
-      expect(lines.where(saysNotStarted), hasLength(1));
+      expect(
+        lines.where(saysNotStarted),
+        hasLength(1),
+        reason: '${result.stderr}',
+      );
       expect(lines.any((line) => line.endsWith(fix)), isTrue);
       expect(File(out).existsSync(), isFalse);
       // It waited out all 30 s before.
