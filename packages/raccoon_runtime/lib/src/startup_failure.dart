@@ -16,6 +16,7 @@ final class StartupFailure {
     this.channels = const [],
     this.plugins = const [],
     this.fixes = const [],
+    this.didNotStart = false,
   });
 
   /// What the engine prints ahead of an exception nothing caught, on the
@@ -60,6 +61,12 @@ final class StartupFailure {
   /// it again` for an app built with another Flutter.
   final List<String> fixes;
 
+  /// Whether the runner said the engine would not start the app (#408): the
+  /// app never ran, so there is no stack, and [exception] is the runner's
+  /// reason, not something the app threw. False for an exception the app
+  /// died of, and for channels nothing answered.
+  final bool didNotStart;
+
   /// [fixes], then one line per plugin of [plugins], such as `firebase_core
   /// has no Linux implementation`.
   List<String> get hints => [
@@ -75,6 +82,7 @@ final class StartupFailure {
     String? exception;
     var stack = <String>[];
     var fixes = <String>[];
+    var didNotStart = false;
     final channels = <String>[];
     for (var i = 0; i < all.length; i++) {
       final line = all[i];
@@ -83,6 +91,7 @@ final class StartupFailure {
         exception = what[0].toUpperCase() + what.substring(1);
         stack = [];
         fixes = [if (match.group(2) case final fix?) fix];
+        didNotStart = true;
         continue;
       }
       if (_unanswered.firstMatch(line) case final match?) {
@@ -105,6 +114,7 @@ final class StartupFailure {
       ];
       exception = text;
       fixes = [];
+      didNotStart = false;
     }
     if (exception == null && channels.isEmpty) return null;
     final reports = plugins?.plugins ?? const <PluginReport>[];
@@ -120,6 +130,7 @@ final class StartupFailure {
       channels: channels,
       plugins: failing,
       fixes: fixes,
+      didNotStart: didNotStart,
     );
   }
 
@@ -283,6 +294,7 @@ final class StartupFailure {
   bool operator ==(Object other) =>
       other is StartupFailure &&
       other.exception == exception &&
+      other.didNotStart == didNotStart &&
       _same(other.stackTrace, stackTrace) &&
       _same(other.channels, channels) &&
       _same(other.hints, hints);
@@ -290,6 +302,7 @@ final class StartupFailure {
   @override
   int get hashCode => Object.hash(
     exception,
+    didNotStart,
     Object.hashAll(stackTrace),
     Object.hashAll(channels),
     Object.hashAll(hints),

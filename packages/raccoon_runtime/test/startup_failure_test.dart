@@ -143,6 +143,28 @@ void main() {
     );
   });
 
+  test('an app the engine would not start is told apart from one that threw: '
+      'it never ran, and has no stack', () {
+    const notStarted =
+        '🦝 the app did not start: the engine could not launch it';
+    expect(StartupFailure.fromLog([notStarted])?.didNotStart, isTrue);
+    expect(StartupFailure.fromLog(_log)?.didNotStart, isFalse);
+    expect(
+      StartupFailure.fromLog([
+        '🦝 nothing answered plugins.flutter.io/camera (no client); the app '
+            'sees no plugin',
+      ])?.didNotStart,
+      isFalse,
+    );
+    // The latest wins, as for exceptions.
+    expect(StartupFailure.fromLog([notStarted, ..._log])?.didNotStart, isFalse);
+    expect(StartupFailure.fromLog([..._log, notStarted])?.didNotStart, isTrue);
+    expect(
+      const StartupFailure(exception: 'x', didNotStart: true),
+      isNot(const StartupFailure(exception: 'x')),
+    );
+  });
+
   test('only failure lines and stack lines can change what the log says', () {
     expect(StartupFailure.tells(_log[0]), isFalse); // the VM service
     expect(StartupFailure.tells(_log[1]), isTrue); // nothing answered
