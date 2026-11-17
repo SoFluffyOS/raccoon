@@ -72,6 +72,9 @@ class GpuRenderer {
   // The current set, false when the pool is off or not yet built. |out|
   // comes empty, and owns its descriptors.
   virtual bool pool_set(GpuBufferSet* out) const = 0;
+  // The current set's generation, without copying its descriptors: 0 when
+  // there is none, or when this renderer doesn't say (pool_set then decides).
+  virtual uint32_t pool_generation() const { return 0; }
   // Whether the next frame has a pool buffer to go into: true as well when
   // there is no pool, or none built yet.
   virtual bool HasFreeBuffer() const = 0;

@@ -492,6 +492,11 @@ void GlRenderer::DisablePool() {
   pool_wanted_ = false;
 }
 
+uint32_t GlRenderer::pool_generation() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return pool_.empty() ? 0 : generation_;
+}
+
 bool GlRenderer::pool_set(GpuBufferSet* out) const {
   std::lock_guard<std::mutex> lock(mutex_);
   if (pool_.empty()) return false;

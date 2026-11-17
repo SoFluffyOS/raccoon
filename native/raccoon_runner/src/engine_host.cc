@@ -923,6 +923,11 @@ void EngineHost::DisableGpuBuffers(FlutterViewId view) {
   if (GpuRenderer* gpu = GpuOf(view)) gpu->DisablePool();
 }
 
+uint32_t EngineHost::GpuPoolGeneration(FlutterViewId view) const {
+  GpuRenderer* gpu = GpuOf(view);
+  return gpu == nullptr ? 0 : gpu->pool_generation();
+}
+
 bool EngineHost::GpuBufferSetNow(FlutterViewId view, GpuBufferSet* out) const {
   GpuRenderer* gpu = GpuOf(view);
   return gpu != nullptr && gpu->pool_set(out);

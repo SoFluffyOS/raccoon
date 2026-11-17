@@ -183,6 +183,8 @@ class EngineHost {
   bool EnableGpuBuffers(FlutterViewId view, size_t count, std::string* error);
   void DisableGpuBuffers(FlutterViewId view);
   bool GpuBufferSetNow(FlutterViewId view, GpuBufferSet* out) const;
+  // The current set's generation, 0 when none or not known.
+  uint32_t GpuPoolGeneration(FlutterViewId view) const;
   // |fence_fd|, when not -1, is signalled once the client's last use of the
   // buffer is done; owned from here.
   void ReleaseGpuBuffer(FlutterViewId view, uint32_t generation, int index,

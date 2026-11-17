@@ -1545,7 +1545,12 @@ int Serve(const Options& options) {
     }
     if (client.gpu) {
       raccoon::GpuBufferSet set;
-      if (host.GpuBufferSetNow(client.view, &set)) {
+      // The set is copied, its descriptors with it, only when the client
+      // hasn't had it yet: not at every turn of the loop (#398).
+      const uint32_t generation = host.GpuPoolGeneration(client.view);
+      const bool told = generation != 0 && generation == client.gpu_told &&
+                        (!gpu_server.has_client() || generation == client.gpu_fds_sent);
+      if (!told && host.GpuBufferSetNow(client.view, &set)) {
         if (set.generation != client.gpu_told) {
           raccoon::v1::RunnerMessage message;
           FillGpuBuffers(set, client.gpu_socket, message.mutable_gpu_buffers());

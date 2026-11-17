@@ -108,6 +108,7 @@ class GlRenderer : public GpuRenderer {
     gpu_frame_ = std::move(callback);
   }
   bool pool_set(GpuBufferSet* out) const override;
+  uint32_t pool_generation() const override;
   bool HasFreeBuffer() const override;
   bool TakeMissedFrame() override;
   bool FrameMissesRing() const override;
