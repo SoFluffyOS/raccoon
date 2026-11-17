@@ -1,0 +1,8 @@
+# The files tagged timing (test/integration/timing_test.dart and
+# gpu_ring_test.dart) fail when the machine holds the test up: they bound
+# frame rates and waits, or starve a GPU ring. CI runs the rest side by side
+# with `-x timing`, then these one file at a time with
+# `-t timing --concurrency=1`. A plain `dart test` runs everything, and
+# `--concurrency=1` one file at a time, as before (#413).
+tags:
+  timing:

@@ -804,7 +804,15 @@ HELPER="$PWD/tool/raccoon-device"
 flutter run -d raccoon
 ```
 
-The integration tests in `packages/raccoon_runtime` drive the real runner.
+The integration tests in `packages/raccoon_runtime` drive the real runner,
+a file per subject in `test/integration/`. `dart test` runs them side by
+side. The two files tagged `timing` bound frame rates and waits, or starve a
+GPU ring when the test is held up, so CI runs them after the rest, one at a
+time:
+
+```sh
+dart test -x timing && dart test -t timing --concurrency=1
+```
 
 ## Benchmark: clean build to first frame
 
