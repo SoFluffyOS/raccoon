@@ -230,6 +230,9 @@ class GlRenderer : public GpuRenderer {
   int current_ = -1;
   // A frame went by readback with every pool buffer taken; mutex_.
   bool missed_ = false;
+  // A frame went by readback while a client wanted the ring and before
+  // its pool was built: the pool owes it a redraw once built; mutex_.
+  bool ring_owed_ = false;
   bool choose_at_start_ = false;
   // Fbo gave the pool's framebuffer with no buffer chosen yet; mutex_.
   bool choose_ = false;

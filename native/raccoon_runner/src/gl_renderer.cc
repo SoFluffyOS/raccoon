@@ -481,6 +481,7 @@ bool GlRenderer::EnablePool(size_t count, std::string* error) {
   }
   pool_wanted_ = true;
   pool_count_ = count;
+  ring_owed_ = false;
   // A new client tries every size afresh.
   failed_width_ = failed_height_ = 0;
   return true;
@@ -783,7 +784,13 @@ uint32_t GlRenderer::Fbo(size_t width, size_t height) {
                        "🦝 no GPU buffers at %zux%zu: the pool could not be "
                        "built; frames by readback\n",
                        width, height);
+        } else if (ring_owed_) {
+          // The frame before went by readback, with no pool to go into
+          // yet: the ring has nothing of the app's until it draws again,
+          // which an idle one doesn't (#397).
+          missed_ = true;
         }
+        if (!pool_.empty()) ring_owed_ = false;
       }
       if (!pool_.empty() && choose_at_start_ && !in_frame_) {
         // Asked at the present before: the frame starts later, and takes
@@ -847,7 +854,15 @@ bool GlRenderer::Present(const FrameCallback& callback) {
     // A frame going by readback while a client takes the ring: it never
     // sees it. Marked here, where it goes, not where Skia took the
     // framebuffer for it a frame before.
-    if (index < 0 && pool_wanted_ && !pool_.empty()) missed_ = true;
+    // One before the pool is built (a client that said hello as the app
+    // drew, or after) is owed by the pool built next.
+    if (index < 0 && pool_wanted_) {
+      if (!pool_.empty()) {
+        missed_ = true;
+      } else {
+        ring_owed_ = true;
+      }
+    }
   }
   if (index >= 0 && pooled) {
     // The client reads the buffer from its own context: it gets a fence for

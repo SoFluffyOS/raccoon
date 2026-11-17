@@ -8147,6 +8147,69 @@ void main() => runApp(
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
+  // #397: on GL the hello's own frame was drawn into the framebuffer taken
+  // a frame before, the readback target, and the pool was built after it:
+  // an idle app left a client that said hello late with nothing in its
+  // ring.
+  test(
+    'a GPU client that says hello to an idle app gets a frame in its ring',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+          headless: true,
+        ),
+      );
+      final firstFrame = runner.stderr.firstWhere(
+        (line) => line.contains('first frame'),
+      );
+      firstFrame.ignore();
+      RunnerClient? client;
+      try {
+        // Frames by readback, then nothing: the app is idle.
+        if (!runner.lastLines.any((line) => line.contains('first frame'))) {
+          await firstFrame.timeout(const Duration(seconds: 15));
+        }
+        await Future<void>.delayed(const Duration(seconds: 1));
+        client = await RunnerClient.connect(endpoint, gpuBuffers: true);
+        final gpuFrame = client.frames.firstWhere((frame) => frame.inGpuBuffer);
+        gpuFrame.ignore();
+        await client.hello.timeout(const Duration(seconds: 10));
+        final set = await client.gpuBufferSets.first
+            .then<GpuBuffers?>((set) => set)
+            .timeout(const Duration(seconds: 10), onTimeout: () => null);
+        // Without a GPU (a CI machine) there is no ring to fill.
+        if (set == null) {
+          printOnFailure('no GPU ring on this host');
+          return;
+        }
+        final frame = await gpuFrame.timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => throw TestFailure(
+            'no frame in the ring; the runner said:\n  '
+            '${runner.lastLines.join('\n  ')}',
+          ),
+        );
+        expect(frame.gpuGeneration, set.generation);
+        client.releaseGpuBuffer(frame.gpuGeneration, frame.bufferIndex);
+      } finally {
+        client?.shutdown();
+        await client?.close();
+        if (client == null) runner.kill();
+        await _exitCode(runner);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   // #123: on GL the engine takes the next frame's framebuffer as it
   // presents a frame. Its ring buffer was chosen then, so a vsync that
   // asked for a free one looked a frame ahead: with the client holding all
