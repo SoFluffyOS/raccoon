@@ -239,11 +239,25 @@ jobs:
         working-directory: packages/raccoon_runtime
         run: dart pub get
 
+      # Linux and Windows run the files side by side, as dart test does (two
+      # at a time on four cores), then the ones tagged timing one file at a
+      # time: they bound frame rates and waits, or starve a GPU ring, when
+      # something beside them holds the machine up. The Macs run one file at
+      # a time: pod and Swift package builds are most of their suite, and
+      # #383's tests fail on the Intel Mac with nothing beside them (#413).
       - name: Run the runtime's tests against the runner
         working-directory: packages/raccoon_runtime
         env:
           RACCOON_RUNNER: ${{ github.workspace }}/native/raccoon_runner/build/raccoon_runner${{ matrix.host.exe }}
-        run: dart test --reporter expanded
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            dart test --reporter expanded --concurrency=1
+          else
+            status=0
+            dart test --reporter expanded --exclude-tags timing || status=$?
+            dart test --reporter expanded --tags timing --concurrency=1 || status=$?
+            exit "$status"
+          fi
 
       - uses: actions/upload-artifact@v6
         with:
