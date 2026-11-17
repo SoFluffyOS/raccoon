@@ -129,6 +129,14 @@ milliseconds after the app printed them. `press_key` sends key events: with
 the simulator, whose input method types text, a key types no character
 there; use `type_text` for text.
 
+When a plugin call fails, `logs` says why. As the app starts, the runner
+names each native plugin it couldn't load: `🦝 plugin <name> not built`,
+the reason on the line after it (on Linux, a missing development package
+names the one to install: `sudo apt install libjson-glib-dev`), or
+`🦝 plugin <name> not loaded: it wants the view`. At the call, `🦝 nothing
+answered <channel> (<why>); the app sees no plugin`. The reason line is the
+app's, not the runner's: read it with no `source`.
+
 ## With no simulator open
 
 The same tools, the same results, `host: headless`. Each `run` is a

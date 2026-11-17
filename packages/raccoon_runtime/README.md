@@ -14,7 +14,9 @@ ID) on macOS, and D3D11 shared handles on Windows. `raccoon_view` has the
 host sides. A frame the runner cannot put in a buffer still comes with
 pixels. A GPU buffer frame has none, so a capture (a screenshot, a GIF)
 calls `wantPixels(true)` for read-back pixel frames while it takes them,
-and `wantPixels(false)` after; the view goes on showing its ring.
+and `wantPixels(false)` after; the view goes on showing its ring. On Linux
+the runner keeps the ring meanwhile, so the view gets the same set back,
+nothing new to import.
 
 Pixel frames come through shared memory where the socket carries file
 descriptors (Linux and macOS), and the client reads each into a new buffer.
@@ -24,13 +26,20 @@ pixels then hold only until the third frame after it, so a consumer that
 keeps them longer copies them. `raccoon_view` copies what it shows. With
 nobody listening to the frames (a host that disposed a hidden view), the
 latest stays unread in its shared buffer until `latestFrame` asks for it,
-so a hidden app costs the client next to nothing.
+so a hidden app costs the client next to nothing. The app itself stops
+drawing when it is told it is hidden (`setLifecycle('hidden')`), as a
+desktop does a minimised window, and `resumed` when it shows again. Lumide
+does so for an app no pane shows, the simulator while its window is hidden:
+there spin's runner goes from 4.1-4.5 % of a core to 0.02 %, and draws
+again 5.3 ms after the window shows.
 
 An app that stops before its first frame, such as one whose `main()` awaits
 a plugin with no implementation on this host, shows up as
 `RunnerClient.startupFailure`: the exception it died of and the channels
 nothing answered, read from the log the runner relays, with the plugin
-each channel belongs to when the plugin report says it cannot work here.
+each channel belongs to when the plugin report says it cannot work here,
+one reported under its host's name too (`yaru_window_linux` for
+`yaru_window`).
 It waits a moment for a frame (`startupGrace`), and once a frame arrives it
 stays null: from then on the app's own error handling rules.
 

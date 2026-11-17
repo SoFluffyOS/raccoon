@@ -18,7 +18,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   One download of an engine goes at a time.
 - Runs an app bundle (`build/flutter_assets`, no native build needed) with a
   GPU renderer where the host has one, else the software renderer, on a
-  pumped platform task runner.
+  pumped platform task runner. At idle the loop wakes once a second, to see
+  whether its parent is gone or a later run took its socket: about 0.01% of
+  a core on Linux, the engine's and Mesa's threads asleep (#398).
 - `serve`: speaks runner protocol v1 (`proto/raccoon/v1/runner.proto`) over a
   Unix socket (Windows has them too): length-prefixed protobuf; frames out as
   pixels, each saying its byte order (BGRA read back from a GPU renderer; the
@@ -188,7 +190,18 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   a cross-process fence would save 0.6-0.8 ms at the median (measured, #60),
   and Metal shares none without XPC. A buffer goes back on either
   socket, with a fence of its own on the second where there are fences. The
-  raccoon_view plugin does this on Linux, macOS and Windows. `--renderer
+  raccoon_view plugin does this on Linux, macOS and Windows. On Linux the GL
+  renderer makes the readback target (a texture, its framebuffer, the buffer
+  the pixels land in) while the app starts, on a raster thread with nothing
+  else to do yet: hello's first frame, headless, 234 → 223 ms (#387). Once
+  frames go into the ring it lets the target go: at once when no frame was
+  read back into it, 11.5 MiB of the runner's memory at a phone's
+  1170 × 2532 (#388), else after 100 ms with no frame drawn into it (#396). A
+  client that says hello late to an idle app still gets a frame in its ring
+  (#397). A capture's pixel frames keep the ring: frames go by readback
+  while it lasts, the client gets the same set back, and the frame after
+  goes straight into the ring; a ring unwanted for 10 s, or at another size,
+  goes (#400). `--renderer
   auto|gl|metal|vulkan|software`, or `RACCOON_RENDERER` in the environment: `auto`
   falls back to software, a named GPU renderer is that one or the runner
   says why not, and a name that is none of these is taken as `auto`; the
@@ -204,9 +217,12 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   devices only) or a render node, such as `/dev/dri/renderD128`.
   Skia draws by default. `RACCOON_IMPELLER=1` (`--impeller`) tries Impeller,
   on Linux's GL renderer only; software stays Skia, as Impeller has no
-  software backend. `RACCOON_FLUTTER_GPU=1` (`--flutter-gpu`) adds Flutter
-  GPU, for flutter_scene. The renderer line ends `, Skia` or `, Impeller`
-  (#379).
+  software backend. `RACCOON_IMPELLER=sdf` adds the distance-field shapes
+  Flutter's Linux embedder draws with, which on 3.50 draw a linear gradient
+  wrong. `RACCOON_FLUTTER_GPU=1` (`--flutter-gpu`) adds Flutter GPU,
+  Impeller with it, for flutter_scene. The renderer line ends `, Skia` or
+  `, Impeller`. On an RX 7600M XT Impeller costs no first-frame time, up
+  to 4 MiB of RSS and 6 MiB of VRAM (#379).
 - Loads the project's native plugins on Linux, instead of answering their
   channels itself. A plugin binary links against `libflutter_linux_gtk.so`;
   the runner ships one of its own with the plugin-facing half of Flutter's
@@ -219,7 +235,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   `pluginClass` or `ffiPlugin`), each in a CMake project of its own with
   what the desktop template gives a plugin, a few at once, and `run`
   passes it. Up to eight at once share half the cores through a jobserver
-  with ninja 1.13 (eight plugins cold: 3.1 s, 4.0 s before); `RACCOON_PLUGIN_JOBS=1` builds one at a time (#393). The project's source is a desktop app's `linux/` folder as a
+  with ninja 1.13 (eight plugins cold: 3.1 s, 4.0 s before);
+  `RACCOON_PLUGIN_JOBS=N` builds N at once, `1` one at a time (9.1 s for
+  the eight) (#393). The project's source is a desktop app's `linux/` folder as a
   plugin sees it, made in the app's `.dart_tool` for the build and removed
   after: the plugin reached as `flutter/ephemeral/.plugin_symlinks/<name>/linux`,
   `generated_config.cmake` beside it as `flutter build linux` writes it,
@@ -297,8 +315,9 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   second, as under `flutter run -d linux`; an app that awaits one before
   `runApp` stops with the exception and the plugin named. One that acts
   on the view's GTK window (flutter_window_close, bitsdojo_window,
-  yaru_window, listed in `tool/raccoon-device`) killed the runner on its
-  first call: it isn't loaded, its calls fail the same way, bitsdojo's
+  yaru_window, `VIEW_PLUGINS_LINUX` in `tool/raccoon-device`) killed the
+  runner on its first call: it isn't loaded, `🦝 plugin <name> not loaded:
+  it wants the view (#365)`, and its calls fail the same way, bitsdojo's
   FFI lookup with an `ArgumentError`, until the view (#365, #386).
   Of 13 plugins that bundle or open a library of their own (#363,
   2026-11-16), these answer, built here: sqlite3_flutter_libs,
@@ -347,7 +366,8 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   flutter_vodozemac Rust, which the helper names (#378).
   fullscreen_window's screen size is garbage under `flutter run -d linux`
   too, and its fullscreen wants the view (#365). flutter_scene needs
-  Flutter GPU, which needs Impeller; the runner draws with Skia (#379).
+  Flutter GPU, which needs Impeller: it draws with `RACCOON_FLUTTER_GPU=1`
+  (#379).
   Tier 4 (#384, 2026-11-16: the 47 that declare Linux with 10k to 30k
   downloads a month): these answer, Dart only, built here or through a
   build hook: sodium, flutter_doc_scanner, system_date_time_format,
@@ -366,8 +386,8 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   system_tray AppIndicator's. The window plugins want the view (#365):
   flutter_window_close's `closeWindow`, bitsdojo_window's size and
   yaru_window's state go through the window the registrar doesn't hand
-  out and kill the runner; flutter_acrylic and handy_window load and
-  have no window to change.
+  out, so those three aren't loaded (#386); flutter_acrylic and
+  handy_window load and have no window to change.
 - Loads the project's native plugins on macOS too. A plugin framework links
   against `FlutterMacOS.framework` and uses its channel and codec classes;
   the runner opens the Flutter SDK's copy at run time, before the plugins,
