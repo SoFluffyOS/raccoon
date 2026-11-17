@@ -304,9 +304,9 @@ final class RaccoonTestDevice {
       final RaccoonTestDevice testDevice;
       try {
         testDevice = await Future.any([attach(), ended]);
-      } on RunnerExited {
-        rethrow;
       } on Object {
+        // The runner's own end, with its last lines, over what its going
+        // broke: a VM service never printed, a socket gone, no frame.
         final exited = await started.exited
             .then<RunnerExited?>((exited) => exited)
             .timeout(const Duration(seconds: 1), onTimeout: () => null);

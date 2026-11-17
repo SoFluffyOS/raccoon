@@ -253,13 +253,10 @@ final class RunnerProcess {
       _stdoutRead.future,
       _stderrRead.future,
     ]).timeout(const Duration(seconds: 1), onTimeout: () => const []);
-    if (!_listening.isCompleted) {
-      _listening.completeError(
-        RunnerExited(code, List.unmodifiable(_lastLines)),
-      );
-    }
-    if (!_vmService.isCompleted) _vmService.completeError(RunnerExited(code));
-    _exited.complete(RunnerExited(code, List.unmodifiable(_lastLines)));
+    final exited = RunnerExited(code, List.unmodifiable(_lastLines));
+    if (!_listening.isCompleted) _listening.completeError(exited);
+    if (!_vmService.isCompleted) _vmService.completeError(exited);
+    _exited.complete(exited);
   }
 }
 
