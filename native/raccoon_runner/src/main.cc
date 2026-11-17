@@ -700,6 +700,14 @@ FlutterKeyEvent ToFlutterKey(const raccoon::v1::KeyEvent& event,
 
 int Render(const Options& options) {
   raccoon::EventLoop loop;
+  // The engine says it will not start the app only on stderr, after it
+  // returned success (#408): read there, the run ends at once rather than
+  // at its timeout.
+  LogQueue logs(loop);
+  raccoon::StderrCapture capture;
+  capture.Start([&logs](const std::string& line) { logs.Push("stderr", line); });
+  EngineRefusal refusal;
+  bool refused = false;
   raccoon::EngineHost host;
   std::string error;
   const raccoon::EngineOptions engine = EngineOptionsFromEnvironment(options.engine);
@@ -728,6 +736,10 @@ int Render(const Options& options) {
       std::chrono::steady_clock::now() + std::chrono::milliseconds(options.timeout_ms);
   bool reported_first = false;
   while (!Done() && std::chrono::steady_clock::now() < deadline) {
+    for (const auto& [tag, text] : logs.Take()) {
+      if (refusal.Read(text)) refused = true;
+    }
+    if (refused) break;
     host.platform().RunDueTasks();
     host.ServiceViews();
     host.ServiceVsync();
@@ -741,6 +753,12 @@ int Render(const Options& options) {
     const long remaining = MillisBetween(std::chrono::steady_clock::now(), deadline);
     const int cap = static_cast<int>(remaining < 0 ? 0 : remaining);
     loop.RunOnce(NextWait(host, cap));
+  }
+  if (refused) {
+    std::fprintf(stderr, "🦝 %s\n", refusal.Message().c_str());
+    host.Shutdown();
+    capture.Stop();
+    return 1;
   }
   std::fprintf(stderr, "🦝 %zu frames presented, %zux%zu\n",
                host.frame().FrameCount(), host.frame().width(),
@@ -770,6 +788,7 @@ int Render(const Options& options) {
     }
   }
   host.Shutdown();
+  capture.Stop();
   return exit_code;
 }
 

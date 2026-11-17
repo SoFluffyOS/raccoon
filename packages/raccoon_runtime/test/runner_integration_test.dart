@@ -11843,6 +11843,41 @@ void main() => runApp(
     skip: ready ? false : 'build the runner and example/hello first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
+
+  test(
+    'render of an app built with another Flutter says why and ends at once, '
+    'not at its timeout',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final stale = _otherFlutterBundle(assets, temp);
+      final out = p.join(temp.path, 'frame.ppm');
+      final clock = Stopwatch()..start();
+      final result = await Process.run(binary!, [
+        'render',
+        '--engine-dir',
+        engineDir!,
+        '--assets',
+        stale,
+        '--icu',
+        icu!,
+        '--timeout-ms',
+        '30000',
+        '--out',
+        out,
+      ]);
+      clock.stop();
+      final lines = '${result.stderr}'.split('\n').map((line) => line.trim());
+      expect(result.exitCode, 1, reason: '${result.stderr}');
+      expect(lines.where(saysNotStarted), hasLength(1));
+      expect(lines.any((line) => line.endsWith(fix)), isTrue);
+      expect(File(out).existsSync(), isFalse);
+      // It waited out all 30 s before.
+      expect(clock.elapsed, lessThan(const Duration(seconds: 10)));
+    },
+    skip: ready ? false : 'build the runner and example/hello first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 }
 
 /// [assets] copied into [into] with its kernel's format version made 1:
