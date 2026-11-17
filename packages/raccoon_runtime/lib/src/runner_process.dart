@@ -162,6 +162,7 @@ final class RunnerProcess {
   final _stdout = StreamController<String>.broadcast();
   final _stderr = StreamController<String>.broadcast();
 
+  final _exited = Completer<RunnerExited>();
   final _stdoutRead = Completer<void>();
   final _stderrRead = Completer<void>();
 
@@ -203,6 +204,10 @@ final class RunnerProcess {
 
   /// Completes with the runner's exit code once it ends.
   Future<int> get exitCode => _process.exitCode;
+
+  /// Completes once the runner ended and its last lines are read: why it
+  /// stopped, such as `🦝 the app did not start: ...` (#408).
+  Future<RunnerExited> get exited => _exited.future;
 
   /// Asks the system to end the runner; false when the signal could not
   /// be sent.
@@ -254,6 +259,7 @@ final class RunnerProcess {
       );
     }
     if (!_vmService.isCompleted) _vmService.completeError(RunnerExited(code));
+    _exited.complete(RunnerExited(code, List.unmodifiable(_lastLines)));
   }
 }
 

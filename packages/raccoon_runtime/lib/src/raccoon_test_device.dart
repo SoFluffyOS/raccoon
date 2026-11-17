@@ -272,23 +272,47 @@ final class RaccoonTestDevice {
         ),
         timeout: timeout,
       );
-      runner.stdout.listen(logs.add);
-      runner.stderr.listen(logs.add);
-      for (final line in runner.lastLines) {
+      final started = runner;
+      started.stdout.listen(logs.add);
+      started.stderr.listen(logs.add);
+      for (final line in started.lastLines) {
         logs.add(line);
       }
-      final vmService = await runner.vmServiceUri.timeout(timeout);
-      final client = await _attach(endpoint, gpuBuffers);
-      final testDevice = RaccoonTestDevice._(
-        deviceId: device,
-        size: known,
-        client: client,
-        vmServiceUri: vmService,
-        logs: logs,
-        runner: runner,
-        temporary: temporary,
+      Future<RaccoonTestDevice> attach() async {
+        final vmService = await started.vmServiceUri.timeout(timeout);
+        final client = await _attach(endpoint, gpuBuffers);
+        final testDevice = RaccoonTestDevice._(
+          deviceId: device,
+          size: known,
+          client: client,
+          vmServiceUri: vmService,
+          logs: logs,
+          runner: started,
+          temporary: temporary,
+        );
+        await testDevice._settleSize(false);
+        return testDevice;
+      }
+
+      // A runner that ends before the first frame, as one whose app the
+      // engine would not start does (#408), fails the launch at once with
+      // its last words, rather than with what its going broke or after
+      // the frame's whole wait.
+      final ended = started.exited.then<RaccoonTestDevice>(
+        (exited) => throw exited,
       );
-      await testDevice._settleSize(false);
+      final RaccoonTestDevice testDevice;
+      try {
+        testDevice = await Future.any([attach(), ended]);
+      } on RunnerExited {
+        rethrow;
+      } on Object {
+        final exited = await started.exited
+            .then<RunnerExited?>((exited) => exited)
+            .timeout(const Duration(seconds: 1), onTimeout: () => null);
+        if (exited != null) throw exited;
+        rethrow;
+      }
       return testDevice.._startup = clock.elapsed;
     } on Object {
       runner?.kill();

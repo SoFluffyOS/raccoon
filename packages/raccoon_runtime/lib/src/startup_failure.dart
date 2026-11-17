@@ -15,6 +15,7 @@ final class StartupFailure {
     this.stackTrace = const [],
     this.channels = const [],
     this.plugins = const [],
+    this.fixes = const [],
   });
 
   /// What the engine prints ahead of an exception nothing caught, on the
@@ -32,8 +33,17 @@ final class StartupFailure {
     r'(?:🦝|raccoon_runner:) nothing answered (\S+) \(',
   );
 
-  /// The exception's text, such as `PlatformException(channel-error, ...)`;
-  /// null when the log has no exception, only channels nothing answered.
+  /// What the runner says when the engine would not start the app (#408):
+  /// `the app did not start: WHAT; FIX`, FIX left out when it has none.
+  /// The engine says why only in its log, after it returned success.
+  static final _notStarted = RegExp(
+    r'(?:🦝|raccoon_runner:) the app did not start: (.+?)(?:; ([^;]+))?$',
+  );
+
+  /// The exception's text, such as `PlatformException(channel-error, ...)`,
+  /// or why the engine would not start the app, such as `Built with another
+  /// Flutter (...)`; null when the log has neither, only channels nothing
+  /// answered.
   final String? exception;
 
   /// The stack lines printed under [exception].
@@ -46,20 +56,35 @@ final class StartupFailure {
   /// work on this host, see [pluginOf].
   final List<PluginReport> plugins;
 
-  /// One line per plugin of [plugins], such as `firebase_core has no Linux
-  /// implementation`.
-  List<String> get hints => [for (final plugin in plugins) hintFor(plugin)];
+  /// What the runner says fixes it, such as `flutter run -d raccoon builds
+  /// it again` for an app built with another Flutter.
+  final List<String> fixes;
+
+  /// [fixes], then one line per plugin of [plugins], such as `firebase_core
+  /// has no Linux implementation`.
+  List<String> get hints => [
+    ...fixes,
+    for (final plugin in plugins) hintFor(plugin),
+  ];
 
   /// Reads an app's log [lines] from before its first frame. Null when they
-  /// tell of no failure: no exception nothing caught, no channel nothing
-  /// answered.
+  /// tell of no failure: no app the engine would not start, no exception
+  /// nothing caught, no channel nothing answered.
   static StartupFailure? fromLog(Iterable<String> lines, {Plugins? plugins}) {
     final all = lines.toList();
     String? exception;
     var stack = <String>[];
+    var fixes = <String>[];
     final channels = <String>[];
     for (var i = 0; i < all.length; i++) {
       final line = all[i];
+      if (_notStarted.firstMatch(line.trim()) case final match?) {
+        final what = match.group(1)!;
+        exception = what[0].toUpperCase() + what.substring(1);
+        stack = [];
+        fixes = [if (match.group(2) case final fix?) fix];
+        continue;
+      }
       if (_unanswered.firstMatch(line) case final match?) {
         final channel = match.group(1) ?? '';
         // The device the entry asks for is the client's to name, or not:
@@ -79,6 +104,7 @@ final class StartupFailure {
           all[k].trim(),
       ];
       exception = text;
+      fixes = [];
     }
     if (exception == null && channels.isEmpty) return null;
     final reports = plugins?.plugins ?? const <PluginReport>[];
@@ -93,6 +119,7 @@ final class StartupFailure {
       stackTrace: stack,
       channels: channels,
       plugins: failing,
+      fixes: fixes,
     );
   }
 
@@ -232,10 +259,12 @@ final class StartupFailure {
   };
 
   /// Whether [line] can change what [fromLog] finds in a log that already
-  /// holds a failure, or start one: a channel nobody answered, an
-  /// unhandled exception, or a line of its stack. Most lines can't, so a
-  /// reader need not read the whole log again for them.
+  /// holds a failure, or start one: the runner's word that the app did not
+  /// start, a channel nobody answered, an unhandled exception, or a line of
+  /// its stack. Most lines can't, so a reader need not read the whole log
+  /// again for them.
   static bool tells(String line) =>
+      _notStarted.hasMatch(line.trim()) ||
       _unanswered.hasMatch(line) ||
       _unhandled.hasMatch(line) ||
       _isStackLine(line);

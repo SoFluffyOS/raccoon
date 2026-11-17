@@ -575,7 +575,12 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   reads, still copied to the real one as it comes, and drained on a crash.
   The lines from before the first frame, the last 200, go again to a
   client that arrives later, so a host can show why an app stopped before
-  it drew anything (`StartupFailure` in `raccoon_runtime`).
+  it drew anything (`StartupFailure` in `raccoon_runtime`). An app the
+  engine won't start, one built with another Flutter, is said in the
+  runner's words, `🦝 the app did not start: built with another Flutter
+  (...); flutter run -d raccoon builds it again`, the fix a hint, and the
+  run ends with 1: once its client goes, at once headless, after 5 s with
+  none (#408).
   `example/no_plugin` dies in `main()` of a call nobody serves;
   `example/no_plugin_late` makes the same call after its first frame and
   goes on.

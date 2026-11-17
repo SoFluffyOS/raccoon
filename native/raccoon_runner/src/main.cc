@@ -33,6 +33,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <cmath>
 #include <unordered_map>
@@ -95,6 +96,10 @@ constexpr auto kFirstClientWait = std::chrono::seconds(1);
 // The log lines kept from before the first frame, the latest, for a client
 // that arrives after them: an app that dies in main() has said why by then.
 constexpr size_t kStartupLines = 200;
+// How long a run whose app the engine would not start waits for a client
+// to tell (#408): a host takes a run of a project it does not have open
+// after 2 s.
+constexpr auto kRefusedWait = std::chrono::seconds(5);
 
 constexpr uint32_t kProtocolVersion = 1;
 // How long a first SemanticsRequest waits for the app's tree, and how long
@@ -368,6 +373,51 @@ void PrintEngineLog(const std::string&, const std::string& message) {
   std::fprintf(stdout, "%s\n", message.c_str());
   std::fflush(stdout);
 }
+
+// What the engine says when it will not start the app: after
+// FlutterEngineRun returned success, on its UI thread, only in its log
+// (`Could not launch engine with configuration.`), the Dart error before it
+// saying why. A kernel from another Flutter is the usual one: an app
+// installed before the SDK was upgraded (#408).
+class EngineRefusal {
+ public:
+  // True for the line that says the engine gave up; once.
+  bool Read(const std::string& line) {
+    if (said_) return false;
+    static constexpr char kDartError[] = "Dart Error: ";
+    if (const size_t at = line.find(kDartError); at != std::string::npos) {
+      why_ = line.substr(at + sizeof(kDartError) - 1);
+    }
+    said_ = line.find("Could not launch engine with configuration") != std::string::npos;
+    return said_;
+  }
+
+  // What the runner says: `the app did not start: WHAT; FIX`, FIX left out
+  // when there is none. StartupFailure in raccoon_runtime reads it.
+  std::string Message() const {
+    static constexpr char kKernel[] = "Can't load Kernel binary: ";
+    std::string why = why_;
+    // The runner's "; " is the last: the engine's own become commas.
+    for (size_t at; (at = why.find("; ")) != std::string::npos;) why.replace(at, 1, ",");
+    if (why.rfind(kKernel, 0) == 0) {
+      std::string detail = why.substr(sizeof(kKernel) - 1);
+      if (!detail.empty() && detail.back() == '.') detail.pop_back();
+      // Another Dart's kernel: its format version, or the same format and
+      // another SDK hash.
+      const bool other_sdk = detail.find("format version") != std::string::npos ||
+                             detail.find("SDK hash") != std::string::npos;
+      return std::string("the app did not start: ") +
+             (other_sdk ? "built with another Flutter (" : "its kernel does not load (") +
+             detail + "); flutter run -d raccoon builds it again";
+    }
+    if (!why.empty()) return "the app did not start: " + why;
+    return "the app did not start: the engine could not launch it";
+  }
+
+ private:
+  std::string why_;
+  bool said_ = false;
+};
 
 // Log lines on their way to the client: the engine's, from its thread, and
 // stderr's, from the capture's. The loop takes them.
@@ -1034,8 +1084,16 @@ int Serve(const Options& options) {
   // The lines from before the first frame, for a client that comes later.
   std::deque<raccoon::v1::RunnerMessage> startup_lines;
   bool startup_over = false;
+  // When the engine would not start the app, if it would not (#408).
+  EngineRefusal refusal;
+  std::optional<std::chrono::steady_clock::time_point> refused_at;
   auto SendLogs = [&]() {
     for (auto& [tag, text] : logs.Take()) {
+      if (!startup_over && !refused_at && tag == "stderr" && refusal.Read(text)) {
+        refused_at = std::chrono::steady_clock::now();
+        // Through the capture: the client gets it with the engine's lines.
+        std::fprintf(stderr, "🦝 %s\n", refusal.Message().c_str());
+      }
       raccoon::v1::RunnerMessage message;
       message.mutable_log()->set_tag(ValidUtf8(tag));
       message.mutable_log()->set_message(ValidUtf8(text));
@@ -1706,6 +1764,13 @@ int Serve(const Options& options) {
         stop = true;
       }
     }
+    // An app the engine would not start never will: the run ends once a
+    // client that came has gone, the lines told it; at once headless; and
+    // after kRefusedWait when none came.
+    if (refused_at && (options.headless || (had_client && !first.server->has_client()) ||
+                       (!had_client && now - *refused_at >= kRefusedWait))) {
+      stop = true;
+    }
   };
   // How long the loop may sleep: until the next platform task, frame or
   // reply due, at most a second.
@@ -1754,16 +1819,18 @@ int Serve(const Options& options) {
     loop.RunOnce(Wait());
   }
 
+  // An app that never started is a run that failed.
+  const int code = refused_at ? 1 : 0;
   if (first.server->has_client()) {
     raccoon::v1::RunnerMessage exited;
-    exited.mutable_exited()->set_code(0);
+    exited.mutable_exited()->set_code(code);
     first.server->Send(exited);
     first.server->Drain(2000);
   }
   for (const auto& client : views) {
     if (!client->server->has_client()) continue;
     raccoon::v1::RunnerMessage exited;
-    exited.mutable_exited()->set_code(0);
+    exited.mutable_exited()->set_code(code);
     client->server->Send(exited);
     client->server->Drain(500);
   }
@@ -1776,7 +1843,7 @@ int Serve(const Options& options) {
                  MillisBetween(kLaunched, std::chrono::steady_clock::now()));
   }
   std::fprintf(stderr, "🦝 stopped\n");
-  return 0;
+  return code;
 }
 
 }  // namespace

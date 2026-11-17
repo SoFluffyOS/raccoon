@@ -106,6 +106,43 @@ void main() {
     expect(failure?.channels, ['plugins.flutter.io/camera']);
   });
 
+  test('an app the engine would not start: why, and what fixes it (#408)', () {
+    const kernel =
+        '[ERROR:flutter/shell/common/shell.cc(119)] Dart Error: Can\'t load '
+        'Kernel binary: Invalid kernel binary format version (expected 141, '
+        'found 138).';
+    const said =
+        '🦝 the app did not start: built with another Flutter (Invalid kernel '
+        'binary format version (expected 141, found 138)); flutter run -d '
+        'raccoon builds it again';
+    final failure = StartupFailure.fromLog([
+      'The Dart VM service is listening on http://127.0.0.1:4000/abc=/',
+      kernel,
+      '[ERROR:flutter/shell/common/shell.cc(808)] Could not launch engine '
+          'with configuration.',
+      said,
+      '🦝 stopped',
+    ]);
+
+    expect(
+      failure?.exception,
+      'Built with another Flutter (Invalid kernel binary format version '
+      '(expected 141, found 138))',
+    );
+    expect(failure?.hints, ['flutter run -d raccoon builds it again']);
+    expect(failure?.stackTrace, isEmpty);
+    expect(failure?.channels, isEmpty);
+    expect(StartupFailure.tells(said), isTrue);
+    expect(StartupFailure.tells(kernel), isFalse);
+    // With no fix to give, the reason alone.
+    expect(
+      StartupFailure.fromLog([
+        '🦝 the app did not start: the engine could not launch it',
+      ])?.hints,
+      isEmpty,
+    );
+  });
+
   test('only failure lines and stack lines can change what the log says', () {
     expect(StartupFailure.tells(_log[0]), isFalse); // the VM service
     expect(StartupFailure.tells(_log[1]), isTrue); // nothing answered

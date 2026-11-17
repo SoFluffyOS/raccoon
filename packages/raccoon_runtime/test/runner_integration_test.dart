@@ -11734,6 +11734,129 @@ void main() => runApp(
             : 'build the runner and example/no_plugin_late first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
+
+  // #408: an app installed before a Flutter upgrade. Its kernel's format
+  // version made 1 is what the engine sees, whichever engine it is.
+  final otherFlutter = RegExp(
+    r'^Built with another Flutter \(Invalid kernel binary format version '
+    r'\(expected \d+, found 1\)\)$',
+  );
+  const fix = 'flutter run -d raccoon builds it again';
+  bool saysNotStarted(String line) =>
+      line.startsWith('🦝 the app did not start: built with another Flutter (');
+
+  test(
+    'an app built with another Flutter: the client is told why and what '
+    'fixes it, and the run ends with 1 once it goes (#408)',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final stale = _otherFlutterBundle(assets, temp);
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: stale,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint);
+      int? code;
+      try {
+        final failure = await client.startupFailures
+            .firstWhere((failure) => failure != null)
+            .timeout(const Duration(seconds: 15));
+        expect(failure?.exception, matches(otherFlutter));
+        expect(failure?.hints, [fix]);
+        expect(client.startupLog.where(saysNotStarted), hasLength(1));
+        expect(client.latestFrame, isNull);
+        // The runner stays while its client shows why, as for an app that
+        // died in main().
+        final gone = await runner.exitCode
+            .then((_) => true)
+            .timeout(const Duration(seconds: 1), onTimeout: () => false);
+        expect(gone, isFalse);
+      } finally {
+        client.shutdown();
+        await client.close();
+        code = await _exitCode(runner);
+        temp.deleteSync(recursive: true);
+      }
+      expect(code, 1, reason: 'an app that never started is a run that failed');
+    },
+    skip: ready ? false : 'build the runner and example/hello first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'an app built with another Flutter fails launchBundle at once with the '
+    "runner's words; with no client the run ends by itself (#408)",
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      try {
+        final stale = _otherFlutterBundle(assets, temp);
+        final clock = Stopwatch()..start();
+        final launch = RaccoonTestDevice.launchBundle(
+          stale,
+          runnerBinary: binary,
+          engineDir: engineDir,
+          icuData: icu,
+        );
+        final exited = await launch.then<Object>((device) async {
+          await device.stop();
+          return device;
+        }, onError: (Object error) => error);
+        expect(exited, isA<RunnerExited>());
+        exited as RunnerExited;
+        expect(exited.exitCode, 1);
+        expect(exited.lastLines.where(saysNotStarted), hasLength(1));
+        expect(clock.elapsed, lessThan(const Duration(seconds: 10)));
+
+        // Not headless and nobody comes: it waits for a host a while, then
+        // ends rather than sitting with no frame.
+        final endpoint = UnixSocketEndpoint(p.join(temp.path, 'alone.sock'));
+        final runner = await RunnerProcess.start(
+          RunnerLaunch(
+            runnerBinary: binary ?? '',
+            engineDir: engineDir ?? '',
+            assets: stale,
+            icuData: icu ?? '',
+            endpoint: endpoint,
+          ),
+        );
+        final alone = await runner.exited.timeout(const Duration(seconds: 20));
+        expect(alone.exitCode, 1);
+        expect(alone.lastLines.where(saysNotStarted), hasLength(1));
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example/hello first',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+}
+
+/// [assets] copied into [into] with its kernel's format version made 1:
+/// what the engine sees of an app built with another Flutter (#408).
+String _otherFlutterBundle(String assets, Directory into) {
+  final copy = p.join(into.path, 'flutter_assets');
+  for (final entity in Directory(assets).listSync(recursive: true)) {
+    final to = p.join(copy, p.relative(entity.path, from: assets));
+    if (entity is Directory) {
+      Directory(to).createSync(recursive: true);
+    }
+    if (entity is File) {
+      Directory(p.dirname(to)).createSync(recursive: true);
+      entity.copySync(to);
+    }
+  }
+  // The header: a magic number, then the format version, big-endian.
+  final kernel = File(p.join(copy, 'kernel_blob.bin'));
+  final bytes = kernel.readAsBytesSync();
+  ByteData.sublistView(bytes).setUint32(4, 1);
+  kernel.writeAsBytesSync(bytes);
+  return copy;
 }
 
 /// A release of buffer [index] of [generation] as the GPU socket takes it,
