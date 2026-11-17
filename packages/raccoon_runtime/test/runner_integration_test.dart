@@ -8059,6 +8059,81 @@ void main() => runApp(
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  // #400: a capture turns the ring off and on again. On GL the pool was
+  // destroyed and built again, a new set for the host to import at every
+  // screenshot, and the frame after went by readback.
+  test(
+    'a capture on a GPU client keeps its ring, and the frame after goes in it',
+    () async {
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: assets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint, gpuBuffers: true);
+      final sets = <int>{};
+      final watching = client.gpuBufferSets.listen(
+        (set) => sets.add(set.generation),
+      );
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        final first = await client.frames
+            .firstWhere((frame) => frame.inGpuBuffer)
+            .then<Frame?>((frame) => frame)
+            .timeout(const Duration(seconds: 15), onTimeout: () => null);
+        // Without a GPU (a CI machine) every frame has pixels already.
+        if (first == null) {
+          printOnFailure('no GPU ring on this host');
+          return;
+        }
+        client.releaseGpuBuffer(first.gpuGeneration, first.bufferIndex);
+        // The app's first frames drawn: nothing else on its way.
+        final settling = client.frames.listen((frame) {
+          if (frame.inGpuBuffer) {
+            client.releaseGpuBuffer(frame.gpuGeneration, frame.bufferIndex);
+          }
+        });
+        await Future<void>.delayed(const Duration(seconds: 1));
+        await settling.cancel();
+        for (var capture = 0; capture < 2; capture++) {
+          client.wantPixels(true);
+          final pixels = await client.frames
+              .firstWhere((frame) => !frame.inGpuBuffer)
+              .timeout(const Duration(seconds: 15));
+          expect(pixels.pixels, isNotEmpty);
+          client.wantPixels(false);
+          // The frames stream starts with the latest: the capture's.
+          final after = await client.frames
+              .firstWhere((frame) => frame.sequence > pixels.sequence)
+              .timeout(const Duration(seconds: 15));
+          expect(after.inGpuBuffer, isTrue, reason: 'capture $capture');
+          expect(after.gpuGeneration, first.gpuGeneration);
+          client.releaseGpuBuffer(after.gpuGeneration, after.bufferIndex);
+        }
+        expect(sets, {first.gpuGeneration});
+      } finally {
+        await watching.cancel();
+        client.shutdown();
+        await client.close();
+        await _expectExit(runner);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    // Metal and Vulkan still build a new pool after a capture.
+    skip: switch ((ready, Platform.isLinux)) {
+      (false, _) => 'build the runner and example first',
+      (_, false) => 'the GL renderer keeps its ring (#400)',
+      _ => false,
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   test(
     'a GPU client gets the frame it missed once it gives a buffer back',
     () async {

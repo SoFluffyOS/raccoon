@@ -209,6 +209,9 @@ class GlRenderer : public GpuRenderer {
 
   mutable std::mutex mutex_;
   bool pool_wanted_ = false;
+  // When the client last stopped wanting the pool: it stays for kPoolKept
+  // after, for a client that wants it back (#400).
+  std::chrono::steady_clock::time_point pool_unwanted_;
   size_t pool_count_ = 0;
   std::vector<Buffer> pool_;
   // One framebuffer for the whole pool, its colour attachment swapped per

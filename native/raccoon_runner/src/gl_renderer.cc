@@ -22,6 +22,11 @@ const bool kTrace = std::getenv("RACCOON_TRACE") != nullptr;
 // between the two every frame or so (#396).
 constexpr std::chrono::milliseconds kTargetIdle{100};
 
+// How long a pool the client stopped wanting stays for it to want back: a
+// capture asks for pixels for 250 ms, up to the 5 s it waits for an app
+// that never settles, then wants the same ring again (#400).
+constexpr std::chrono::seconds kPoolKept{10};
+
 // A display to try, and how it was reached: "surfaceless", or a device's
 // render node, "device" for one without.
 struct Candidate {
@@ -381,6 +386,7 @@ bool GlRenderer::EnsureSize(size_t width, size_t height) {
   width_ = width;
   height_ = height;
   readback_.resize(width * height * 4);
+  if (kTrace) std::fprintf(stderr, "🦝 gl readback target %zux%zu\n", width, height);
   return true;
 }
 
@@ -489,6 +495,7 @@ bool GlRenderer::EnablePool(size_t count, std::string* error) {
 
 void GlRenderer::DisablePool() {
   std::lock_guard<std::mutex> lock(mutex_);
+  if (pool_wanted_) pool_unwanted_ = std::chrono::steady_clock::now();
   pool_wanted_ = false;
 }
 
@@ -772,7 +779,14 @@ uint32_t GlRenderer::Fbo(size_t width, size_t height) {
     }
     current_ = -1;
     choose_ = false;
-    if (!pool_wanted_ && !pool_.empty()) DestroyPool();
+    // A pool the client stopped wanting stays a while: a screenshot takes
+    // pixels and then wants the same ring back, not a new one to import
+    // (#400). One at another size, or unwanted for longer, goes.
+    if (!pool_wanted_ && !pool_.empty() &&
+        (pool_width_ != width || pool_height_ != height ||
+         std::chrono::steady_clock::now() - pool_unwanted_ >= kPoolKept)) {
+      DestroyPool();
+    }
     if (pool_wanted_ && can_export_) {
       const bool stale = pool_.empty() || pool_width_ != width || pool_height_ != height;
       // One that can't be built at a size is tried again at the next:
@@ -809,6 +823,17 @@ uint32_t GlRenderer::Fbo(size_t width, size_t height) {
         fbo = pool_fbo_;
       }
       // Every buffer is with the client: this frame goes by readback.
+    } else if (!pool_.empty() && choose_at_start_ && !in_frame_) {
+      // The ring kept, unwanted: the frame chooses as it starts as well,
+      // the readback target while pixels are wanted, a ring buffer once
+      // the client wants the ring again. Chosen here, the frame after a
+      // screenshot went by readback and the ring got its frame only from
+      // a redraw after it.
+      BindingsKept kept;
+      glBindFramebuffer(GL_FRAMEBUFFER, pool_fbo_);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+      choose_ = true;
+      fbo = pool_fbo_;
     }
     if (fbo == 0) {
       if (kTrace && pool_wanted_) std::fprintf(stderr, "🦝 gl fbo -> readback\n");
@@ -856,6 +881,12 @@ bool GlRenderer::Present(const FrameCallback& callback) {
     current_ = -1;
     in_frame_ = false;
     presenting_ = pooled ? index : -1;
+    // A buffer whose frame goes by readback, the pool turned off as it was
+    // drawn, was never handed out: free for the pool kept (#400). Read
+    // below, on this thread, before any frame draws there again.
+    if (index >= 0 && !pooled && static_cast<size_t>(index) < pool_.size()) {
+      pool_[index].busy = false;
+    }
     // A frame going by readback while a client takes the ring: it never
     // sees it. Marked here, where it goes, not where Skia took the
     // framebuffer for it a frame before.
