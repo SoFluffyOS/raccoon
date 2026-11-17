@@ -75,7 +75,8 @@ and unpacks it into a `PrebuiltRunner`'s folder, whose `deviceHelper` the
 checked against the SHA-256 the release lists and its own gzip trailer,
 each install unpacks apart, so two hosts setting up at once don't mix
 their files, and a runner counts as installed only with its device helper; `RuntimeStore`
-fetches the engine for the SDK, and `FlutterSettings` says whether the tool
+fetches the engine for the SDK, into `RACCOON_ENGINE_CACHE` when set, as
+the runner's `tool/engine_dir.sh` does, and `FlutterSettings` says whether the tool
 lists custom devices at all (`flutter config --enable-custom-devices`).
 Both of the tool's files are found where the tool itself keeps them
 (`flutterConfigPath`).
@@ -157,7 +158,9 @@ await phone.stop();
 
 - `launch(project, device:, target:, size:, gpuBuffers:)`, or
   `launchBundle(assets, ...)` to start the runner on a built bundle, no
-  Flutter tool and so no hot reload. `launchAll(project)` starts the
+  Flutter tool and so no hot reload; `RACCOON_RUNNER`, `RACCOON_ENGINE_DIR`
+  and `RACCOON_ICU` stand in for its `runnerBinary`, `engineDir` and
+  `icuData`, the runner required, the others the SDK's by default. `launchAll(project)` starts the
   phone, the tablet and the desktop and returns the three; the first
   builds, the others start on its build.
 - `tap`, `longPress`, `drag`, `scroll` (a mouse wheel), `typeText` into the

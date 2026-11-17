@@ -617,6 +617,71 @@ Lumide. Part of the [raccoon](https://github.com/SoFluffyOS/raccoon) repository 
   `RunnerDiscovery` reads (#118, #340). Installs of one project go one at
   a time (#341).
 
+## Knobs
+
+Every `RACCOON_` variable the runner, `tool/raccoon-device` and the
+packages read, one row each; the paragraphs above say more where a knob needs its context. A
+variable set for `flutter run -d raccoon` reaches the helper and the runner
+it starts: the Flutter tool passes the runner none of its flags, so these
+stand in for them.
+
+| Variable | Read by | Values (default) | What it does | Since |
+| --- | --- | --- | --- | --- |
+| `RACCOON_HEADLESS` | runner (`serve`) | `1` (unset) | `--headless`: no client is expected. `RaccoonTestDevice.launch` sets it unless `headless: false` | #47 |
+| `RACCOON_RENDERER` | runner | `auto`, `gl`, `metal`, `vulkan`, `software` (`auto`) | `--renderer`, taken while the flag is `auto` | #18 |
+| `RACCOON_VIEWS` | runner | `1` (unset) | `--views`: views mode | #182 |
+| `RACCOON_IMPELLER` | runner | `1`, `sdf` (unset: Skia) | `--impeller`: Impeller on the GL renderer; `sdf` adds `--impeller-use-sdfs` | #379 |
+| `RACCOON_FLUTTER_GPU` | runner | `1` (unset) | `--flutter-gpu`: Flutter GPU, with Impeller | #379 |
+| `RACCOON_GL_DEVICE` | runner, Linux | `auto`, `surfaceless`, `device`, a render node such as `/dev/dri/renderD128` (`auto`) | Which EGL displays the GL renderer tries: `auto` is Mesa's surfaceless platform, then the EGL devices | #123 |
+| `RACCOON_CAMERA_SOURCE` | runner | a PNG or JPEG, a video on Windows (unset: the test pattern) | `--camera-source`: what the camera shows; the flag wins | #96 |
+| `RACCOON_PARENT_PID` | runner | a pid (the helper's `run` sets the Flutter tool's) | The run stops when that process is gone, as when its parent is | #50 |
+| `RACCOON_TRACE` | runner | any value (unset) | Prints the client's resize, pointer and key messages, the window, camera and shared_preferences calls the runner answers, and the GL and Metal renderers' buffer events | — |
+| `RACCOON_PTRACE_ANY` | runner, Linux | any value (unset) | Lets any process of the user attach a debugger, for a runner a test harness started | — |
+| `RACCOON_ENDPOINT` | the app, through `package:raccoon` | `unix:<socket>` (set by the runner) | What `Raccoon().isPresent` reads; the runner sets it, not the user | — |
+| `RACCOON_RUNNER` | helper, raccoon_runtime | a runner binary (`build/raccoon_runner` in a checkout, else the release archive's) | The runner the helper starts; `RaccoonTestDevice.launchBundle`'s when no `runnerBinary` is passed | — |
+| `RACCOON_ENGINE_CACHE` | helper (`ping`, `tool/engine_dir.sh`), raccoon_runtime (`RuntimeStore`) | a directory (`$XDG_CACHE_HOME/raccoon/engines`, else `~/.cache/raccoon/engines`) | Where the engines are kept, one folder per engine revision | — |
+| `RACCOON_PLUGINS` | helper (`install`), `tool/plugins_windows.dart` | `build`, `cached`, `off` (unset: the app's setting, the host's default, else `build`) | How much an install does with native plugins and native assets | #214 |
+| `RACCOON_PLUGIN_CACHE` | helper | a directory (`$XDG_CACHE_HOME/raccoon/plugins/linux` on Linux, `.../plugins/<engine revision>` on macOS and Windows; `~/.cache` without `XDG_CACHE_HOME`) | Where built plugins and kept failures go | #40 |
+| `RACCOON_PREBUILT_PLUGINS` | helper, Linux and macOS | a URL (the release's `plugins-linux-<arch>.tar.gz`, or `plugins-<engine>-macos-<arch>.tar.gz`, for this runner's version) | The prebuilt plugin archive an install fetches. Set on Linux, any hosted plugin may come from it, not only those `tool/plugins`' lock names | #40 |
+| `RACCOON_NO_PREBUILT` | helper, Linux and macOS | any value (unset) | Fetches no prebuilt archive: what the cache lacks builds | #40 |
+| `RACCOON_PLUGIN_JOBS` | helper, Linux | N > 0 (up to eight sharing half the cores through a jobserver, with ninja 1.13; else up to four) | How many plugins build at once; `1` one at a time | #393 |
+| `RACCOON_RETRY_PLUGINS` | helper, `tool/plugins_windows.dart` | `1` (unset: a failure is kept a day) | Builds a plugin kept failed again at once | #136 |
+| `RACCOON_NO_SWIFT_PACKAGES` | helper, macOS | `1` (unset) | Builds every plugin through CocoaPods, none through its Swift package | #187 |
+| `RACCOON_PREBUILD_ALL` | helper (`prebuild`) | `1` (unset) | Fails the prebuild when any plugin failed to build, as CI's check | #237 |
+| `RACCOON_PROTOC_DIR` | `tool/protoc.sh` | a directory (`~/.local/raccoon/protoc`) | Where protoc is installed. Elsewhere, pass CMake `-DRACCOON_PROTOC=` its binary: CMake looks in the default | — |
+| `RACCOON_ENGINE_DIR` | raccoon_runtime (`RaccoonTestDevice.launchBundle`) | an engine directory (the runtime store's, for the SDK on the PATH) | The engine when no `engineDir` is passed. Also the CMake variable of the same name, the directory with the embedder header | — |
+| `RACCOON_ICU` | raccoon_runtime (`RaccoonTestDevice.launchBundle`) | an `icudtl.dat` (the SDK's) | The ICU data when no `icuData` is passed | — |
+| `RACCOON_UPDATE_GOLDENS` | raccoon_runtime | `1` (unset) | Writes every golden again | #47 |
+| `RACCOON_CONTROL` | raccoon_mcp, through raccoon_runtime's `RaccoonControlClient` | a host's control file (unset: the newest live host) | Which host's control endpoint raccoon_mcp takes | #48 |
+| `RACCOON_MCP_HEADLESS` | raccoon_mcp's tests | `1` (unset) | Runs the device tests headless too | #48 |
+
+The runner's flags (`raccoon_runner --help`):
+
+| Flag | Command | Default | What it does |
+| --- | --- | --- | --- |
+| `--engine-dir DIR`, `--assets DIR`, `--icu FILE` | both | required | The engine (`tool/engine_dir.sh` prints it), the app's `flutter_assets`, the SDK's `icudtl.dat` |
+| `--socket PATH` | `serve` | required | The client's Unix socket |
+| `--headless` | `serve` | off | No client is expected |
+| `--out F` | `render` | `frame.ppm` | Where the frame goes, each view beside it |
+| `--frames N` | `render` | 1 | Frames to wait for before writing |
+| `--timeout-ms N` | `render` | 10000 | How long to wait for them |
+| `--rgba` | `render` | off | Reads the frame as RGBA whatever it says |
+| `--view WxH@DPR` | `render` | none | A view beside the first, once for each; views mode |
+| `--width N`, `--height N`, `--dpr X` | both | 800, 600, 1 | The size in physical pixels and the pixel ratio |
+| `--data-dir DIR` | both | in memory | Where the app's data persists |
+| `--renderer NAME` | both | `auto` | `auto`, `gl`, `metal`, `vulkan` or `software` |
+| `--views` | both | off | Views mode |
+| `--impeller`, `--flutter-gpu` | both | off | Impeller on the GL renderer; Flutter GPU with it |
+| `--plugins MANIFEST` | both | none | The native plugins to load; the helper's install writes it |
+| `--camera-source FILE` | both | the test pattern | What the camera shows |
+| `-- SWITCHES` | both | none | Engine switches, after the runner's own |
+| `--version`, `--help` | | | The version; the usage, with the runner's main variables |
+
+The helper's verbs (`tool/raccoon-device`):
+`ping`, `install [--instance KEY] <localPath> <appName>`, `uninstall
+[--instance KEY] <appName>`, `run [--instance KEY] [--size WxH@R] <appName>
+[engine switches]` and `prebuild <project> <archive.tar.gz>`.
+
 ## Build
 
 Linux needs a C++17 compiler, CMake and Ninja; macOS the Xcode command-line
