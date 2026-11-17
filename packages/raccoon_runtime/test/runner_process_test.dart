@@ -56,6 +56,30 @@ void main() {
     },
   );
 
+  // #408: a headless runner whose app the engine would not start ends
+  // before the VM service line, slower to come on CI than here.
+  test(
+    'a runner that ends before its VM service line says why there too',
+    () async {
+      final runner = await RunnerProcess.start(
+        launchOf(
+          "echo '🦝 listening on x'; "
+          "echo '🦝 the app did not start: built with another Flutter' >&2; "
+          'exit 1',
+        ),
+      );
+      final why = isA<RunnerExited>()
+          .having((e) => e.exitCode, 'exitCode', 1)
+          .having(
+            (e) => e.lastLines,
+            'lastLines',
+            contains('🦝 the app did not start: built with another Flutter'),
+          );
+      await expectLater(runner.vmServiceUri, throwsA(why));
+      expect(await runner.exited, why);
+    },
+  );
+
   test(
     'output that is not UTF-8 does not stop the runner being followed',
     () async {

@@ -11810,7 +11810,11 @@ void main() => runApp(
         expect(exited, isA<RunnerExited>());
         exited as RunnerExited;
         expect(exited.exitCode, 1);
-        expect(exited.lastLines.where(saysNotStarted), hasLength(1));
+        expect(
+          exited.lastLines.where(saysNotStarted),
+          hasLength(1),
+          reason: exited.lastLines.join('\n'),
+        );
         expect(clock.elapsed, lessThan(const Duration(seconds: 10)));
 
         // Not headless and nobody comes: it waits for a host a while, then
@@ -11827,7 +11831,11 @@ void main() => runApp(
         );
         final alone = await runner.exited.timeout(const Duration(seconds: 20));
         expect(alone.exitCode, 1);
-        expect(alone.lastLines.where(saysNotStarted), hasLength(1));
+        expect(
+          alone.lastLines.where(saysNotStarted),
+          hasLength(1),
+          reason: alone.lastLines.join('\n'),
+        );
       } finally {
         temp.deleteSync(recursive: true);
       }
