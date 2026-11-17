@@ -126,11 +126,32 @@ jobs:
             "$(cygpath -m "$PWD")/tool/raccoon-device" ping
           fi
 
+      # Side by side: each is its own project, and the bundles come out
+      # byte for byte as they do one after another; on four cores 34 s
+      # became 15 (#409). Each one's output is shown whole, in turn.
       - name: Build the example bundles
         run: |
-          for example in hello spin channels camera text views plugins_app plugins_modal plugins_static no_plugin no_plugin_late; do
-            (cd "example/$example" && flutter build bundle --target-platform=${{ matrix.host.target }})
+          examples="hello spin channels camera text views plugins_app plugins_modal plugins_static no_plugin no_plugin_late"
+          mkdir -p build/bundle-logs
+          pids=""
+          for example in $examples; do
+            (cd "example/$example" && flutter build bundle --target-platform=${{ matrix.host.target }}) \
+              > "build/bundle-logs/$example.log" 2>&1 &
+            pids="$pids $!"
           done
+          set -- $pids
+          failed=""
+          for example in $examples; do
+            if wait "$1"; then status=ok; else status=failed; failed="$failed $example"; fi
+            shift
+            echo "::group::example/$example: $status"
+            cat "build/bundle-logs/$example.log"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::bundles failed:$failed"
+            exit 1
+          fi
 
       # A code asset from a build hook (#53, #57); its C exports nothing for
       # a Windows DLL.
