@@ -20,6 +20,7 @@
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -66,8 +67,9 @@ class GlRenderer : public GpuRenderer {
   void CountFrame();
   // Makes the readback target for frames of |width| x |height| before the
   // first asks for it, on the raster thread between frames: the context is
-  // left as it was found, current or not. A first frame that goes into a
-  // pool buffer lets it go; one read back later makes it again.
+  // left as it was found, current or not. A frame that goes into a pool
+  // buffer lets it go, at once if no frame had it, else once none has for
+  // a while; one read back later makes it again.
   void PrepareReadback(size_t width, size_t height);
   // Hands the drawn frame on: to |gpu| when it is in a pool buffer, else read
   // back through |callback|; an empty |callback| drops a frame that would
@@ -164,9 +166,11 @@ class GlRenderer : public GpuRenderer {
   size_t height_ = 0;
   bool reads_bgra_ = false;
   std::vector<uint8_t> readback_;
-  // The target was made by PrepareReadback and no frame has had it yet: a
-  // first frame that goes into a pool buffer lets it go (#388).
-  bool prepared_ = false;
+  // When a frame last had the readback target; the epoch for one
+  // PrepareReadback made that no frame has had yet. A frame into a pool
+  // buffer lets it go once this is far enough back (#388, #396). Raster
+  // thread.
+  std::chrono::steady_clock::time_point target_used_;
   // One row, for turning the readback over in place.
   std::vector<uint8_t> row_;
   std::string description_;

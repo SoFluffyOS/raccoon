@@ -8,12 +8,19 @@
 #include <cstdlib>
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 
 namespace raccoon {
 namespace {
 
 const bool kTrace = std::getenv("RACCOON_TRACE") != nullptr;
+
+// How long the readback target goes without a frame before a frame into a
+// pool buffer lets it go: the ring's hold. A view whose ring is full draws
+// each frame into it, so a client that falls behind goes back and forth
+// between the two every frame or so (#396).
+constexpr std::chrono::milliseconds kTargetIdle{100};
 
 // A display to try, and how it was reached: "surfaceless", or a device's
 // render node, "device" for one without.
@@ -351,7 +358,7 @@ bool FitsTexture(size_t width, size_t height) {
 
 bool GlRenderer::EnsureSize(size_t width, size_t height) {
   // A frame has it now: PrepareReadback marks its own afterwards.
-  prepared_ = false;
+  target_used_ = std::chrono::steady_clock::now();
   if (fbo_ != 0 && width == width_ && height == height_) return true;
   if (!FitsTexture(width, height)) return false;
   BindingsKept kept;
@@ -378,7 +385,6 @@ bool GlRenderer::EnsureSize(size_t width, size_t height) {
 }
 
 void GlRenderer::DropTarget(std::vector<uint8_t>* memory) {
-  prepared_ = false;
   // Neither is bound: EnsureSize binds back what was.
   if (fbo_ != 0) glDeleteFramebuffers(1, &fbo_);
   if (texture_ != 0) glDeleteTextures(1, &texture_);
@@ -813,8 +819,9 @@ void GlRenderer::PrepareReadback(size_t width, size_t height) {
   }
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    // Made for a frame already: that frame's, not a spare.
-    if (fbo_ == 0 && EnsureSize(width, height)) prepared_ = true;
+    // Made for a frame already: that frame's, not a spare. One made here
+    // no frame has had yet.
+    if (fbo_ == 0 && EnsureSize(width, height)) target_used_ = {};
   }
   if (!current) ClearCurrent();
 }
@@ -859,11 +866,14 @@ bool GlRenderer::Present(const FrameCallback& callback) {
     {
       std::lock_guard<std::mutex> lock(mutex_);
       presenting_ = -1;
-      // The target made for a first frame read back, and this one went
-      // into the ring instead: a client on GPU buffers may never read
-      // back, and the target is 24 MB at phone size. Let go once the frame
-      // is on its way; a readback later makes it again (#388).
-      if (prepared_) DropTarget(&unused);
+      // Frames go into the ring, and none has drawn into the target for a
+      // while, or ever: a client on GPU buffers may never read back, and
+      // the target is 24 MB at phone size. Let go once the frame is on its
+      // way, whether it served a frame or not (a client that said hello
+      // late); a readback later makes it again (#388, #396).
+      if (fbo_ != 0 && std::chrono::steady_clock::now() - target_used_ >= kTargetIdle) {
+        DropTarget(&unused);
+      }
     }
     return true;
   }
