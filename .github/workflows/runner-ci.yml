@@ -73,14 +73,17 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-      # cache: true keeps the SDK and the pub cache between runs. Up to
-      # ~3 min; once it sat 37 (#333).
+      # Up to ~3 min; once it sat 37 (#333). The SDK and pub cache are kept
+      # between runs on Linux and Windows. Not on macOS: four 2 GB SDKs
+      # pushed the repo past its 10 GB of caches, so they evicted each other
+      # and the engine's, and a miss spent up to 190 s saving 2 GB again; a
+      # hit on the Intel Mac took 74-196 s, a download 104-144 s (#409).
       - uses: subosito/flutter-action@v2
         timeout-minutes: 15
         with:
           channel: stable
           flutter-version: ${{ matrix.flutter }}
-          cache: true
+          cache: ${{ runner.os != 'macOS' }}
 
       - name: Cache the engine and protoc
         uses: actions/cache@v5
