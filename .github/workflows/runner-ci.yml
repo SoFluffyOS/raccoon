@@ -242,15 +242,28 @@ jobs:
       # Linux and Windows run the files side by side, as dart test does (two
       # at a time on four cores), then the ones tagged timing one file at a
       # time: they bound frame rates and waits, or starve a GPU ring, when
-      # something beside them holds the machine up. The Macs run one file at
-      # a time: pod and Swift package builds are most of their suite, and
-      # #383's tests fail on the Intel Mac with nothing beside them (#413).
+      # something beside them holds the machine up. The Macs run the
+      # runner's files one at a time: pod and Swift package builds are most
+      # of their suite, and #383's tests fail on the Intel Mac as it is. Its
+      # other files go beside them, as its two slots had them before; the
+      # M1's three cores always ran one file at a time (#413).
       - name: Run the runtime's tests against the runner
         working-directory: packages/raccoon_runtime
         env:
           RACCOON_RUNNER: ${{ github.workspace }}/native/raccoon_runner/build/raccoon_runner${{ matrix.host.exe }}
         run: |
-          if [ "$RUNNER_OS" = macOS ]; then
+          if [ "$RUNNER_OS" = macOS ] && [ "$(uname -m)" = x86_64 ]; then
+            status=0
+            dart test --reporter expanded --concurrency=1 test/*_test.dart \
+              > "$RUNNER_TEMP/other-tests.log" 2>&1 &
+            others=$!
+            dart test --reporter expanded --concurrency=1 test/integration || status=$?
+            wait "$others" || status=$?
+            echo "::group::the other test files"
+            cat "$RUNNER_TEMP/other-tests.log"
+            echo "::endgroup::"
+            exit "$status"
+          elif [ "$RUNNER_OS" = macOS ]; then
             dart test --reporter expanded --concurrency=1
           else
             status=0
