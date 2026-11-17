@@ -44,19 +44,18 @@ Future<RaccoonFrame> settledFrame(
     quiet = Timer(settle, finish);
   }
 
-  final subscription = client.messages
-      .where((message) => message.hasFrame())
-      .map((message) => message.frame)
-      .listen((frame) {
-        if (frame.inGpuBuffer) {
-          if (releaseGpuFrames) {
-            client.releaseGpuBuffer(frame.gpuGeneration, frame.bufferIndex);
-          }
-          return;
-        }
-        latest = frame;
-        rest();
-      }, onError: (Object _) {});
+  // On frames, not messages: a GPU buffer frame heard only on messages
+  // has gone back already (#414).
+  final subscription = client.frames.listen((frame) {
+    if (frame.inGpuBuffer) {
+      if (releaseGpuFrames) {
+        client.releaseGpuBuffer(frame.gpuGeneration, frame.bufferIndex);
+      }
+      return;
+    }
+    latest = frame;
+    rest();
+  }, onError: (Object _) {});
   rest();
   final cap = Timer(timeout, () {
     if (done.isCompleted) return;

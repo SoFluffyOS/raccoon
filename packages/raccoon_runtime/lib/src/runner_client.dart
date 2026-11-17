@@ -202,6 +202,9 @@ final class RunnerClient
   // would be for nothing. Read when [latestFrame] is asked for; given back
   // when the next frame comes.
   int? _heldBuffer;
+  // Listeners to [frames]: a GPU buffer frame none of them hears goes back
+  // to the runner as it comes (#414).
+  var _frameListeners = 0;
   String? _vmServiceUri;
   int? _pid;
   var _takesViews = false;
@@ -212,7 +215,10 @@ final class RunnerClient
 
   /// Every message the runner sends, after the connection was made. What
   /// ends the connection badly comes here, and to [frames], once each; the
-  /// other streams built on it just end (#227).
+  /// other streams built on it just end (#227). A frame in a GPU buffer is
+  /// here too, but its buffer is only the listener's to show and give back
+  /// when it heard it on [frames]: with nobody listening there, it went
+  /// back to the runner as it came.
   Stream<RunnerMessage> get messages => _messages.stream;
 
   Stream<RunnerMessage> get _withoutErrors =>
@@ -231,11 +237,32 @@ final class RunnerClient
   /// have given that buffer back, and showing it, then giving it back
   /// again, frees a buffer the runner may be drawing into (#145). A view
   /// sends its size as it lays out, which draws a fresh frame.
+  ///
+  /// A frame in a GPU buffer that comes while nobody listens here goes
+  /// back to the runner at once: nothing else would give it back, and four
+  /// of them fill the ring, so that every frame after went by readback,
+  /// ten a second (#414). A listener that comes later gets the next.
   @override
-  Stream<Frame> get frames async* {
-    if (latestFrame case final frame? when !frame.inGpuBuffer) yield frame;
-    yield* messages.where((m) => m.hasFrame()).map((m) => m.frame);
-  }
+  Stream<Frame> get frames => Stream.multi((listener) {
+    if (latestFrame case final frame? when !frame.inGpuBuffer) {
+      listener.add(frame);
+    }
+    // Counted from the listen to the cancel, in step with the subscription
+    // below: a frame is either delivered or given back, never both.
+    _frameListeners++;
+    final frames = messages
+        .where((m) => m.hasFrame())
+        .map((m) => m.frame)
+        .listen(
+          listener.add,
+          onError: listener.addError,
+          onDone: listener.close,
+        );
+    listener.onCancel = () {
+      _frameListeners--;
+      return frames.cancel();
+    };
+  });
 
   /// The latest frame the runner sent, if any.
   Frame? get latestFrame {
@@ -518,6 +545,13 @@ final class RunnerClient
       if (message.hasSharedBuffers()) _takeBuffers(message.sharedBuffers);
       if (message.hasGpuBuffers()) _latestGpuBuffers = message.gpuBuffers;
       if (message.hasFrame()) {
+        // A GPU buffer frame nobody hears on frames: the runner's again.
+        if (message.frame.inGpuBuffer && _frameListeners == 0) {
+          releaseGpuBuffer(
+            message.frame.gpuGeneration,
+            message.frame.bufferIndex,
+          );
+        }
         // A newer frame: the one held back is the runner's again.
         if (_heldBuffer case final held?) {
           _heldBuffer = null;

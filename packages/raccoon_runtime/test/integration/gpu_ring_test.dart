@@ -1387,6 +1387,78 @@ void main() {
             : 'build the runner first',
     timeout: const Timeout(Duration(minutes: 2)),
   );
+  // #414: the frames that came while the client was held up, before it
+  // listened, were never given back. The ring stayed full, and every frame
+  // after went by readback, ten a second, for good.
+  test(
+    'a GPU client held up before it listens gets its next frames in the ring',
+    () async {
+      final spinAssets = p.join(
+        p.dirname(p.dirname(p.dirname(assets))),
+        'spin',
+        'build',
+        'flutter_assets',
+      );
+      final temp = Directory.systemTemp.createTempSync('raccoon_test');
+      final endpoint = UnixSocketEndpoint(p.join(temp.path, 'runner.sock'));
+      final runner = await RunnerProcess.start(
+        RunnerLaunch(
+          runnerBinary: binary ?? '',
+          engineDir: engineDir ?? '',
+          assets: spinAssets,
+          icuData: icu ?? '',
+          endpoint: endpoint,
+        ),
+      );
+      final client = await RunnerClient.connect(endpoint, gpuBuffers: true);
+      try {
+        await client.hello.timeout(const Duration(seconds: 10));
+        // Held up as a loaded machine holds it: the ring's four frames and
+        // the set come in one read, nobody listening to the frames yet.
+        sleep(const Duration(milliseconds: 300));
+        final set = await client.gpuBufferSets.first
+            .then<GpuBuffers?>((set) => set)
+            .timeout(const Duration(seconds: 5), onTimeout: () => null);
+        // Without a GPU (a CI machine) there is no ring to fill.
+        if (set == null) {
+          printOnFailure('no GPU ring on this host');
+          return;
+        }
+        var readBack = 0;
+        var inRing = 0;
+        final eight = Completer<void>();
+        final subscription = client.frames.listen((frame) {
+          if (!frame.inGpuBuffer) {
+            readBack++;
+            return;
+          }
+          client.releaseGpuBuffer(frame.gpuGeneration, frame.bufferIndex);
+          if (++inRing == 8 && !eight.isCompleted) eight.complete();
+        });
+        try {
+          // Spin draws 60 a second: eight in the ring well within the
+          // wait, where a starved ring sends none at all.
+          await eight.future.timeout(
+            const Duration(seconds: 5),
+            onTimeout:
+                () =>
+                    throw TestFailure(
+                      '$inRing frames in the ring, $readBack read back',
+                    ),
+          );
+        } finally {
+          await subscription.cancel();
+        }
+      } finally {
+        client.shutdown();
+        await client.close();
+        await _exitCode(runner);
+        temp.deleteSync(recursive: true);
+      }
+    },
+    skip: ready ? false : 'build the runner and example first',
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
   test(
     'a client that imports GPU buffers gets frames as buffer indices and their descriptors on the GPU socket',
     () async {

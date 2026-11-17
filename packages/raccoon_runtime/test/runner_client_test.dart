@@ -518,6 +518,55 @@ void main() {
     expect(again.inGpuBuffer, isFalse);
   });
 
+  // #414: a GPU buffer frame that came before anyone listened was never
+  // given back; four of them filled the ring, and every frame after went
+  // by readback, ten a second.
+  test('a GPU buffer frame nobody listens for is given back as it comes, '
+      'and a listener that comes later gets the next', () async {
+    Frame gpuFrame(int index) => Frame(
+      sequence: Int64(index + 1),
+      width: 1,
+      height: 1,
+      inGpuBuffer: true,
+      bufferIndex: index,
+      gpuGeneration: 3,
+    );
+    final releases = <(int, int)>[];
+    final releasing = runner.received
+        .where((m) => m.hasReleaseBuffer())
+        .listen(
+          (m) =>
+              releases.add((m.releaseBuffer.generation, m.releaseBuffer.index)),
+        );
+    Future<void> releasedSoFar(int count) async {
+      final waited = Stopwatch()..start();
+      while (releases.length < count && waited.elapsed.inSeconds < 5) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+    }
+
+    runner.sendAll([
+      for (var index = 0; index < 4; index++)
+        RunnerMessage(frame: gpuFrame(index)),
+    ]);
+    await releasedSoFar(4);
+    expect(releases, [(3, 0), (3, 1), (3, 2), (3, 3)]);
+
+    // The listener's own to show and give back: the client keeps off it.
+    final heard = client.frames.first;
+    runner.send(RunnerMessage(frame: gpuFrame(0)));
+    final frame = await heard.timeout(const Duration(seconds: 5));
+    expect((frame.inGpuBuffer, frame.bufferIndex), (true, 0));
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(releases, hasLength(4));
+
+    // The listener gone, the next goes back again.
+    runner.send(RunnerMessage(frame: gpuFrame(1)));
+    await releasedSoFar(5);
+    expect(releases.last, (3, 1));
+    await releasing.cancel();
+  });
+
   group('semantics', () {
     late _Runner semanticRunner;
     late RunnerClient semanticClient;
