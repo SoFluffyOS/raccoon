@@ -64,10 +64,10 @@ jobs:
 
       - name: Install CMake and Ninja
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libegl1-mesa-dev libgles2-mesa-dev libgtk-3-dev libepoxy-dev libsecret-1-dev libjsoncpp-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build ccache libegl1-mesa-dev libgles2-mesa-dev libgtk-3-dev libepoxy-dev libsecret-1-dev libjsoncpp-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - name: Install CMake and Ninja
         if: runner.os == 'macOS'
-        run: brew install cmake ninja
+        run: brew install cmake ninja ccache
       # MSVC on the PATH, and Visual Studio's own CMake and Ninja with it.
       - name: Set up MSVC
         if: runner.os == 'Windows'
@@ -108,12 +108,43 @@ jobs:
           echo "RACCOON_ENGINE_DIR=$ENGINE_DIR" >> "$GITHUB_ENV"
           echo "RACCOON_ICU=$ICU" >> "$GITHUB_ENV"
 
+      # protobuf is built from source, 118 of the Intel Mac's 166 build
+      # steps, the same every run (#409). The objects are kept by the
+      # runner's sources; a change starts from the last ones. Not on
+      # Windows: MSVC writes debug info with /Zi, which ccache can't keep.
+      - name: Cache the compiled objects
+        if: runner.os != 'Windows'
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-${{ matrix.host.name }}-flutter-${{ matrix.flutter }}-${{ hashFiles('native/raccoon_runner/CMakeLists.txt', 'native/raccoon_runner/src/**', 'native/raccoon_runner/test/**', 'native/raccoon_runner/proto/**', 'native/raccoon_runner/third_party/**') }}
+          restore-keys: ccache-${{ matrix.host.name }}-flutter-${{ matrix.flutter }}-
+
       - name: Install protoc
         run: tool/protoc.sh
+      # Only the runner's own build goes through ccache, not the plugins the
+      # tests build. The compiler is told apart by its version, not its
+      # path: on macOS that is a shim, whatever Xcode is behind it.
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DRACCOON_ENGINE_DIR="$RACCOON_ENGINE_DIR"
+        env:
+          CCACHE_DIR: ${{ runner.temp }}/ccache
+        run: |
+          launch=()
+          if [ "$RUNNER_OS" != Windows ]; then
+            ccache --zero-stats
+            launch=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
+            if [ "$RUNNER_OS" = macOS ]; then
+              launch+=(-DCMAKE_OBJC_COMPILER_LAUNCHER=ccache -DCMAKE_OBJCXX_COMPILER_LAUNCHER=ccache)
+            fi
+          fi
+          cmake -S . -B build -G Ninja -DRACCOON_ENGINE_DIR="$RACCOON_ENGINE_DIR" "${launch[@]}"
       - name: Build
-        run: ninja -C build
+        env:
+          CCACHE_DIR: ${{ runner.temp }}/ccache
+          CCACHE_COMPILERCHECK: '%compiler% --version'
+        run: |
+          ninja -C build
+          if [ "$RUNNER_OS" != Windows ]; then ccache --show-stats; fi
       - name: Version
         run: build/raccoon_runner --version
       # Flutter's device ping, by the absolute path setup writes (C:/... on
