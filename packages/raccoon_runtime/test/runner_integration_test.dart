@@ -8266,10 +8266,12 @@ void main() => runApp(
         }
         final frame = await gpuFrame.timeout(
           const Duration(seconds: 5),
-          onTimeout: () => throw TestFailure(
-            'no frame in the ring; the runner said:\n  '
-            '${runner.lastLines.join('\n  ')}',
-          ),
+          onTimeout:
+              () =>
+                  throw TestFailure(
+                    'no frame in the ring; the runner said:\n  '
+                    '${runner.lastLines.join('\n  ')}',
+                  ),
         );
         expect(frame.gpuGeneration, set.generation);
         client.releaseGpuBuffer(frame.gpuGeneration, frame.bufferIndex);
@@ -11421,8 +11423,9 @@ void main() => runApp(
                   sizes: sizes,
                 ));
               case 'RFEN':
-                if (handles.isNotEmpty)
+                if (handles.isNotEmpty) {
                   handles.removeAt(0).toFile().closeSync();
+                }
             }
           }
         });
