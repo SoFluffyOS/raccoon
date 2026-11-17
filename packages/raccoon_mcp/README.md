@@ -130,12 +130,12 @@ the simulator, whose input method types text, a key types no character
 there; use `type_text` for text.
 
 When a plugin call fails, `logs` says why. As the app starts, the runner
-names each native plugin it couldn't load: `🦝 plugin <name> not built`,
-the reason on the line after it (on Linux, a missing development package
-names the one to install: `sudo apt install libjson-glib-dev`), or
-`🦝 plugin <name> not loaded: it wants the view`. At the call, `🦝 nothing
-answered <channel> (<why>); the app sees no plugin`. The reason line is the
-app's, not the runner's: read it with no `source`.
+names each native plugin it couldn't load, and why, on one line: `🦝 plugin
+<name> not built: <why>` (on Linux, a missing development package names
+the one to install: `sudo apt install libjson-glib-dev`), or `🦝 plugin
+<name> not loaded: it wants the view`. At the call, `🦝 nothing answered
+<channel> (<why>); the app sees no plugin`. `logs` with `source: runner`
+shows them, the reasons with them.
 
 ## With no simulator open
 

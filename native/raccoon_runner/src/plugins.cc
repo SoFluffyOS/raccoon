@@ -17,7 +17,9 @@ namespace {
 
 // The loader's reason, short, for the log; the report keeps it whole.
 // macOS's dlopen error repeats the path and lists every place it tried:
-// what matters is after "dlopen(...): ", up to the line's end.
+// what matters is after "dlopen(...): ", up to the line's end. It goes on
+// the runner's line, after the plugin's name: a line of its own, with no
+// 🦝, reads as the app's to a log's reader (#407).
 std::string ShortReason(const std::string& why) {
   std::string reason = why;
   const size_t dlopen = reason.find("dlopen(");
@@ -87,7 +89,7 @@ bool PluginHost::LoadManifest(const std::string& path, std::string* error) {
       std::fprintf(stderr, "🦝 plugin %s loaded\n", entry.name.c_str());
       statuses_.push_back({entry.name, "loaded", ""});
     } else {
-      std::fprintf(stderr, "🦝 plugin %s not loaded\n     %s\n", entry.name.c_str(),
+      std::fprintf(stderr, "🦝 plugin %s not loaded: %s\n", entry.name.c_str(),
                    ShortReason(why).c_str());
       statuses_.push_back({entry.name, "failed", why});
     }
@@ -97,7 +99,7 @@ bool PluginHost::LoadManifest(const std::string& path, std::string* error) {
     if (!item.is_object()) continue;
     PluginStatus status{Str(item, "name"), Str(item, "state"), Str(item, "detail")};
     if (status.state == "failed") {
-      std::fprintf(stderr, "🦝 plugin %s not built\n     %s\n", status.name.c_str(),
+      std::fprintf(stderr, "🦝 plugin %s not built: %s\n", status.name.c_str(),
                    ShortReason(status.detail).c_str());
     } else if (status.state == "wants_view") {
       // Left out by the helper: it acts on the view's window, which the

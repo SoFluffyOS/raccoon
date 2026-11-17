@@ -44,4 +44,44 @@ void main() {
       temp.deleteSync(recursive: true);
     }
   });
+
+  test(
+    'a runner line says why a plugin failed; the next line is the app\'s',
+    () {
+      // The reason is on the runner's line (#407): a line after it, indented
+      // as the runner's second line once was, is the app's own.
+      final lines = [
+        for (final text in [
+          '12:00:00.100 🦝 plugin ffmpeg_kit_flutter_new_min not built: needs '
+              'the development files of json-glib-1.0, as flutter run -d linux '
+              'does: sudo apt install libjson-glib-dev; see .../build.log',
+          '12:00:00.120 🦝 plugin nowhere not loaded: libnowhere_plugin.so: '
+              'cannot open shared object file: No such file or directory',
+          '12:00:00.200      flutter: indented by the app',
+          '12:00:00.300 flutter: hello',
+        ])
+          DeviceLogLine.output(text),
+      ];
+      expect(
+        [for (final line in lines) line.source],
+        [
+          DeviceLogSource.runner,
+          DeviceLogSource.runner,
+          DeviceLogSource.app,
+          DeviceLogSource.app,
+        ],
+      );
+      expect(lines.first.text, contains('sudo apt install libjson-glib-dev'));
+    },
+  );
+
+  test('an indented line with no runner line before it is the app\'s', () {
+    for (final text in [
+      '     needs the development files of json-glib-1.0',
+      '12:00:00.000      needs the development files of json-glib-1.0',
+      '\tat main (main.dart:3)',
+    ]) {
+      expect(DeviceLogSource.of(text), DeviceLogSource.app, reason: text);
+    }
+  });
 }

@@ -353,6 +353,10 @@ void main() {
   test('logs filter by source, text and count', () async {
     phone.lines.addAll([
       DeviceLogLine.output('12:00:00.000 🦝 first frame 236 ms after launch'),
+      DeviceLogLine.output(
+        '12:00:00.010 🦝 plugin ffmpeg_kit_flutter_new_min not built: needs '
+        'the development files of json-glib-1.0; see .../build.log',
+      ),
       DeviceLogLine.output('flutter: hello'),
       DeviceLogLine.output('flutter: hello again'),
       const DeviceLogLine(DeviceLogSource.tool, 'Reloaded 1 of 600 libraries'),
@@ -361,8 +365,12 @@ void main() {
       for (final line in result['lines'] as List)
         (line as Map)['text'] as String,
     ];
+    // Why a plugin failed is on the runner's line, so the runner's lines
+    // say it (#407).
     expect(texts(await control.call('logs', {'source': 'runner'})), [
       '12:00:00.000 🦝 first frame 236 ms after launch',
+      '12:00:00.010 🦝 plugin ffmpeg_kit_flutter_new_min not built: needs '
+          'the development files of json-glib-1.0; see .../build.log',
     ]);
     expect(
       texts(await control.call('logs', {'contains': 'hello', 'last': 1})),
@@ -372,7 +380,7 @@ void main() {
       'Reloaded 1 of 600 libraries',
     ]);
     final all = await control.call('logs', {});
-    expect((all['matched'], all['total']), (4, 4));
+    expect((all['matched'], all['total']), (5, 5));
   });
 
   test('a run not started here has no hot reload', () async {

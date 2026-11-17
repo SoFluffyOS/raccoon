@@ -10347,6 +10347,13 @@ void main() => runApp(
                 'state': 'wants_view',
                 'detail': 'no implementation on Raccoon: it wants the view',
               },
+              {
+                'name': 'json_glib_user',
+                'state': 'failed',
+                'detail':
+                    'needs the development files of json-glib-1.0; see '
+                    '.../build.log\nthe log\'s second line',
+              },
             ],
           }),
         );
@@ -10407,6 +10414,39 @@ void main() => runApp(
           await Future<void>.delayed(const Duration(milliseconds: 50));
         }
         expect(logs, contains(contains(wantsView)));
+        // Why one didn't load or build is on the runner's line, which a
+        // log's reader files as the runner's: a line of its own would read
+        // as the app's (#407).
+        const notBuilt =
+            '🦝 plugin json_glib_user not built: needs the development '
+            'files of json-glib-1.0; see .../build.log';
+        while (!logs.any((l) => l.contains(notBuilt)) &&
+            DateTime.now().isBefore(said)) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        expect(logs, contains(endsWith(notBuilt)));
+        expect(
+          logs,
+          contains(
+            allOf(
+              contains('🦝 plugin nowhere not loaded: '),
+              contains('libnowhere_plugin.so'),
+            ),
+          ),
+        );
+        expect(
+          logs.where((l) => l.trimLeft().startsWith('needs the development')),
+          isEmpty,
+        );
+        for (final line in logs.where(
+          (l) => l.contains('nowhere') || l.contains('json_glib_user'),
+        )) {
+          expect(
+            DeviceLogSource.of(line),
+            DeviceLogSource.runner,
+            reason: line,
+          );
+        }
         expect(client.latestPlugins, plugins);
         if (Platform.isMacOS) {
           // FlutterMacOS shares classes with the engine library; the
